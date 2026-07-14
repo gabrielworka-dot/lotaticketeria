@@ -1,0 +1,6 @@
+node_modules/
+.env
+db.json
+pedidos_*.json
+*.log
+.DS_Store
