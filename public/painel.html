@@ -367,21 +367,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const d=await api('GET','/api/auth/me');
     CU=d.user;
     if(!CU.isOrganizador){
-      // Fluxo de virar organizador
-      document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px"><div style="max-width:400px;width:100%;background:#161410;border:1px solid #2A2822;border-radius:16px;padding:28px"><h2 style="margin-bottom:6px">Torne-se organizador</h2><p style="font-size:13px;color:#A09880;margin-bottom:20px">Crie sua página pública e comece a vender ingressos</p><label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px">Nome público</label><input id="opNome" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:12px" placeholder="Ex: Atlética XYZ"><label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px">Bio</label><textarea id="opBio" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:16px;min-height:70px" placeholder="Conte sobre você ou sua entidade..."></textarea><button onclick="tornarOrganizador()" style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer">Criar página →</button></div></div>';
-      return;
+      // Contas antigas (criadas antes do cadastro virar organizador automaticamente)
+      // são promovidas em silêncio, sem travar a tela com um formulário extra
+      try{
+        const d2=await api('POST','/api/auth/tornar-organizador',{nomePublico:CU.nome,bio:''});
+        CU=d2.user;
+      }catch(e){}
     }
     gp('eventos');
   }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
 })();
-
-async function tornarOrganizador(){
-  const nomePublico=document.getElementById('opNome').value.trim();
-  const bio=document.getElementById('opBio').value.trim();
-  if(!nomePublico){ alert('Digite um nome público.'); return; }
-  try{ await api('POST','/api/auth/tornar-organizador',{nomePublico,bio}); location.reload(); }
-  catch(e){ alert(e.message); }
-}
 
 // ─── EVENTOS ────────────────────────────────────────────────
 async function carregarEventos(){
