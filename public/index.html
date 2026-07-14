@@ -142,7 +142,7 @@ a{color:inherit;text-decoration:none;}
   <div class="event-grid" id="eventGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando eventos...</p></div></div>
 </div>
 
-<div class="footer">© 2025 Lota Ticketeria — Todos os direitos reservados</div>
+<div class="footer">© 2025 Lota Ticketeria — Todos os direitos reservados · <a href="/termos.html" style="color:var(--text2)">Termos de Uso</a> · <a href="/privacidade.html" style="color:var(--text2)">Privacidade</a></div>
 
 <!-- LOGIN MODAL -->
 <div class="mo" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
@@ -153,7 +153,21 @@ a{color:inherit;text-decoration:none;}
     <div class="fg"><label>E-mail</label><input class="fi" id="loginEmail" type="email" placeholder="seu@email.com"></div>
     <div class="fg"><label>Senha</label><input class="fi" id="loginSenha" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="btn bp" style="width:100%;padding:12px" onclick="doLogin()">Entrar →</button>
+    <div class="switch-auth"><a onclick="closeModal('loginModal');openModal('esqueciModal')">Esqueci minha senha</a></div>
     <div class="switch-auth">Não tem conta? <a onclick="closeModal('loginModal');openModal('registroModal')">Criar conta</a></div>
+  </div>
+</div>
+
+<!-- ESQUECI SENHA MODAL -->
+<div class="mo" id="esqueciModal" onclick="if(event.target===this)closeModal('esqueciModal')">
+  <div class="modal">
+    <h2>Redefinir senha</h2>
+    <p class="sub">Digite seu e-mail e enviaremos um link de redefinição</p>
+    <div class="err" id="esqueciErr"></div>
+    <div class="ok" id="esqueciOk" style="display:none;font-size:13px;color:#4ADE80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;text-align:center;margin-bottom:12px">Se o e-mail existir, você receberá um link em instantes.</div>
+    <div class="fg" id="esqueciForm"><label>E-mail</label><input class="fi" id="esqueciEmail" type="email" placeholder="seu@email.com" onkeydown="if(event.key==='Enter')enviarRecuperacao()"></div>
+    <button class="btn bp" id="btnEsqueci" style="width:100%;padding:12px" onclick="enviarRecuperacao()">Enviar link →</button>
+    <div class="switch-auth"><a onclick="closeModal('esqueciModal');openModal('loginModal')">Voltar ao login</a></div>
   </div>
 </div>
 
@@ -167,6 +181,7 @@ a{color:inherit;text-decoration:none;}
     <div class="fg"><label>E-mail</label><input class="fi" id="regEmail" type="email" placeholder="seu@email.com"></div>
     <div class="fg"><label>Senha</label><input class="fi" id="regSenha" type="password" placeholder="Mínimo 6 caracteres" onkeydown="if(event.key==='Enter')doRegistro()"></div>
     <button class="btn bp" style="width:100%;padding:12px" onclick="doRegistro()">Criar conta →</button>
+    <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:10px">Ao criar conta, você concorda com os <a href="/termos.html" target="_blank" style="color:var(--p2)">Termos de Uso</a> e a <a href="/privacidade.html" target="_blank" style="color:var(--p2)">Política de Privacidade</a>.</p>
     <div class="switch-auth">Já tem conta? <a onclick="closeModal('registroModal');openModal('loginModal')">Entrar</a></div>
   </div>
 </div>
@@ -224,10 +239,27 @@ function doLogout(){AT=null;CU=null;localStorage.removeItem('role_token');locati
 
 function initLoggedIn(){
   const el=document.getElementById('hdrActions');
-  el.innerHTML='<button class="btn bo btn-sm" onclick="location.href=\'/painel.html\'">'+(CU.isOrganizador?'🎛️ Painel':'✨ Criar evento')+'</button>'
+  el.innerHTML='<button class="btn bo btn-sm" onclick="location.href=\'/meus-ingressos.html\'">🎫 Meus Ingressos</button>'
+    +'<button class="btn bo btn-sm" onclick="location.href=\'/painel.html\'">'+(CU.isOrganizador?'🎛️ Painel':'✨ Criar evento')+'</button>'
     +'<div class="user-chip" onclick="location.href=\'/painel.html\'"><div class="av">'+esc(CU.nome.charAt(0).toUpperCase())+'</div><span class="txt">'+esc(CU.nome.split(' ')[0])+'</span></div>';
   document.getElementById('feedSection').style.display='block';
   loadFeed();
+}
+
+async function enviarRecuperacao(){
+  const email=document.getElementById('esqueciEmail').value.trim();
+  const err=document.getElementById('esqueciErr');
+  err.style.display='none';
+  if(!email){ err.textContent='Digite seu e-mail.'; err.style.display='block'; return; }
+  const btn=document.getElementById('btnEsqueci');
+  btn.disabled=true; btn.textContent='Enviando...';
+  try{
+    await api('POST','/api/auth/esqueci-senha',{email});
+    document.getElementById('esqueciForm').style.display='none';
+    document.getElementById('esqueciOk').style.display='block';
+    btn.style.display='none';
+  }catch(e){ err.textContent=e.message; err.style.display='block'; }
+  finally{ btn.disabled=false; btn.textContent='Enviar link →'; }
 }
 
 async function loadFeed(){
