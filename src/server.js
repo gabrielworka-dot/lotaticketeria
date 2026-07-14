@@ -503,6 +503,54 @@ app.get('/api/eventos/:id/pedidos', auth, (req, res) => {
   res.json({ pedidos: PEDIDOS.filter(p => p.eventoId === ev.id) });
 });
 
+// ── CANCELAMENTO / REEMBOLSO DE PEDIDO ──
+app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  if (pedido.status !== 'pago') return res.status(400).json({ error: 'Somente pedidos pagos podem ser reembolsados.' });
+
+  // Cortesia ou pagamento simulado — não envolve dinheiro real, só cancela localmente
+  const semPagamentoReal = pedido.mpPaymentId === 'CORTESIA' || String(pedido.mpPaymentId || '').startsWith('SIMULADO');
+
+  if (!semPagamentoReal) {
+    const producerToken = req.user.mpAccount?.accessToken;
+    if (!producerToken) return res.status(400).json({ error: 'Conta Mercado Pago não conectada.' });
+    try {
+      const refResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}/refunds`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${producerToken}`, 'Content-Type': 'application/json' }
+      });
+      if (!refResp.ok) {
+        const errData = await refResp.json().catch(() => ({}));
+        return res.status(400).json({ error: errData.message || 'Erro ao processar reembolso no Mercado Pago.' });
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Erro ao conectar com o Mercado Pago: ' + e.message });
+    }
+  }
+
+  // Marca pedido como reembolsado, invalida ingressos e libera as vagas do lote
+  pedido.status = 'reembolsado';
+  pedido.reembolsadoEm = new Date().toISOString();
+  (pedido.tickets || []).forEach(t => { t.cancelado = true; });
+  const qtdTotal = (pedido.itens || []).reduce((s, it) => s + it.qtd, 0);
+  for (const it of (pedido.itens || [])) {
+    const lote = ev.lotes.find(l => l.id === it.loteId);
+    if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd);
+  }
+  if (pedido.cupomUsado) {
+    const c = ev.cupons.find(c => c.codigo === pedido.cupomUsado);
+    if (c) c.usosAtuais = Math.max(0, (c.usosAtuais || 0) - 1);
+  }
+  if (pedido.promoterRef) {
+    const p = ev.promoters.find(p => p.id === pedido.promoterRef);
+    if (p) { p.vendas = Math.max(0, (p.vendas || 0) - qtdTotal); p.receita = Math.max(0, (p.receita || 0) - pedido.total); }
+  }
+  persistPedidos(); persistEventos();
+  res.json({ ok: true, reembolsoReal: !semPagamentoReal });
+});
+
 app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
@@ -570,6 +618,7 @@ app.post('/api/checkin/validar', auth, rateLimit(60000, 60), (req, res) => {
   let ticket = null, pedido = null;
   for (const p of pedidos) { const t = (p.tickets||[]).find(tk => tk.codigo === sanitize(codigo, 40)); if (t) { ticket = t; pedido = p; break; } }
   if (!ticket) return res.status(404).json({ error: 'Ingresso não encontrado.', valido: false });
+  if (ticket.cancelado) return res.json({ valido: false, cancelado: true, ticket, comprador: pedido.comprador });
   if (ticket.usado) return res.json({ valido: false, jaUsado: true, usadoEm: ticket.usadoEm, ticket, comprador: pedido.comprador });
   ticket.usado = true; ticket.usadoEm = new Date().toISOString();
   persistPedidos();
