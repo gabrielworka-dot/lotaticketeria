@@ -151,6 +151,10 @@ a{color:inherit;}
     <div class="ni" onclick="gp('pagamento',this)">💳 Mercado Pago</div>
     <div class="ni" onclick="gp('comunidade',this)">📣 Comunidade</div>
     <div class="ni" onclick="gp('perfil',this)">👤 Perfil</div>
+    <div id="navAdminSec" style="display:none">
+      <div class="sb-sec">Plataforma</div>
+      <div class="ni" onclick="location.href='/admin.html'">⚙️ Administração</div>
+    </div>
   </div>
   <div class="sb-bot"><button class="logout-btn" onclick="doLogout()">Sair</button></div>
 </nav>
@@ -349,6 +353,13 @@ function goBack(){ if(!PH.length) return; const p=PH.pop(); gp(p); }
 
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
+async function tornarOrganizador(){
+  const nomePublico=document.getElementById('opNome').value.trim();
+  if(!nomePublico){ alert('Digite um nome público.'); return; }
+  try{ await api('POST','/api/auth/tornar-organizador',{nomePublico,bio:''}); location.reload(); }
+  catch(e){ alert(e.message); }
+}
+
 // ─── INIT / GUARD ───────────────────────────────────────────
 // ─── iOS TOUCH FIX ─────────────────────────────────────────
 // Safari iOS às vezes não dispara onclick em divs — forçamos via touchend
@@ -367,14 +378,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const d=await api('GET','/api/auth/me');
     CU=d.user;
     if(!CU.isOrganizador){
-      // Contas antigas (criadas antes do cadastro virar organizador automaticamente)
-      // são promovidas em silêncio, sem travar a tela com um formulário extra
-      try{
-        const d2=await api('POST','/api/auth/tornar-organizador',{nomePublico:CU.nome,bio:''});
-        CU=d2.user;
-      }catch(e){}
+      if(CU.isAdmin){ location.href='/admin.html'; return; }
+      // Cliente tentando acessar o painel de produtor — pede confirmação explícita, não promove sozinho
+      document.body.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px">
+        <div style="max-width:400px;width:100%;background:#161410;border:1px solid #2A2822;border-radius:16px;padding:28px;text-align:center">
+          <div style="font-size:36px;margin-bottom:10px">🎪</div>
+          <h2 style="margin-bottom:8px">Área exclusiva de produtores</h2>
+          <p style="font-size:13px;color:#A09880;margin-bottom:20px">Sua conta é de cliente. Quer também criar eventos e vender ingressos pela Lota Ticketeria?</p>
+          <label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px;text-align:left">Nome público (nome da sua produtora/marca)</label>
+          <input id="opNome" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:16px" placeholder="Ex: Atlética XYZ">
+          <button onclick="tornarOrganizador()" style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer;margin-bottom:10px">Quero vender ingressos também →</button>
+          <a href="/" style="font-size:12px;color:#A09880">← Voltar para a vitrine de eventos</a>
+        </div>
+      </div>`;
+      return;
     }
     gp('eventos');
+    if(CU.isAdmin){ const s=document.getElementById('navAdminSec'); if(s) s.style.display='block'; }
   }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
 })();
 
