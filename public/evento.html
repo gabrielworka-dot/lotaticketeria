@@ -77,9 +77,11 @@ const slug=location.pathname.split('/').filter(Boolean).pop();
 let EVENTO=null, PROMOTER_INFO=null;
 let selecoes={};
 let cupomAplicado=null;
+const AT_COMPRADOR=localStorage.getItem('role_token')||null;
 
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT_COMPRADOR) o.headers['Authorization']='Bearer '+AT_COMPRADOR;
   if(b) o.body=JSON.stringify(b);
   const r=await fetch(p,o);
   const d=await r.json();
