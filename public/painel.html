@@ -104,12 +104,15 @@ a{color:inherit;}
 .toast.err{background:var(--red);color:#fff;}
 
 .mob-top{display:none;position:fixed;top:0;left:0;right:0;height:52px;z-index:70;background:#0A0908;border-bottom:1px solid var(--border);align-items:center;justify-content:space-between;padding:0 14px;}
-.ham{background:none;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--p2);font-size:18px;}
-.mob-over{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:65;}
+.ham{background:none;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--p2);font-size:18px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;}
+.mob-over{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:75;}
 .mob-over.show{display:block;}
+.mob-back-btn{display:none;background:none;border:1px solid var(--border2);border-radius:8px;padding:6px 10px;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.mob-back-btn.show{display:block;}
 @media(max-width:768px){
-  .sb{transform:translateX(-230px);}
-  .sb.open{transform:translateX(0);}
+  .sb{transform:translateX(-230px);z-index:80;}
+  .sb.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.6);}
+  .ni{min-height:46px;padding:11px 10px;}
   .main{margin-left:0;padding-top:52px;}
   .mob-top{display:flex;}
   .topbar{display:none;}
@@ -117,12 +120,25 @@ a{color:inherit;}
   .met-g{grid-template-columns:1fr 1fr;}
   .ev-grid{grid-template-columns:1fr;}
   .page{padding:14px;}
+  .fi,.fs,.fta{font-size:16px!important;}
+  .modal{max-height:85vh;padding:20px;}
+  .ma{flex-direction:column-reverse;}
+  .ma .btn{width:100%;}
+  .br .btn{width:100%;justify-content:center;}
+  .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 }
 </style>
 </head>
 <body>
 
-<div class="mob-top"><button class="ham" onclick="toggleSb()">☰</button><span style="font-weight:800;color:#E8961A">🎟️ Lota</span><div></div></div>
+<div class="mob-top">
+  <button class="ham" id="mobHam" onclick="toggleSb()">☰</button>
+  <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;justify-content:center">
+    <button class="mob-back-btn" id="mobBtnBack" onclick="goBack()">← Voltar</button>
+    <span id="mobTitle" style="font-weight:800;color:#E8961A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">🎟️ Lota</span>
+  </div>
+  <div style="width:44px"></div>
+</div>
 <div class="mob-over" id="mobOver" onclick="closeSb()"></div>
 
 <nav class="sb" id="sbNav">
@@ -313,8 +329,16 @@ function gp(id,el){
   pg.classList.add('active');
   if(el) el.classList.add('active');
   const m=PM[id]||{t:id,bk:true};
+  const showBack = m.bk && PH.length>0;
   document.getElementById('tbTitle').textContent=m.t;
-  document.getElementById('btnBack').classList.toggle('show', m.bk && PH.length>0);
+  document.getElementById('btnBack').classList.toggle('show', showBack);
+  // Topbar mobile
+  const mobTitle=document.getElementById('mobTitle');
+  const mobBack=document.getElementById('mobBtnBack');
+  const mobHam=document.getElementById('mobHam');
+  if(mobTitle) mobTitle.textContent=m.t;
+  if(mobBack) mobBack.classList.toggle('show', showBack);
+  if(mobHam) mobHam.style.display = showBack ? 'none' : 'flex';
   if(id==='eventos') carregarEventos();
   if(id==='pagamento') carregarMP();
   if(id==='comunidade') carregarMeusPosts();
@@ -326,6 +350,17 @@ function goBack(){ if(!PH.length) return; const p=PH.pop(); gp(p); }
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
 // ─── INIT / GUARD ───────────────────────────────────────────
+// ─── iOS TOUCH FIX ─────────────────────────────────────────
+// Safari iOS às vezes não dispara onclick em divs — forçamos via touchend
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.ni').forEach(el => {
+    el.addEventListener('touchstart', function(e){ el._touchStartY = e.touches[0].clientY; }, {passive:true});
+    el.addEventListener('touchend', function(e){
+      if(Math.abs(e.changedTouches[0].clientY - (el._touchStartY||0)) < 10){ e.preventDefault(); el.click(); }
+    }, {passive:false});
+  });
+});
+
 (async function(){
   if(!AT){ location.href='/'; return; }
   try{
@@ -397,6 +432,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('cupons',this)">🏷️ Cupons</div>
       <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
+      <div class="tab" onclick="evTab('pedidos',this)">📦 Pedidos</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
       <div class="tab" onclick="evTab('checkin',this)">🚪 Check-in</div>
     </div>
@@ -405,6 +441,7 @@ function renderEventoDetalhe(){
     <div id="evTabCupons" style="display:none"></div>
     <div id="evTabPromoters" style="display:none"></div>
     <div id="evTabPixels" style="display:none"></div>
+    <div id="evTabPedidos" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
   `;
@@ -412,7 +449,7 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Cupons','Promoters','Pixels','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Cupons','Promoters','Pixels','Pedidos','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -420,6 +457,7 @@ function evTab(tab,el){
   if(tab==='cupons') renderTabCupons();
   if(tab==='promoters') renderTabPromoters();
   if(tab==='pixels') renderTabPixels();
+  if(tab==='pedidos') renderTabPedidos();
   if(tab==='relatorios') renderTabRelatorios();
   if(tab==='checkin') renderTabCheckin();
 }
@@ -582,6 +620,33 @@ async function salvarPixels(){
   }catch(e){ toast(e.message,'err'); }
 }
 
+// ── PEDIDOS (cancelamento e reembolso) ──
+async function renderTabPedidos(){
+  const el=document.getElementById('evTabPedidos');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/pedidos');
+    const pedidos=d.pedidos.slice().reverse();
+    if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
+    const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado']};
+    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Total</th><th>Status</th><th>Data</th><th></th></tr></thead><tbody>'
+      +pedidos.map(p=>{
+        const [cls,lbl]=stMap[p.status]||['',p.status];
+        const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
+        const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedido(\''+p.id+'\')">↩️ Reembolsar</button>':'';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+p.total.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td>'+btnReembolso+'</td></tr>';
+      }).join('')+'</tbody></table></div></div>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function reembolsarPedido(pedidoId){
+  if(!confirm('Reembolsar este pedido? Se for um pagamento real, o valor será devolvido ao comprador via Mercado Pago e os ingressos serão invalidados. Esta ação não pode ser desfeita.')) return;
+  try{
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/pedidos/'+pedidoId+'/reembolsar',{});
+    toast(d.reembolsoReal?'Reembolso processado no Mercado Pago!':'Pedido cancelado.','ok');
+    renderTabPedidos();
+  }catch(e){ toast(e.message,'err'); }
+}
+
 // ── RELATÓRIOS ──
 async function renderTabRelatorios(){
   const el=document.getElementById('evTabRelatorios');
@@ -640,6 +705,8 @@ async function validarCheckin(){
       document.getElementById('checkinCodigo').value='';
     }else if(d.jaUsado){
       resEl.innerHTML='<div style="background:var(--rbg);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">⚠️</span><div><div style="font-weight:700;color:var(--red)">Já utilizado!</div><div style="font-size:12px;color:var(--text2)">Usado em '+new Date(d.usadoEm).toLocaleString('pt-BR')+'</div></div></div>';
+    }else if(d.cancelado){
+      resEl.innerHTML='<div style="background:var(--rbg);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">🚫</span><div><div style="font-weight:700;color:var(--red)">Ingresso reembolsado</div><div style="font-size:12px;color:var(--text2)">Este pedido foi cancelado e não dá mais acesso ao evento.</div></div></div>';
     }
   }catch(e){
     resEl.innerHTML='<div style="background:var(--rbg);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">❌</span><div><div style="font-weight:700;color:var(--red)">Inválido</div><div style="font-size:12px;color:var(--text2)">'+esc(e.message)+'</div></div></div>';
