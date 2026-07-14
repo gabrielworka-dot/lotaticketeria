@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meus Ingressos — Lota Ticketeria</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0F0E0C;--card:#161410;--border:#2A2822;--text:#F0EDE8;--text2:#A09880;--text3:#605848;--p:#C47B14;--p2:#E8961A;--pbg:rgba(196,123,20,.12);--pb:rgba(196,123,20,.3);}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;}
+a{color:inherit;text-decoration:none;}
+.topbar{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.logo{font-size:18px;font-weight:900;color:var(--p2);}
+.btn{padding:8px 16px;border-radius:20px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--border);background:transparent;color:var(--text2);}
+.wrap{max-width:640px;margin:0 auto;padding:24px 16px 60px;}
+h1{font-size:22px;font-weight:900;margin-bottom:20px;}
+.pedido-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px;}
+.pedido-hdr{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.pedido-img{width:54px;height:54px;border-radius:10px;background:linear-gradient(135deg,var(--p),#7A4A0C);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;}
+.pedido-img img{width:100%;height:100%;object-fit:cover;}
+.pedido-nome{font-size:15px;font-weight:800;}
+.pedido-data{font-size:12px;color:var(--text3);margin-top:2px;}
+.ticket{background:#0F0E0C;border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:8px;display:flex;align-items:center;gap:12px;}
+.ticket-qr{width:56px;height:56px;background:#fff;border-radius:8px;flex-shrink:0;}
+.ticket-code{font-family:monospace;font-size:12px;font-weight:700;color:var(--p2);}
+.ticket-lote{font-size:11px;color:var(--text3);margin-top:2px;}
+.ticket-usado{font-size:10px;color:#4ADE80;margin-top:3px;}
+.empty{text-align:center;padding:60px 20px;color:var(--text3);}
+.empty-ic{font-size:36px;display:block;margin-bottom:10px;opacity:.4;}
+.spinner{width:32px;height:32px;border:3px solid rgba(232,150,26,.2);border-top-color:var(--p2);border-radius:50%;animation:spin 1s linear infinite;margin:40px auto;}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="/" class="logo">🎟️ Lota Ticketeria</a><a href="/"><button class="btn">← Voltar</button></a></div>
+<div class="wrap">
+  <h1>Meus Ingressos</h1>
+  <div id="content"><div class="spinner"></div></div>
+</div>
+<script>
+const AT=localStorage.getItem('role_token')||null;
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function api(m,p){
+  const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT) o.headers['Authorization']='Bearer '+AT;
+  const r=await fetch(p,o);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Erro');
+  return d;
+}
+function gerarQR(codigo,elId){
+  const el=document.getElementById(elId); if(!el) return;
+  const img=document.createElement('img');
+  img.src='https://api.qrserver.com/v1/create-qr-code/?size=110x110&data='+encodeURIComponent(codigo);
+  img.style.width='100%'; img.style.height='100%'; img.style.borderRadius='8px';
+  el.appendChild(img);
+}
+async function init(){
+  if(!AT){ location.href='/'; return; }
+  const el=document.getElementById('content');
+  try{
+    const d=await api('GET','/api/meus-ingressos');
+    if(!d.pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎟️</span><p>Você ainda não comprou nenhum ingresso.</p></div>'; return; }
+    el.innerHTML=d.pedidos.map(p=>`
+      <div class="pedido-card">
+        <div class="pedido-hdr">
+          <div class="pedido-img">${p.imagemCapa?'<img src="'+esc(p.imagemCapa)+'">':'🎪'}</div>
+          <div><div class="pedido-nome">${esc(p.eventoNome)}</div><div class="pedido-data">${p.dataEvento?new Date(p.dataEvento).toLocaleDateString('pt-BR'):''}${p.eventoSlug?' · <a href="/e/'+esc(p.eventoSlug)+'" style="color:#E8961A">ver evento</a>':''}</div></div>
+        </div>
+        ${p.tickets.map((t,i)=>`
+          <div class="ticket">
+            <div class="ticket-qr" id="qr-${p.pedidoId}-${i}"></div>
+            <div><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':''}</div>
+          </div>`).join('')}
+      </div>`).join('');
+    d.pedidos.forEach(p => p.tickets.forEach((t,i) => gerarQR(t.codigo, 'qr-'+p.pedidoId+'-'+i)));
+  }catch(e){
+    el.innerHTML='<div class="empty"><span class="empty-ic">⚠️</span><p>'+esc(e.message)+'</p></div>';
+  }
+}
+init();
+</script>
+</body>
+</html>
