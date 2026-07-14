@@ -230,9 +230,7 @@ async function doRegistro(){
   try{
     const d=await api('POST','/api/auth/registro',{nome,email,senha});
     AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
-    closeModal('registroModal');
-    initLoggedIn();
-    toast('Conta criada! Bem-vindo, '+CU.nome+'!','ok');
+    location.href='/painel.html';
   }catch(e){err.textContent=e.message;err.style.display='block';}
 }
 function doLogout(){AT=null;CU=null;localStorage.removeItem('role_token');location.reload();}
