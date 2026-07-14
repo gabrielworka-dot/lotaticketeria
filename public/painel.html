@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Painel — Lota Ticketeria</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0F0E0C;--bg2:#161410;--bg3:#1E1C18;--card:#161410;
+  --border:#2A2822;--border2:#383430;
+  --text:#F0EDE8;--text2:#A09880;--text3:#605848;
+  --p:#C47B14;--p2:#E8961A;--pbg:rgba(196,123,20,.12);--pb:rgba(196,123,20,.3);
+  --green:#22C55E;--gbg:rgba(34,197,94,.1);
+  --red:#EF4444;--rbg:rgba(239,68,68,.1);
+  --blue:#60A5FA;--bbg:rgba(96,165,250,.1);
+  --sh:0 4px 16px rgba(0,0,0,.3);--shl:0 12px 32px rgba(0,0,0,.5);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;}
+body{display:flex;overflow:hidden;}
+a{color:inherit;}
+
+/* SIDEBAR */
+.sb{position:fixed;left:0;top:0;bottom:0;width:230px;background:#0A0908;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:60;transition:transform .25s;}
+.sb-logo{padding:20px 18px;font-size:20px;font-weight:900;color:var(--p2);border-bottom:1px solid var(--border);}
+.sb-nav{flex:1;overflow-y:auto;padding:10px 8px;}
+.sb-sec{font-size:9px;font-weight:700;color:var(--text3);padding:12px 10px 4px;letter-spacing:1.5px;text-transform:uppercase;}
+.ni{display:flex;align-items:center;gap:9px;padding:10px 10px;border-radius:8px;cursor:pointer;color:var(--text2);font-size:13px;font-weight:600;transition:all .2s;margin-bottom:1px;}
+.ni:hover{background:rgba(255,255,255,.04);color:var(--text);}
+.ni.active{background:var(--pbg);color:var(--p2);}
+.sb-bot{padding:12px 10px;border-top:1px solid var(--border);}
+.logout-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text2);font-family:inherit;font-size:12px;cursor:pointer;}
+.logout-btn:hover{border-color:var(--red);color:var(--red);}
+
+.main{margin-left:230px;height:100vh;overflow-y:auto;flex:1;}
+.topbar{position:sticky;top:0;z-index:40;padding:16px 26px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.btn-back{display:none;padding:6px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;}
+.btn-back.show{display:block;}
+.tb-title{font-size:18px;font-weight:800;}
+.page{display:none;padding:24px 26px;}
+.page.active{display:block;}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--sh);margin-bottom:16px;}
+.ct{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;}
+.fg{margin-bottom:13px;}
+.fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
+.fi{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;}
+.fi:focus{border-color:var(--p2);}
+.fs{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;}
+.fta{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;resize:vertical;min-height:80px;}
+.fg2{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px;}
+
+.btn{padding:10px 18px;border-radius:9px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid;transition:all .2s;}
+.bp{background:var(--p2);border-color:var(--p2);color:#18160F;}
+.bp:hover{background:#F0A828;}
+.bo{background:transparent;border-color:var(--border2);color:var(--text2);}
+.bo:hover{border-color:var(--p2);color:var(--p2);}
+.bgreen{background:var(--gbg);border-color:rgba(34,197,94,.3);color:var(--green);}
+.bdng{background:var(--rbg);border-color:rgba(239,68,68,.3);color:var(--red);}
+.btn-sm{padding:7px 12px;font-size:12px;}
+.br{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+.tabs{display:flex;gap:0;margin-bottom:18px;border-bottom:1px solid var(--border);overflow-x:auto;}
+.tab{padding:9px 16px;font-size:13px;font-weight:600;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}
+.tab.active{color:var(--p2);border-bottom-color:var(--p2);}
+
+.ev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+.ev-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:all .2s;}
+.ev-card:hover{border-color:var(--pb);}
+.ev-status{display:inline-block;font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;margin-bottom:8px;}
+.ev-status.publicado{background:var(--gbg);color:var(--green);}
+.ev-status.rascunho{background:var(--pbg);color:var(--p2);}
+.ev-nome{font-size:14px;font-weight:700;margin-bottom:4px;}
+.ev-meta{font-size:11px;color:var(--text3);}
+
+.met-g{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+.met-c{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.met-l{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;margin-bottom:5px;}
+.met-v{font-size:22px;font-weight:800;}
+
+.lote-row,.cupom-row,.promoter-row{display:flex;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.lote-row:last-child,.cupom-row:last-child,.promoter-row:last-child{border-bottom:none;}
+.tw{overflow-x:auto;}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.tbl th{padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--border);}
+.st-on{color:var(--green);font-weight:600;}
+.st-off{color:var(--red);font-weight:600;}
+
+.empty{text-align:center;padding:40px 20px;color:var(--text3);}
+.empty-ic{font-size:32px;display:block;margin-bottom:8px;opacity:.4;}
+
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;display:none;align-items:center;justify-content:center;padding:16px;}
+.mo.show{display:flex;}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;width:min(440px,100%);max-height:88vh;overflow-y:auto;}
+.modal h2{font-size:17px;font-weight:800;margin-bottom:16px;}
+.ma{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
+
+.toast{position:fixed;bottom:20px;right:20px;z-index:600;padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;display:none;box-shadow:var(--shl);}
+.toast.show{display:block;}
+.toast.ok{background:var(--green);color:#fff;}
+.toast.err{background:var(--red);color:#fff;}
+
+.mob-top{display:none;position:fixed;top:0;left:0;right:0;height:52px;z-index:70;background:#0A0908;border-bottom:1px solid var(--border);align-items:center;justify-content:space-between;padding:0 14px;}
+.ham{background:none;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--p2);font-size:18px;}
+.mob-over{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:65;}
+.mob-over.show{display:block;}
+@media(max-width:768px){
+  .sb{transform:translateX(-230px);}
+  .sb.open{transform:translateX(0);}
+  .main{margin-left:0;padding-top:52px;}
+  .mob-top{display:flex;}
+  .topbar{display:none;}
+  .fg2,.fg3{grid-template-columns:1fr;}
+  .met-g{grid-template-columns:1fr 1fr;}
+  .ev-grid{grid-template-columns:1fr;}
+  .page{padding:14px;}
+}
+</style>
+</head>
+<body>
+
+<div class="mob-top"><button class="ham" onclick="toggleSb()">☰</button><span style="font-weight:800;color:#E8961A">🎟️ Lota</span><div></div></div>
+<div class="mob-over" id="mobOver" onclick="closeSb()"></div>
+
+<nav class="sb" id="sbNav">
+  <div class="sb-logo">🎟️ Lota Ticketeria</div>
+  <div class="sb-nav">
+    <div class="sb-sec">Eventos</div>
+    <div class="ni active" onclick="gp('eventos',this)">📋 Meus Eventos</div>
+    <div class="ni" onclick="gp('novo',this)">✨ Criar Evento</div>
+    <div class="sb-sec">Conta</div>
+    <div class="ni" onclick="gp('pagamento',this)">💳 Mercado Pago</div>
+    <div class="ni" onclick="gp('comunidade',this)">📣 Comunidade</div>
+    <div class="ni" onclick="gp('perfil',this)">👤 Perfil</div>
+  </div>
+  <div class="sb-bot"><button class="logout-btn" onclick="doLogout()">Sair</button></div>
+</nav>
+
+<div class="main">
+  <div class="topbar">
+    <button class="btn-back" id="btnBack" onclick="goBack()">← Voltar</button>
+    <div class="tb-title" id="tbTitle">Meus Eventos</div>
+  </div>
+
+  <!-- EVENTOS -->
+  <div class="page active" id="page-eventos">
+    <div class="ev-grid" id="eventosGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
+  <!-- NOVO EVENTO -->
+  <div class="page" id="page-novo">
+    <div class="card" style="max-width:560px">
+      <div class="ct">Dados do Evento</div>
+      <div class="fg"><label>Nome do evento *</label><input class="fi" id="nvNome" placeholder="Ex: Festa da Faculdade 2026"></div>
+      <div class="fg"><label>Descrição</label><textarea class="fta" id="nvDesc" placeholder="Conte sobre o evento..."></textarea></div>
+      <div class="fg2">
+        <div class="fg"><label>Data *</label><input class="fi" type="date" id="nvData"></div>
+        <div class="fg"><label>Hora</label><input class="fi" type="time" id="nvHora"></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Cidade</label><input class="fi" id="nvCidade" placeholder="São Paulo"></div>
+        <div class="fg"><label>Categoria</label><select class="fs" id="nvCategoria"><option>Festas e shows</option><option>Espetáculos</option><option>Stand-up</option><option>Universitário</option><option>Esportes</option></select></div>
+      </div>
+      <div class="fg"><label>Local</label><input class="fi" id="nvLocal" placeholder="Nome do local / endereço"></div>
+      <div class="fg"><label>Imagem de capa (URL)</label><input class="fi" id="nvImg" placeholder="https://..."></div>
+      <button class="btn bp" onclick="criarEvento()">Criar Evento →</button>
+    </div>
+  </div>
+
+  <!-- DETALHE DO EVENTO -->
+  <div class="page" id="page-evento-detalhe">
+    <div id="eventoDetalhe" data-id=""></div>
+  </div>
+
+  <!-- MERCADO PAGO -->
+  <div class="page" id="page-pagamento">
+    <div class="card" style="max-width:520px" id="mpCard"></div>
+  </div>
+
+  <!-- COMUNIDADE -->
+  <div class="page" id="page-comunidade">
+    <div class="card" style="max-width:600px">
+      <div class="ct">Publicar Novidade</div>
+      <div class="fg"><label>Texto</label><textarea class="fta" id="postTexto" placeholder="O que você quer compartilhar com seus seguidores?"></textarea></div>
+      <div class="fg"><label>Imagem (URL, opcional)</label><input class="fi" id="postImg" placeholder="https://..."></div>
+      <button class="btn bp" onclick="publicarPost()">Publicar</button>
+    </div>
+    <div id="meusPostsList"></div>
+  </div>
+
+  <!-- PERFIL -->
+  <div class="page" id="page-perfil">
+    <div class="card" style="max-width:480px">
+      <div class="ct">Meu Perfil</div>
+      <div id="perfilForm"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="mo" id="loteModal" onclick="if(event.target===this)cm('loteModal')">
+  <div class="modal"><h2 id="loteModalTit">Novo Lote</h2>
+    <input type="hidden" id="loteId">
+    <div class="fg"><label>Nome do lote *</label><input class="fi" id="loteNome" placeholder="1º Lote"></div>
+    <div class="fg2"><div class="fg"><label>Preço (R$)</label><input class="fi" type="number" id="lotePreco" step="0.01" min="0"></div><div class="fg"><label>Quantidade *</label><input class="fi" type="number" id="loteQtd" min="1"></div></div>
+    <div class="fg" style="display:flex;gap:16px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)"><input type="checkbox" id="loteCortesia" onchange="toggleCortesia()"> Cortesia (gratuito)</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)"><input type="checkbox" id="loteExclusivo"> Exclusivo para promoters</label>
+    </div>
+    <div class="ma"><button class="btn bo" onclick="cm('loteModal')">Cancelar</button><button class="btn bp" onclick="salvarLote()">Salvar</button></div>
+  </div>
+</div>
+
+<div class="mo" id="cupomModal" onclick="if(event.target===this)cm('cupomModal')">
+  <div class="modal"><h2>Novo Cupom</h2>
+    <div class="fg"><label>Código *</label><input class="fi" id="cupCodigo" placeholder="DESCONTO10" style="text-transform:uppercase"></div>
+    <div class="fg2"><div class="fg"><label>Tipo</label><select class="fs" id="cupTipo"><option value="percentual">Percentual (%)</option><option value="fixo">Valor fixo (R$)</option></select></div><div class="fg"><label>Valor *</label><input class="fi" type="number" id="cupValor" step="0.01" min="0"></div></div>
+    <div class="fg"><label>Limite de usos (0 = ilimitado)</label><input class="fi" type="number" id="cupUsosMax" value="0" min="0"></div>
+    <div class="ma"><button class="btn bo" onclick="cm('cupomModal')">Cancelar</button><button class="btn bp" onclick="salvarCupom()">Criar</button></div>
+  </div>
+</div>
+
+<div class="mo" id="promoterModal" onclick="if(event.target===this)cm('promoterModal')">
+  <div class="modal"><h2>Novo Promoter</h2>
+    <div class="fg"><label>Nome *</label><input class="fi" id="promNome" placeholder="Nome do promoter"></div>
+    <div class="fg"><label>E-mail</label><input class="fi" type="email" id="promEmail" placeholder="opcional"></div>
+    <div class="fg"><label>Comissão (%)</label><input class="fi" type="number" id="promComissao" value="10" min="0" max="100"></div>
+    <div class="ma"><button class="btn bo" onclick="cm('promoterModal')">Cancelar</button><button class="btn bp" onclick="salvarPromoter()">Adicionar</button></div>
+  </div>
+</div>
+
+<div class="mo" id="scanModal" onclick="if(event.target===this)fecharScanner()">
+  <div class="modal" style="max-width:400px">
+    <h2>📷 Escanear Ingresso</h2>
+    <video id="scanVideo" playsinline style="width:100%;border-radius:10px;background:#000"></video>
+    <canvas id="scanCanvas" style="display:none"></canvas>
+    <div id="scanStatus" style="font-size:12px;color:var(--text3);text-align:center;margin-top:10px">Aponte a câmera para o QR Code...</div>
+    <div class="ma"><button class="btn bo" onclick="fecharScanner()">Fechar</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let AT=localStorage.getItem('role_token')||null;
+let CU=null;
+let PH=[];
+
+async function api(m,p,b){
+  const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT) o.headers['Authorization']='Bearer '+AT;
+  if(b) o.body=JSON.stringify(b);
+  const r=await fetch(p,o);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Erro');
+  return d;
+}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
+function cm(id){document.getElementById(id).classList.remove('show');}
+function gv(id){return document.getElementById(id)?.value?.trim()||'';}
+function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
+function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
+
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},pagamento:{t:'Mercado Pago',bk:false},comunidade:{t:'Comunidade',bk:false},perfil:{t:'Meu Perfil',bk:false}};
+
+function gp(id,el){
+  const prev=document.querySelector('.page.active');
+  if(prev && prev.id!=='page-'+id) PH.push(prev.id.replace('page-',''));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  const pg=document.getElementById('page-'+id); if(!pg) return;
+  pg.classList.add('active');
+  if(el) el.classList.add('active');
+  const m=PM[id]||{t:id,bk:true};
+  document.getElementById('tbTitle').textContent=m.t;
+  document.getElementById('btnBack').classList.toggle('show', m.bk && PH.length>0);
+  if(id==='eventos') carregarEventos();
+  if(id==='pagamento') carregarMP();
+  if(id==='comunidade') carregarMeusPosts();
+  if(id==='perfil') carregarPerfil();
+  closeSb();
+}
+function goBack(){ if(!PH.length) return; const p=PH.pop(); gp(p); }
+
+function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
+
+// ─── INIT / GUARD ───────────────────────────────────────────
+(async function(){
+  if(!AT){ location.href='/'; return; }
+  try{
+    const d=await api('GET','/api/auth/me');
+    CU=d.user;
+    if(!CU.isOrganizador){
+      // Fluxo de virar organizador
+      document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px"><div style="max-width:400px;width:100%;background:#161410;border:1px solid #2A2822;border-radius:16px;padding:28px"><h2 style="margin-bottom:6px">Torne-se organizador</h2><p style="font-size:13px;color:#A09880;margin-bottom:20px">Crie sua página pública e comece a vender ingressos</p><label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px">Nome público</label><input id="opNome" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:12px" placeholder="Ex: Atlética XYZ"><label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px">Bio</label><textarea id="opBio" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:16px;min-height:70px" placeholder="Conte sobre você ou sua entidade..."></textarea><button onclick="tornarOrganizador()" style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer">Criar página →</button></div></div>';
+      return;
+    }
+    gp('eventos');
+  }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
+})();
+
+async function tornarOrganizador(){
+  const nomePublico=document.getElementById('opNome').value.trim();
+  const bio=document.getElementById('opBio').value.trim();
+  if(!nomePublico){ alert('Digite um nome público.'); return; }
+  try{ await api('POST','/api/auth/tornar-organizador',{nomePublico,bio}); location.reload(); }
+  catch(e){ alert(e.message); }
+}
+
+// ─── EVENTOS ────────────────────────────────────────────────
+async function carregarEventos(){
+  const el=document.getElementById('eventosGrid');
+  try{
+    const d=await api('GET','/api/meus-eventos');
+    if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento ainda. Crie o primeiro!</p></div>'; return; }
+    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+new Date(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div></div>').join('');
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+
+async function criarEvento(){
+  const nome=gv('nvNome'), data=gv('nvData');
+  if(!nome||!data){ toast('Nome e data obrigatórios.','err'); return; }
+  try{
+    const d=await api('POST','/api/eventos',{nome,descricao:gv('nvDesc'),dataEvento:data,horaEvento:gv('nvHora'),cidade:gv('nvCidade'),categoria:gv('nvCategoria'),local:gv('nvLocal'),imagemCapa:gv('nvImg')});
+    toast('Evento criado!','ok');
+    abrirEvento(d.evento.id);
+  }catch(e){ toast(e.message,'err'); }
+}
+
+let EV_ATUAL=null;
+async function abrirEvento(id){
+  try{
+    const d=await api('GET','/api/eventos/'+id);
+    EV_ATUAL=d.evento;
+    renderEventoDetalhe();
+    document.getElementById('eventoDetalhe').dataset.id=id;
+    PH.push('eventos');
+    gp('evento-detalhe');
+  }catch(e){ toast(e.message,'err'); }
+}
+
+function renderEventoDetalhe(){
+  const ev=EV_ATUAL;
+  const el=document.getElementById('eventoDetalhe');
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div><div style="font-size:20px;font-weight:800">${esc(ev.nome)}</div><div style="font-size:12px;color:var(--text2)">${new Date(ev.dataEvento).toLocaleDateString('pt-BR')} · ${esc(ev.cidade||'')}</div></div>
+      <div style="display:flex;gap:8px">
+        <a href="/e/${ev.slug}" target="_blank" class="btn bo btn-sm">Ver página →</a>
+        <button class="btn ${ev.status==='publicado'?'bgreen':'bp'} btn-sm" onclick="togglePublicar()">${ev.status==='publicado'?'✅ Publicado':'▶️ Publicar'}</button>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="evTab('geral',this)">📋 Geral</div>
+      <div class="tab" onclick="evTab('lotes',this)">🎟️ Lotes</div>
+      <div class="tab" onclick="evTab('cupons',this)">🏷️ Cupons</div>
+      <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
+      <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
+      <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
+      <div class="tab" onclick="evTab('checkin',this)">🚪 Check-in</div>
+    </div>
+    <div id="evTabGeral"></div>
+    <div id="evTabLotes" style="display:none"></div>
+    <div id="evTabCupons" style="display:none"></div>
+    <div id="evTabPromoters" style="display:none"></div>
+    <div id="evTabPixels" style="display:none"></div>
+    <div id="evTabRelatorios" style="display:none"></div>
+    <div id="evTabCheckin" style="display:none"></div>
+  `;
+  renderTabGeral();
+}
+
+function evTab(tab,el){
+  ['Geral','Lotes','Cupons','Promoters','Pixels','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
+  el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  if(tab==='lotes') renderTabLotes();
+  if(tab==='cupons') renderTabCupons();
+  if(tab==='promoters') renderTabPromoters();
+  if(tab==='pixels') renderTabPixels();
+  if(tab==='relatorios') renderTabRelatorios();
+  if(tab==='checkin') renderTabCheckin();
+}
+
+async function togglePublicar(){
+  try{
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/publicar',{publicar: EV_ATUAL.status!=='publicado'});
+    EV_ATUAL=d.evento;
+    renderEventoDetalhe();
+    toast(EV_ATUAL.status==='publicado'?'Evento publicado!':'Evento voltou a rascunho.','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+
+function renderTabGeral(){
+  document.getElementById('evTabGeral').innerHTML=`
+    <div class="card">
+      <div class="ct">Informações do Evento</div>
+      <div class="fg"><label>Nome</label><input class="fi" id="edNome" value="${esc(EV_ATUAL.nome)}"></div>
+      <div class="fg"><label>Descrição</label><textarea class="fta" id="edDesc">${esc(EV_ATUAL.descricao)}</textarea></div>
+      <div class="fg2"><div class="fg"><label>Data</label><input class="fi" type="date" id="edData" value="${EV_ATUAL.dataEvento}"></div><div class="fg"><label>Hora</label><input class="fi" type="time" id="edHora" value="${EV_ATUAL.horaEvento||''}"></div></div>
+      <div class="fg2"><div class="fg"><label>Cidade</label><input class="fi" id="edCidade" value="${esc(EV_ATUAL.cidade)}"></div><div class="fg"><label>Local</label><input class="fi" id="edLocal" value="${esc(EV_ATUAL.local)}"></div></div>
+      <div class="fg"><label>Imagem de capa (URL)</label><input class="fi" id="edImg" value="${esc(EV_ATUAL.imagemCapa)}"></div>
+      <button class="btn bp" onclick="salvarGeral()">💾 Salvar Alterações</button>
+    </div>
+    <div class="card" style="border-color:var(--rbg)">
+      <div class="ct" style="color:var(--red)">Zona de Risco</div>
+      <button class="btn bdng" onclick="excluirEvento()">🗑️ Excluir Evento</button>
+    </div>
+  `;
+}
+async function salvarGeral(){
+  try{
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg')});
+    EV_ATUAL=d.evento; toast('Salvo!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function excluirEvento(){
+  if(!confirm('Excluir este evento permanentemente?')) return;
+  try{ await api('DELETE','/api/eventos/'+EV_ATUAL.id); toast('Excluído.','ok'); goBack(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+// ── LOTES ──
+let _lotesTemp=[];
+function renderTabLotes(){
+  _lotesTemp=JSON.parse(JSON.stringify(EV_ATUAL.lotes||[]));
+  const el=document.getElementById('evTabLotes');
+  el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div><div id="lotesListEl"></div><div class="br"><button class="btn bo btn-sm" onclick="abrirNovoLote()">+ Adicionar Lote</button><button class="btn bp" onclick="salvarLotes()">💾 Salvar</button></div></div>';
+  renderLotesLista();
+}
+function renderLotesLista(){
+  const el=document.getElementById('lotesListEl');
+  if(!_lotesTemp.length){ el.innerHTML='<div class="empty" style="padding:16px"><p>Nenhum lote ainda.</p></div>'; return; }
+  el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row"><div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div><button class="btn bo btn-sm" onclick="abrirEditarLote('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_lotesTemp.splice('+i+',1);renderLotesLista()">✕</button></div>').join('');
+}
+function abrirNovoLote(){
+  document.getElementById('loteId').value='';
+  document.getElementById('loteModalTit').textContent='Novo Lote';
+  document.getElementById('loteNome').value='';
+  document.getElementById('lotePreco').value='';
+  document.getElementById('loteQtd').value='';
+  document.getElementById('loteCortesia').checked=false;
+  document.getElementById('loteExclusivo').checked=false;
+  document.getElementById('lotePreco').disabled=false;
+  document.getElementById('loteModal').classList.add('show');
+}
+function abrirEditarLote(i){
+  const l=_lotesTemp[i];
+  document.getElementById('loteId').value=i;
+  document.getElementById('loteModalTit').textContent='Editar Lote';
+  document.getElementById('loteNome').value=l.nome;
+  document.getElementById('lotePreco').value=l.preco;
+  document.getElementById('loteQtd').value=l.qtdTotal;
+  document.getElementById('loteCortesia').checked=l.cortesia;
+  document.getElementById('loteExclusivo').checked=l.exclusivoPromoter;
+  document.getElementById('lotePreco').disabled=l.cortesia;
+  document.getElementById('loteModal').classList.add('show');
+}
+function toggleCortesia(){ document.getElementById('lotePreco').disabled=document.getElementById('loteCortesia').checked; }
+function salvarLote(){
+  const idx=gv('loteId');
+  const cortesia=document.getElementById('loteCortesia').checked;
+  const lote={ nome:gv('loteNome')||'Lote', preco: cortesia?0:(parseFloat(gv('lotePreco'))||0), qtdTotal:parseInt(gv('loteQtd'))||0, vendidos: idx!==''?_lotesTemp[idx].vendidos:0, ativo:true, cortesia, exclusivoPromoter: document.getElementById('loteExclusivo').checked, id: idx!==''?_lotesTemp[idx].id:undefined };
+  if(!lote.nome || !lote.qtdTotal){ toast('Preencha nome e quantidade.','err'); return; }
+  if(idx!=='') _lotesTemp[idx]=lote; else _lotesTemp.push(lote);
+  cm('loteModal'); renderLotesLista();
+}
+async function salvarLotes(){
+  try{ const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/lotes',{lotes:_lotesTemp}); EV_ATUAL=d.evento; toast('Lotes salvos!','ok'); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+// ── CUPONS ──
+function renderTabCupons(){
+  const el=document.getElementById('evTabCupons');
+  const cupons=EV_ATUAL.cupons||[];
+  el.innerHTML='<div class="card"><div class="ct">Cupons de Desconto</div>'
+    +(cupons.length?cupons.map(c=>'<div class="cupom-row"><div style="flex:1"><strong>'+esc(c.codigo)+'</strong> — '+(c.tipo==='fixo'?'R$'+c.valor.toFixed(2):c.valor+'%')+'<div style="font-size:11px;color:var(--text3)">'+c.usosAtuais+' usado(s)'+(c.usosMax?' / '+c.usosMax+' máx':' · ilimitado')+'</div></div><button class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" onclick="toggleCupom(\''+c.id+'\','+!c.ativo+')">'+(c.ativo?'Ativo':'Inativo')+'</button><button class="btn bdng btn-sm" onclick="deletarCupom(\''+c.id+'\')">✕</button></div>').join(''):'<div class="empty" style="padding:16px"><p>Nenhum cupom ainda.</p></div>')
+    +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'cupomModal\').classList.add(\'show\')">+ Novo Cupom</button></div></div>';
+}
+async function salvarCupom(){
+  try{
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/cupons',{codigo:gv('cupCodigo'),tipo:gv('cupTipo'),valor:gv('cupValor'),usosMax:gv('cupUsosMax')});
+    EV_ATUAL=d.evento; cm('cupomModal'); renderTabCupons(); toast('Cupom criado!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function toggleCupom(id,ativo){
+  try{ const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/cupons/'+id,{ativo}); EV_ATUAL=d.evento; renderTabCupons(); }catch(e){ toast(e.message,'err'); }
+}
+async function deletarCupom(id){
+  if(!confirm('Remover cupom?')) return;
+  try{ const d=await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/cupons/'+id); EV_ATUAL=d.evento; renderTabCupons(); }catch(e){ toast(e.message,'err'); }
+}
+
+// ── PROMOTERS ──
+function renderTabPromoters(){
+  const el=document.getElementById('evTabPromoters');
+  const proms=EV_ATUAL.promoters||[];
+  const linkBase=location.origin+'/e/'+EV_ATUAL.slug+'?ref=';
+  el.innerHTML='<div class="card"><div class="ct">Promoters</div>'
+    +(proms.length?'<div class="tw"><table class="tbl"><thead><tr><th>Nome</th><th>Comissão</th><th>Vendas</th><th>Receita</th><th>Link</th><th></th></tr></thead><tbody>'
+      +proms.map(p=>'<tr><td>'+esc(p.nome)+'</td><td>'+p.comissaoPercentual+'%</td><td>'+p.vendas+'</td><td>R$'+p.receita.toFixed(2)+'</td><td><button class="btn bo btn-sm" onclick="navigator.clipboard.writeText(\''+linkBase+p.codigoRef+'\').then(()=>toast(\'Link copiado!\',\'ok\'))">Copiar link</button></td><td><button class="btn bdng btn-sm" onclick="deletarPromoter(\''+p.id+'\')">✕</button></td></tr>').join('')+'</tbody></table></div>'
+      :'<div class="empty" style="padding:16px"><p>Nenhum promoter ainda.</p></div>')
+    +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'promoterModal\').classList.add(\'show\')">+ Adicionar Promoter</button></div></div>';
+}
+async function salvarPromoter(){
+  try{
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/promoters',{nome:gv('promNome'),email:gv('promEmail'),comissaoPercentual:gv('promComissao')});
+    EV_ATUAL=d.evento; cm('promoterModal'); renderTabPromoters(); toast('Promoter adicionado!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function deletarPromoter(id){
+  if(!confirm('Remover promoter?')) return;
+  try{ const d=await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/promoters/'+id); EV_ATUAL=d.evento; renderTabPromoters(); }catch(e){ toast(e.message,'err'); }
+}
+
+// ── PIXELS ──
+function renderTabPixels(){
+  const px=EV_ATUAL.pixels||{};
+  document.getElementById('evTabPixels').innerHTML=`<div class="card"><div class="ct">Pixels e Analytics — rastreie suas campanhas</div>
+    <div class="fg"><label>Meta Pixel ID (Facebook/Instagram Ads)</label><input class="fi" id="pxMeta" value="${esc(px.metaPixelId||'')}" placeholder="Ex: 123456789012345"></div>
+    <div class="fg"><label>TikTok Pixel ID</label><input class="fi" id="pxTiktok" value="${esc(px.tiktokPixelId||'')}" placeholder="Ex: ABCDEFG123"></div>
+    <div class="fg"><label>Google Analytics — Measurement ID</label><input class="fi" id="pxGa" value="${esc(px.gaMeasurementId||'')}" placeholder="Ex: G-XXXXXXXXXX"></div>
+    <div class="fg2"><div class="fg"><label>Google Ads — Conversion ID</label><input class="fi" id="pxGadsId" value="${esc(px.googleAdsConversionId||'')}" placeholder="Ex: AW-123456789"></div><div class="fg"><label>Conversion Label</label><input class="fi" id="pxGadsLabel" value="${esc(px.googleAdsConversionLabel||'')}" placeholder="Ex: AbCdEfGh"></div></div>
+    <button class="btn bp" onclick="salvarPixels()">💾 Salvar</button></div>`;
+}
+async function salvarPixels(){
+  try{
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/pixels',{metaPixelId:gv('pxMeta'),tiktokPixelId:gv('pxTiktok'),gaMeasurementId:gv('pxGa'),googleAdsConversionId:gv('pxGadsId'),googleAdsConversionLabel:gv('pxGadsLabel')});
+    EV_ATUAL=d.evento; toast('Pixels salvos!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+
+// ── RELATÓRIOS ──
+async function renderTabRelatorios(){
+  const el=document.getElementById('evTabRelatorios');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const r=await api('GET','/api/eventos/'+EV_ATUAL.id+'/relatorio');
+    el.innerHTML=`
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Receita Total</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Ingressos Vendidos</div><div class="met-v">${r.totalIngressos}</div></div>
+        <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
+        <div class="met-c"><div class="met-l">Ticket Médio</div><div class="met-v">${r.totalIngressos>0?'R$'+(r.totalReceita/r.totalIngressos).toFixed(2):'—'}</div></div>
+      </div>
+      <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+d.receita.toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
+      <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
+      <div class="card"><div class="ct">Exportar</div><div class="br">
+        <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'participantes.csv')">📥 Lista de Participantes</a>
+        <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'bordero.csv')">📥 Exportar Borderô</a>
+      </div></div>
+    `;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function baixarComAuth(ev,tipo){
+  ev.preventDefault();
+  const url = tipo==='participantes.csv' ? '/api/eventos/'+EV_ATUAL.id+'/participantes.csv' : '/api/eventos/'+EV_ATUAL.id+'/bordero.csv';
+  try{
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+AT}});
+    if(!r.ok){ const d=await r.json(); toast(d.error||'Erro','err'); return false; }
+    const blob=await r.blob();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=(tipo==='participantes.csv'?'participantes-':'bordero-')+EV_ATUAL.slug+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }catch(e){ toast('Erro ao baixar.','err'); }
+  return false;
+}
+
+// ── CHECK-IN ──
+function renderTabCheckin(){
+  document.getElementById('evTabCheckin').innerHTML=`<div class="card"><div class="ct">Check-in na Portaria</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input class="fi" id="checkinCodigo" placeholder="RL-XXXXXXXX-XXXX" style="flex:1;min-width:180px;font-family:monospace" onkeydown="if(event.key==='Enter')validarCheckin()">
+      <button class="btn bo" onclick="abrirScanner()">📷 Escanear</button>
+      <button class="btn bp" onclick="validarCheckin()">Validar</button>
+    </div>
+    <div id="checkinResult" style="margin-top:14px"></div></div>`;
+}
+async function validarCheckin(){
+  const codigo=gv('checkinCodigo');
+  if(!codigo){ toast('Digite o código.','err'); return; }
+  const resEl=document.getElementById('checkinResult');
+  try{
+    const d=await api('POST','/api/checkin/validar',{eventoId:EV_ATUAL.id,codigo});
+    if(d.valido){
+      resEl.innerHTML='<div style="background:var(--gbg);border:1px solid rgba(34,197,94,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">✅</span><div><div style="font-weight:700;color:var(--green)">Entrada liberada!</div><div style="font-size:12px;color:var(--text2)">'+esc(d.comprador?.nome||'')+' · '+esc(d.ticket?.loteNome||'')+'</div></div></div>';
+      document.getElementById('checkinCodigo').value='';
+    }else if(d.jaUsado){
+      resEl.innerHTML='<div style="background:var(--rbg);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">⚠️</span><div><div style="font-weight:700;color:var(--red)">Já utilizado!</div><div style="font-size:12px;color:var(--text2)">Usado em '+new Date(d.usadoEm).toLocaleString('pt-BR')+'</div></div></div>';
+    }
+  }catch(e){
+    resEl.innerHTML='<div style="background:var(--rbg);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px"><span style="font-size:28px">❌</span><div><div style="font-weight:700;color:var(--red)">Inválido</div><div style="font-size:12px;color:var(--text2)">'+esc(e.message)+'</div></div></div>';
+  }
+}
+let _scanStream=null,_scanRAF=null;
+function garantirJsQR(cb){ if(window.jsQR){cb();return;} const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js'; s.onload=cb; document.head.appendChild(s); }
+function abrirScanner(){ garantirJsQR(()=>{ document.getElementById('scanModal').classList.add('show'); iniciarScanner(); }); }
+function fecharScanner(){ if(_scanRAF) cancelAnimationFrame(_scanRAF); if(_scanStream) _scanStream.getTracks().forEach(t=>t.stop()); document.getElementById('scanModal').classList.remove('show'); }
+async function iniciarScanner(){
+  try{
+    _scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const video=document.getElementById('scanVideo'); video.srcObject=_scanStream; await video.play();
+    const canvas=document.getElementById('scanCanvas'); const ctx=canvas.getContext('2d');
+    const tick=()=>{
+      if(!document.getElementById('scanModal').classList.contains('show')) return;
+      if(video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code=window.jsQR(img.data,img.width,img.height);
+        if(code&&code.data){ document.getElementById('checkinCodigo').value=code.data; fecharScanner(); validarCheckin(); return; }
+      }
+      _scanRAF=requestAnimationFrame(tick);
+    };
+    _scanRAF=requestAnimationFrame(tick);
+  }catch(e){ document.getElementById('scanStatus').textContent='Erro: '+e.message; }
+}
+
+// ─── MERCADO PAGO ───────────────────────────────────────────
+async function carregarMP(){
+  const el=document.getElementById('mpCard');
+  try{
+    const d=await api('GET','/api/mp/status');
+    el.innerHTML='<div class="ct">Conta de Recebimento</div>'
+      +(d.connected
+        ?'<div style="font-size:13px;color:var(--green);margin-bottom:12px">✅ Mercado Pago conectada'+(d.testMode?' <span style="background:var(--pbg);color:var(--p2);border-radius:20px;padding:2px 9px;font-size:10px;margin-left:6px">🧪 TESTE</span>':'')+'</div><div style="font-size:11px;color:var(--text3);margin-bottom:14px">Comissão da plataforma: '+d.feePercent+'%</div><button class="btn bdng" onclick="desconectarMP()">Desconectar</button>'
+        :'<p style="font-size:13px;color:var(--text2);margin-bottom:16px">Conecte sua conta para receber pagamentos e publicar eventos.</p><button class="btn bp" onclick="conectarMP()">🔗 Conectar Mercado Pago</button>');
+  }catch(e){ el.innerHTML='<p>'+esc(e.message)+'</p>'; }
+}
+async function conectarMP(){
+  try{
+    const d=await api('GET','/api/mp/oauth/connect');
+    const win=window.open(d.url,'mp_oauth','width=520,height=680');
+    const timer=setInterval(()=>{ if(win.closed){ clearInterval(timer); setTimeout(carregarMP,600); } },700);
+  }catch(e){ toast(e.message,'err'); }
+}
+async function desconectarMP(){
+  if(!confirm('Desconectar sua conta Mercado Pago?')) return;
+  try{ await api('POST','/api/mp/disconnect'); toast('Desconectado.','ok'); carregarMP(); }catch(e){ toast(e.message,'err'); }
+}
+
+// ─── COMUNIDADE ─────────────────────────────────────────────
+async function publicarPost(){
+  const texto=gv('postTexto');
+  if(!texto){ toast('Escreva algo.','err'); return; }
+  try{
+    await api('POST','/api/posts',{texto,imagemUrl:gv('postImg')});
+    document.getElementById('postTexto').value=''; document.getElementById('postImg').value='';
+    toast('Publicado!','ok'); carregarMeusPosts();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function carregarMeusPosts(){
+  // Não há endpoint dedicado "meus posts" — usamos o perfil público já que sabemos o slug
+  const el=document.getElementById('meusPostsList');
+  if(!CU.organizadorSlug){ el.innerHTML=''; return; }
+  try{
+    const d=await api('GET','/api/organizadores/'+CU.organizadorSlug);
+    el.innerHTML=d.posts.length?d.posts.map(p=>'<div class="card"><div style="font-size:11px;color:var(--text3);margin-bottom:6px">'+new Date(p.createdAt).toLocaleString('pt-BR')+'</div><div style="font-size:13px">'+esc(p.texto)+'</div>'+(p.imagemUrl?'<img src="'+esc(p.imagemUrl)+'" style="width:100%;border-radius:8px;margin-top:8px">':'')+'<button class="btn bdng btn-sm" style="margin-top:10px" onclick="deletarPost(\''+p.id+'\')">Excluir</button></div>').join(''):'';
+  }catch(e){}
+}
+async function deletarPost(id){
+  if(!confirm('Excluir esta publicação?')) return;
+  try{ await api('DELETE','/api/posts/'+id); toast('Excluído.','ok'); carregarMeusPosts(); }catch(e){ toast(e.message,'err'); }
+}
+
+// ─── PERFIL ─────────────────────────────────────────────────
+function carregarPerfil(){
+  document.getElementById('perfilForm').innerHTML=`
+    <div class="fg"><label>Nome</label><input class="fi" id="pfNome" value="${esc(CU.nome)}"></div>
+    <div class="fg"><label>Bio</label><textarea class="fta" id="pfBio">${esc(CU.bio||'')}</textarea></div>
+    <div class="fg"><label>Avatar (URL)</label><input class="fi" id="pfAvatar" value="${esc(CU.avatarUrl||'')}"></div>
+    <div class="fg"><label>Banner (URL)</label><input class="fi" id="pfBanner" value="${esc(CU.bannerUrl||'')}"></div>
+    <div class="fg"><label>Instagram</label><input class="fi" id="pfInsta" value="${esc(CU.redesSociais?.instagram||'')}"></div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Sua página pública: <a href="/o/${CU.organizadorSlug}" target="_blank" style="color:var(--p2)">/o/${CU.organizadorSlug}</a></div>
+    <button class="btn bp" onclick="salvarPerfil()">💾 Salvar</button>
+  `;
+}
+async function salvarPerfil(){
+  try{
+    const d=await api('PATCH','/api/auth/perfil',{nome:gv('pfNome'),bio:gv('pfBio'),avatarUrl:gv('pfAvatar'),bannerUrl:gv('pfBanner'),redesSociais:{instagram:gv('pfInsta')}});
+    CU=d.user; toast('Perfil salvo!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+</script>
+</body>
+</html>
