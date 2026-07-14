@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Administração — Lota Ticketeria</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0F0E0C;--bg2:#161410;--bg3:#1E1C18;--card:#161410;
+  --border:#2A2822;--border2:#383430;
+  --text:#F0EDE8;--text2:#A09880;--text3:#605848;
+  --p:#C47B14;--p2:#E8961A;--pbg:rgba(196,123,20,.12);--pb:rgba(196,123,20,.3);
+  --green:#22C55E;--gbg:rgba(34,197,94,.1);
+  --red:#EF4444;--rbg:rgba(239,68,68,.1);
+  --blue:#60A5FA;--bbg:rgba(96,165,250,.1);
+  --sh:0 4px 16px rgba(0,0,0,.3);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;}
+body{display:flex;overflow:hidden;}
+a{color:inherit;}
+
+.sb{position:fixed;left:0;top:0;bottom:0;width:220px;background:#0A0908;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:60;transition:transform .25s;}
+.sb-logo{padding:20px 18px;font-size:17px;font-weight:900;color:var(--p2);border-bottom:1px solid var(--border);}
+.sb-logo .tag{display:block;font-size:9px;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-top:2px;font-weight:700;}
+.sb-nav{flex:1;overflow-y:auto;padding:10px 8px;}
+.ni{display:flex;align-items:center;gap:9px;padding:10px 10px;border-radius:8px;cursor:pointer;color:var(--text2);font-size:13px;font-weight:600;transition:all .2s;margin-bottom:1px;}
+.ni:hover{background:rgba(255,255,255,.04);color:var(--text);}
+.ni.active{background:var(--pbg);color:var(--p2);}
+.sb-bot{padding:12px 10px;border-top:1px solid var(--border);}
+.logout-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text2);font-family:inherit;font-size:12px;cursor:pointer;}
+.logout-btn:hover{border-color:var(--red);color:var(--red);}
+
+.main{margin-left:220px;height:100vh;overflow-y:auto;flex:1;}
+.topbar{position:sticky;top:0;z-index:40;padding:16px 26px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.tb-title{font-size:18px;font-weight:800;}
+.page{display:none;padding:24px 26px;}
+.page.active{display:block;}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--sh);margin-bottom:16px;}
+.ct{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;}
+
+.met-g{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+.met-c{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--sh);}
+.met-l{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;margin-bottom:6px;}
+.met-v{font-size:24px;font-weight:800;}
+
+.fg{margin-bottom:13px;}
+.fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
+.fi{background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:14px;outline:none;}
+.fi:focus{border-color:var(--p2);}
+
+.btn{padding:9px 16px;border-radius:9px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid;transition:all .2s;}
+.bp{background:var(--p2);border-color:var(--p2);color:#18160F;}
+.bp:hover{background:#F0A828;}
+.bo{background:transparent;border-color:var(--border2);color:var(--text2);}
+.bo:hover{border-color:var(--p2);color:var(--p2);}
+.bgreen{background:var(--gbg);border-color:rgba(34,197,94,.3);color:var(--green);}
+.bdng{background:var(--rbg);border-color:rgba(239,68,68,.3);color:var(--red);}
+.btn-sm{padding:6px 11px;font-size:12px;}
+
+.tw{overflow-x:auto;}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.tbl th{padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--border);}
+.tbl tr:hover td{background:var(--bg3);}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;}
+.badge.produtor{background:var(--pbg);color:var(--p2);}
+.badge.cliente{background:var(--bbg);color:var(--blue);}
+.badge.admin{background:var(--gbg);color:var(--green);}
+.st-on{color:var(--green);font-weight:600;}
+.st-off{color:var(--red);font-weight:600;}
+
+.empty{text-align:center;padding:40px 20px;color:var(--text3);}
+.empty-ic{font-size:32px;display:block;margin-bottom:8px;opacity:.4;}
+
+.mob-top{display:none;position:fixed;top:0;left:0;right:0;height:52px;z-index:70;background:#0A0908;border-bottom:1px solid var(--border);align-items:center;justify-content:space-between;padding:0 14px;}
+.ham{background:none;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--p2);font-size:18px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;}
+.mob-over{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:75;}
+.mob-over.show{display:block;}
+@media(max-width:768px){
+  .sb{transform:translateX(-220px);z-index:80;}
+  .sb.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.6);}
+  .ni{min-height:46px;}
+  .main{margin-left:0;padding-top:52px;}
+  .mob-top{display:flex;}
+  .topbar{display:none;}
+  .met-g{grid-template-columns:1fr 1fr;}
+  .page{padding:14px;}
+  .fi{font-size:16px!important;}
+}
+
+.toast{position:fixed;bottom:20px;right:20px;z-index:600;padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;display:none;box-shadow:0 12px 32px rgba(0,0,0,.5);}
+.toast.show{display:block;}
+.toast.ok{background:var(--green);color:#fff;}
+.toast.err{background:var(--red);color:#fff;}
+</style>
+</head>
+<body>
+
+<div class="mob-top"><button class="ham" onclick="toggleSb()">☰</button><span style="font-weight:800;color:#E8961A">⚙️ Admin</span><div style="width:44px"></div></div>
+<div class="mob-over" id="mobOver" onclick="closeSb()"></div>
+
+<nav class="sb" id="sbNav">
+  <div class="sb-logo">🎟️ Lota Ticketeria<span class="tag">Administração</span></div>
+  <div class="sb-nav">
+    <div class="ni active" onclick="gp('overview',this)">📊 Visão Geral</div>
+    <div class="ni" onclick="gp('usuarios',this)">👥 Usuários</div>
+    <div class="ni" onclick="gp('eventos',this)">🎪 Eventos</div>
+    <div class="ni" onclick="gp('config',this)">⚙️ Comissão</div>
+  </div>
+  <div class="sb-bot">
+    <a href="/painel.html" style="display:block;font-size:12px;color:var(--text2);margin-bottom:8px;text-align:center">← Ir para meu painel</a>
+    <button class="logout-btn" onclick="doLogout()">Sair</button>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="topbar"><div class="tb-title" id="tbTitle">Visão Geral da Plataforma</div></div>
+
+  <!-- VISÃO GERAL -->
+  <div class="page active" id="page-overview">
+    <div id="overviewContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
+  <!-- USUÁRIOS -->
+  <div class="page" id="page-usuarios">
+    <div class="card">
+      <div class="ct">Todos os Usuários</div>
+      <div class="tw" id="usuariosTable"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+    </div>
+  </div>
+
+  <!-- EVENTOS -->
+  <div class="page" id="page-eventos">
+    <div class="card">
+      <div class="ct">Todos os Eventos da Plataforma</div>
+      <div class="tw" id="eventosTable"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+    </div>
+  </div>
+
+  <!-- CONFIG -->
+  <div class="page" id="page-config">
+    <div class="card" style="max-width:420px">
+      <div class="ct">Comissão da Plataforma (Split de Pagamento)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">% retido automaticamente de cada venda de ingresso feita por qualquer produtor conectado ao Mercado Pago.</p>
+      <div style="display:flex;gap:9px;align-items:center">
+        <input type="number" id="feePercentInput" class="fi" style="width:90px" min="0" max="50" step="0.1">
+        <span style="font-size:13px;color:var(--text2)">%</span>
+        <button class="btn bp btn-sm" onclick="salvarFee()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let AT=localStorage.getItem('role_token')||null;
+let CU=null;
+
+async function api(m,p,b){
+  const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT) o.headers['Authorization']='Bearer '+AT;
+  if(b) o.body=JSON.stringify(b);
+  const r=await fetch(p,o);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Erro');
+  return d;
+}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
+function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
+function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
+function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
+
+const PM={overview:'Visão Geral da Plataforma',usuarios:'Usuários',eventos:'Eventos',config:'Comissão da Plataforma'};
+function gp(id,el){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  if(el) el.classList.add('active');
+  document.getElementById('tbTitle').textContent=PM[id]||id;
+  if(id==='overview') carregarOverview();
+  if(id==='usuarios') carregarUsuarios();
+  if(id==='eventos') carregarEventos();
+  if(id==='config') carregarFee();
+  closeSb();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.ni').forEach(el => {
+    el.addEventListener('touchstart', function(e){ el._touchStartY = e.touches[0].clientY; }, {passive:true});
+    el.addEventListener('touchend', function(e){
+      if(Math.abs(e.changedTouches[0].clientY - (el._touchStartY||0)) < 10){ e.preventDefault(); el.click(); }
+    }, {passive:false});
+  });
+});
+
+(async function(){
+  if(!AT){ location.href='/'; return; }
+  try{
+    const d=await api('GET','/api/auth/me');
+    CU=d.user;
+    if(!CU.isAdmin){ location.href='/painel.html'; return; }
+    carregarOverview();
+  }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
+})();
+
+async function carregarOverview(){
+  const el=document.getElementById('overviewContent');
+  try{
+    const d=await api('GET','/api/admin/overview');
+    el.innerHTML=`
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Usuários Totais</div><div class="met-v">${d.totalUsuarios}</div></div>
+        <div class="met-c"><div class="met-l">Produtores</div><div class="met-v" style="color:var(--p2)">${d.totalProdutores}</div></div>
+        <div class="met-c"><div class="met-l">Clientes</div><div class="met-v" style="color:var(--blue)">${d.totalClientes}</div></div>
+        <div class="met-c"><div class="met-l">Produtores c/ Mercado Pago</div><div class="met-v">${d.produtoresConectados}</div></div>
+      </div>
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Eventos Criados</div><div class="met-v">${d.totalEventos}</div></div>
+        <div class="met-c"><div class="met-l">Eventos Publicados</div><div class="met-v" style="color:var(--green)">${d.eventosPublicados}</div></div>
+        <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidosPagos}</div></div>
+        <div class="met-c"><div class="met-l">Comissão % Atual</div><div class="met-v">${d.feePercent}%</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">Financeiro da Plataforma</div>
+        <div style="display:flex;gap:30px;flex-wrap:wrap">
+          <div><div style="font-size:11px;color:var(--text3)">Volume Transacionado (bruto)</div><div style="font-size:26px;font-weight:800;color:var(--green)">R$ ${d.receitaTotal.toFixed(2)}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Comissão da Plataforma (sua receita)</div><div style="font-size:26px;font-weight:800;color:var(--p2)">R$ ${d.comissaoTotal.toFixed(2)}</div></div>
+        </div>
+      </div>`;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+
+async function carregarUsuarios(){
+  const el=document.getElementById('usuariosTable');
+  try{
+    const d=await api('GET','/api/admin/usuarios');
+    el.innerHTML='<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Mercado Pago</th><th>Status</th><th>Cadastro</th><th></th></tr></thead><tbody>'
+      +d.usuarios.map(u=>{
+        const tipo=u.isAdmin?'<span class="badge admin">Admin</span>':u.isOrganizador?'<span class="badge produtor">Produtor</span>':'<span class="badge cliente">Cliente</span>';
+        return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(u.email)+'</td><td>'+tipo+'</td><td>'+(u.mpConectado?'✅':'—')+'</td><td class="'+(u.ativo!==false?'st-on':'st-off')+'">'+(u.ativo!==false?'Ativo':'Inativo')+'</td><td>'+new Date(u.createdAt).toLocaleDateString('pt-BR')+'</td><td>'+(u.isAdmin?'':'<button class="btn '+(u.ativo!==false?'bdng':'bgreen')+' btn-sm" onclick="toggleUsuario(\''+u.id+'\','+(u.ativo===false)+')">'+(u.ativo!==false?'Desativar':'Ativar')+'</button>')+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function toggleUsuario(id,ativo){
+  try{ await api('PATCH','/api/admin/usuarios/'+id+'/ativo',{ativo}); toast(ativo?'Usuário ativado!':'Usuário desativado.','ok'); carregarUsuarios(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+async function carregarEventos(){
+  const el=document.getElementById('eventosTable');
+  try{
+    const d=await api('GET','/api/admin/eventos');
+    if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento criado ainda.</p></div>'; return; }
+    el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th></th></tr></thead><tbody>'
+      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+new Date(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td>'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'</td></tr>').join('')+'</tbody></table>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+
+async function carregarFee(){
+  try{ const d=await api('GET','/api/admin/marketplace-fee'); document.getElementById('feePercentInput').value=d.feePercent; }catch(e){}
+}
+async function salvarFee(){
+  const v=parseFloat(document.getElementById('feePercentInput').value);
+  if(isNaN(v)||v<0||v>50){ toast('Valor inválido (0-50%).','err'); return; }
+  try{ await api('PATCH','/api/admin/marketplace-fee',{feePercent:v}); toast('Comissão atualizada!','ok'); }
+  catch(e){ toast(e.message,'err'); }
+}
+</script>
+</body>
+</html>
