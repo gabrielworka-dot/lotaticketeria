@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redefinir Senha — Lota Ticketeria</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:#0F0E0C;color:#F0EDE8;font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;}
+body{display:flex;align-items:center;justify-content:center;padding:20px;}
+.card{background:#161410;border:1px solid #2A2822;border-radius:16px;padding:28px;width:100%;max-width:380px;}
+.logo{font-size:20px;font-weight:900;color:#E8961A;margin-bottom:4px;text-align:center;}
+h2{font-size:17px;font-weight:800;margin:16px 0 6px;text-align:center;}
+p.sub{font-size:12px;color:#A09880;text-align:center;margin-bottom:20px;}
+.fg{margin-bottom:13px;}
+.fg label{font-size:11px;font-weight:600;color:#A09880;display:block;margin-bottom:5px;}
+.fi{width:100%;background:#0F0E0C;border:1.5px solid #2A2822;border-radius:9px;padding:11px 13px;color:#F0EDE8;font-family:inherit;font-size:14px;outline:none;}
+.fi:focus{border-color:#E8961A;}
+.btn{width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-family:inherit;font-size:14px;font-weight:800;cursor:pointer;margin-top:6px;}
+.btn:disabled{opacity:.5;}
+.err{font-size:12px;color:#F87171;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:9px 12px;margin-bottom:12px;display:none;}
+.ok{font-size:13px;color:#4ADE80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;text-align:center;display:none;}
+a{color:#E8961A;text-decoration:none;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🎟️ Lota Ticketeria</div>
+  <h2>Criar nova senha</h2>
+  <p class="sub">Digite sua nova senha abaixo</p>
+  <div id="formArea">
+    <div class="err" id="errMsg"></div>
+    <div class="fg"><label>Nova senha</label><input class="fi" type="password" id="novaSenha" placeholder="Mínimo 6 caracteres"></div>
+    <div class="fg"><label>Confirmar senha</label><input class="fi" type="password" id="confSenha" placeholder="Digite novamente" onkeydown="if(event.key==='Enter')redefinir()"></div>
+    <button class="btn" id="btnSalvar" onclick="redefinir()">Salvar nova senha →</button>
+  </div>
+  <div class="ok" id="okMsg">✅ Senha redefinida! <a href="/">Voltar e entrar →</a></div>
+</div>
+<script>
+const params=new URLSearchParams(location.search);
+const token=params.get('token');
+if(!token){
+  document.getElementById('formArea').innerHTML='<div class="err" style="display:block">Link inválido. Solicite um novo pelo botão "Esqueci minha senha" na tela de login.</div>';
+}
+async function redefinir(){
+  const novaSenha=document.getElementById('novaSenha').value.trim();
+  const conf=document.getElementById('confSenha').value.trim();
+  const err=document.getElementById('errMsg');
+  err.style.display='none';
+  if(!novaSenha||novaSenha.length<6){ err.textContent='Senha deve ter pelo menos 6 caracteres.'; err.style.display='block'; return; }
+  if(novaSenha!==conf){ err.textContent='As senhas não coincidem.'; err.style.display='block'; return; }
+  const btn=document.getElementById('btnSalvar');
+  btn.disabled=true; btn.textContent='Salvando...';
+  try{
+    const r=await fetch('/api/auth/redefinir-senha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,novaSenha})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Erro');
+    document.getElementById('formArea').style.display='none';
+    document.getElementById('okMsg').style.display='block';
+  }catch(e){
+    err.textContent=e.message; err.style.display='block';
+    btn.disabled=false; btn.textContent='Salvar nova senha →';
+  }
+}
+</script>
+</body>
+</html>
