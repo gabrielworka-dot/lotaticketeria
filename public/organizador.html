@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lota Ticketeria — Produtor</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:#0F0E0C;color:#F0EDE8;font-family:'Plus Jakarta Sans',sans-serif;}
+a{color:inherit;text-decoration:none;}
+.topbar{padding:14px 20px;border-bottom:1px solid #2A2822;}
+.logo{font-size:18px;font-weight:900;color:#E8961A;}
+.banner{width:100%;height:180px;background:linear-gradient(135deg,#C47B14,#7A4A0C);position:relative;}
+.banner img{width:100%;height:100%;object-fit:cover;}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px 60px;}
+.profile-hdr{margin-top:-40px;position:relative;padding-bottom:16px;border-bottom:1px solid #2A2822;}
+.avatar{width:88px;height:88px;border-radius:20px;background:#C47B14;border:4px solid #0F0E0C;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#18160F;}
+.p-nome{font-size:22px;font-weight:900;margin-top:12px;}
+.p-bio{font-size:13px;color:#A09880;margin-top:6px;line-height:1.6;max-width:500px;}
+.p-stats{display:flex;gap:20px;margin-top:12px;font-size:12px;color:#A09880;}
+.p-stats strong{color:#fff;}
+.btn{padding:10px 20px;border-radius:20px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid;transition:all .2s;margin-top:14px;}
+.bp{background:#E8961A;border-color:#E8961A;color:#18160F;}
+.bo{background:transparent;border-color:#383430;color:#A09880;}
+.bo.seguindo{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3);color:#4ADE80;}
+.section-title{font-size:16px;font-weight:800;margin:26px 0 12px;}
+.event-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+.event-card{background:#161410;border:1px solid #2A2822;border-radius:12px;overflow:hidden;cursor:pointer;transition:all .2s;}
+.event-card:hover{border-color:rgba(196,123,20,.4);}
+.event-img{width:100%;aspect-ratio:16/10;background:linear-gradient(135deg,#C47B14,#7A4A0C);display:flex;align-items:center;justify-content:center;font-size:24px;}
+.event-img img{width:100%;height:100%;object-fit:cover;}
+.event-body{padding:11px;}
+.event-name{font-size:13px;font-weight:700;line-height:1.3;}
+.event-meta{font-size:10px;color:#605848;margin-top:4px;}
+.feed-item{background:#161410;border:1px solid #2A2822;border-radius:12px;padding:16px;margin-bottom:10px;}
+.feed-time{font-size:11px;color:#605848;margin-bottom:8px;}
+.feed-text{font-size:13px;line-height:1.6;}
+.feed-img{width:100%;border-radius:10px;margin-top:10px;}
+.empty{text-align:center;padding:30px;color:#605848;font-size:13px;}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="/" class="logo">🎟️ Lota Ticketeria</a></div>
+<div class="banner" id="bannerEl"></div>
+<div class="wrap" id="app"></div>
+
+<script>
+const slug=location.pathname.split('/').filter(Boolean).pop();
+let AT=localStorage.getItem('role_token')||null;
+let CU=null;
+
+async function api(m,p,b){
+  const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT) o.headers['Authorization']='Bearer '+AT;
+  if(b) o.body=JSON.stringify(b);
+  const r=await fetch(p,o);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Erro');
+  return d;
+}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function init(){
+  if(AT){ try{ const d=await api('GET','/api/auth/me'); CU=d.user; }catch(e){ AT=null; } }
+  try{
+    const d=await api('GET','/api/organizadores/'+slug);
+    render(d);
+  }catch(e){
+    document.getElementById('app').innerHTML='<div class="empty">'+esc(e.message)+'</div>';
+  }
+}
+
+let ORGANIZADOR_ID=null;
+function render(d){
+  const org=d.organizador;
+  ORGANIZADOR_ID=org.id;
+  if(org.bannerUrl) document.getElementById('bannerEl').innerHTML='<img src="'+esc(org.bannerUrl)+'">';
+  const jaLogado=!!CU;
+  const ehEuMesmo=CU&&CU.organizadorSlug===slug;
+  document.getElementById('app').innerHTML=`
+    <div class="profile-hdr">
+      <div class="avatar">${org.avatarUrl?'<img src="'+esc(org.avatarUrl)+'" style="width:100%;height:100%;object-fit:cover;border-radius:16px">':esc(org.nome.charAt(0).toUpperCase())}</div>
+      <div class="p-nome">${esc(org.nome)}</div>
+      ${org.bio?'<div class="p-bio">'+esc(org.bio)+'</div>':''}
+      <div class="p-stats"><span><strong>${org.seguidores}</strong> seguidores</span><span><strong>${d.eventos.length}</strong> eventos</span></div>
+      ${!ehEuMesmo?'<button class="btn '+(org.jaSegue?'bo seguindo':'bo')+'" id="btnSeguir" onclick="toggleSeguir()">'+(jaLogado?(org.jaSegue?'✓ Seguindo':'+ Seguir'):'Entre para seguir')+'</button>':''}
+    </div>
+    <div class="section-title">Próximos eventos</div>
+    <div class="event-grid" id="eventosGrid">${d.eventos.length?d.eventos.map(e=>`
+      <div class="event-card" onclick="location.href='/e/${e.slug}'">
+        <div class="event-img">${e.imagemCapa?'<img src="'+esc(e.imagemCapa)+'">':'🎪'}</div>
+        <div class="event-body"><div class="event-name">${esc(e.nome)}</div><div class="event-meta">${new Date(e.dataEvento).toLocaleDateString('pt-BR')} · ${esc(e.cidade||'')}</div></div>
+      </div>`).join(''):'<div class="empty">Nenhum evento publicado ainda.</div>'}</div>
+    <div class="section-title">Novidades</div>
+    <div id="postsList">${d.posts.length?d.posts.map(p=>`
+      <div class="feed-item"><div class="feed-time">${new Date(p.createdAt).toLocaleDateString('pt-BR')}</div><div class="feed-text">${esc(p.texto)}</div>${p.imagemUrl?'<img class="feed-img" src="'+esc(p.imagemUrl)+'">':''}</div>`).join(''):'<div class="empty">Nenhuma novidade publicada ainda.</div>'}</div>
+  `;
+}
+
+async function toggleSeguir(){
+  if(!CU){ location.href='/'; return; }
+  if(!ORGANIZADOR_ID) return;
+  try{
+    const d=await api('POST','/api/organizadores/'+ORGANIZADOR_ID+'/seguir');
+    const btn=document.getElementById('btnSeguir');
+    if(d.seguindo){ btn.textContent='✓ Seguindo'; btn.classList.add('seguindo'); }
+    else{ btn.textContent='+ Seguir'; btn.classList.remove('seguindo'); }
+  }catch(e){ alert(e.message); }
+}
+
+init();
+</script>
+</body>
+</html>
