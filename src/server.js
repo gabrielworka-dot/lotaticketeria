@@ -53,6 +53,13 @@ function sanitize(str, maxLen = 500) {
   if (typeof str !== 'string') return '';
   return str.trim().slice(0, maxLen).replace(/<[^>]*>/g, '');
 }
+// Imagens podem vir como URL normal ou como data URI base64 (upload direto) — precisa de limite bem maior
+function sanitizeImagem(str) {
+  if (typeof str !== 'string') return '';
+  const v = str.trim();
+  if (v.startsWith('data:image/')) return v.slice(0, 2_000_000); // até ~2MB em base64
+  return v.slice(0, 500).replace(/<[^>]*>/g, '');
+}
 function slugify(str) {
   return String(str || '')
     .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -182,8 +189,8 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
   const { nome, bio, avatarUrl, bannerUrl, redesSociais, senhaAtual, novaSenha } = req.body;
   if (nome) user.nome = sanitize(nome, 100);
   if (bio !== undefined) user.bio = sanitize(bio, 500);
-  if (avatarUrl !== undefined) user.avatarUrl = sanitize(avatarUrl, 300);
-  if (bannerUrl !== undefined) user.bannerUrl = sanitize(bannerUrl, 300);
+  if (avatarUrl !== undefined) user.avatarUrl = sanitizeImagem(avatarUrl);
+  if (bannerUrl !== undefined) user.bannerUrl = sanitizeImagem(bannerUrl);
   if (redesSociais) user.redesSociais = { instagram: sanitize(redesSociais.instagram||'',60), tiktok: sanitize(redesSociais.tiktok||'',60), site: sanitize(redesSociais.site||'',200) };
   if (novaSenha) {
     if (!senhaAtual || !bcrypt.compareSync(senhaAtual, user.senha)) return res.status(401).json({ error: 'Senha atual incorreta.' });
@@ -216,6 +223,66 @@ const MP_CLIENT_SECRET = process.env.MP_CLIENT_SECRET || '';
 const MP_API = 'https://api.mercadopago.com';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota Ticketeria <onboarding@resend.dev>';
+
+async function enviarEmailGenerico(destinatario, assunto, html) {
+  if (!RESEND_API_KEY || !destinatario) return false;
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({ from: RESEND_FROM, to: destinatario, subject: assunto, html })
+    });
+    return r.ok;
+  } catch(e) { console.error('Erro e-mail:', e.message); return false; }
+}
+
+// ════════════════════════════════════════════════════════
+// RECUPERAÇÃO DE SENHA
+// ════════════════════════════════════════════════════════
+app.post('/api/auth/esqueci-senha', rateLimit(60000, 5), async (req, res) => {
+  const email = sanitize(req.body.email || '', 150).toLowerCase();
+  // Sempre responde sucesso, mesmo se o e-mail não existir — evita expor quais e-mails estão cadastrados
+  const user = db.users.find(u => u.email === email);
+  if (user) {
+    const token = jwt.sign({ uid: user.id, tipo: 'reset' }, JWT_SECRET, { expiresIn: '30m' });
+    const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
+    const link = `${proto}://${host}/redefinir-senha.html?token=${token}`;
+    const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+      <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">🎟️ Lota Ticketeria</div>
+      <h2 style="font-size:18px;margin-bottom:12px;">Redefinir sua senha</h2>
+      <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Clique no botão abaixo para criar uma nova senha. Este link expira em 30 minutos.</p>
+      <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Redefinir senha →</a>
+      <p style="font-size:11px;color:#605848;margin-top:24px;">Se você não pediu isso, pode ignorar este e-mail com segurança.</p>
+      </div></div>`;
+    await enviarEmailGenerico(user.email, '🔑 Redefinir sua senha — Lota Ticketeria', html);
+  }
+  res.json({ ok: true, message: 'Se o e-mail existir, você receberá um link de redefinição.' });
+});
+
+app.post('/api/auth/redefinir-senha', rateLimit(60000, 10), (req, res) => {
+  const { token, novaSenha } = req.body;
+  if (!token || !novaSenha) return res.status(400).json({ error: 'Dados incompletos.' });
+  if (novaSenha.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
+  let dec;
+  try { dec = jwt.verify(token, JWT_SECRET); } catch(e) { return res.status(400).json({ error: 'Link inválido ou expirado. Solicite um novo.' }); }
+  if (dec.tipo !== 'reset') return res.status(400).json({ error: 'Link inválido.' });
+  const user = db.users.find(u => u.id === dec.uid);
+  if (!user) return res.status(400).json({ error: 'Usuário não encontrado.' });
+  user.senha = bcrypt.hashSync(novaSenha, 12);
+  saveDB(db);
+  res.json({ ok: true });
+});
+
+// ════════════════════════════════════════════════════════
+// MEUS INGRESSOS (comprador logado)
+// ════════════════════════════════════════════════════════
+app.get('/api/meus-ingressos', auth, (req, res) => {
+  const meusPedidos = PEDIDOS.filter(p => p.status === 'pago' && (p.compradorUserId === req.user.id || (p.comprador?.email || '').toLowerCase() === req.user.email.toLowerCase()));
+  const comEvento = meusPedidos.map(p => {
+    const ev = EVENTOS.find(e => e.id === p.eventoId);
+    return { pedidoId: p.id, eventoNome: ev?.nome || 'Evento', eventoSlug: ev?.slug || '', dataEvento: ev?.dataEvento || null, imagemCapa: ev?.imagemCapa || '', total: p.total, tickets: p.tickets || [], createdAt: p.createdAt };
+  }).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ pedidos: comEvento });
+});
 
 app.get('/api/mp/oauth/connect', auth, (req, res) => {
   if (!MP_CLIENT_ID) return res.status(400).json({ error: 'Marketplace do Mercado Pago não configurado (MP_CLIENT_ID ausente).' });
@@ -280,7 +347,7 @@ app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
     dataEvento, horaEvento: sanitize(horaEvento || '', 10),
     local: sanitize(local || '', 150), cidade: sanitize(cidade || '', 80),
     categoria: sanitize(categoria || 'Festas e shows', 40),
-    imagemCapa: sanitize(imagemCapa || '', 300),
+    imagemCapa: sanitizeImagem(imagemCapa || ''),
     status: 'rascunho',
     cores: { primaria: '#C47B14', fundo: '#18160F' },
     lotes: [], cupons: [], promoters: [],
@@ -303,8 +370,9 @@ app.get('/api/eventos/:id', auth, (req, res) => {
 app.patch('/api/eventos/:id', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
-  const campos = ['nome','descricao','dataEvento','horaEvento','local','cidade','categoria','imagemCapa','politicaCancelamento'];
+  const campos = ['nome','descricao','dataEvento','horaEvento','local','cidade','categoria','politicaCancelamento'];
   campos.forEach(c => { if (req.body[c] !== undefined) ev[c] = typeof req.body[c] === 'string' ? sanitize(req.body[c], c === 'descricao' ? 2000 : 150) : req.body[c]; });
+  if (req.body.imagemCapa !== undefined) ev.imagemCapa = sanitizeImagem(req.body.imagemCapa);
   if (req.body.cores) ev.cores = req.body.cores;
   ev.updatedAt = new Date().toISOString();
   persistEventos();
@@ -607,6 +675,10 @@ app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (
 app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
   try {
     const { slug, itens, comprador, cupom, ref } = req.body;
+    // Autenticação opcional — se o comprador estiver logado, vinculamos a compra à conta dele
+    let compradorUserId = null;
+    const authHeader = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
+    if (authHeader) { try { compradorUserId = jwt.verify(authHeader, JWT_SECRET).id; } catch(e) {} }
     const ticketRef = db.ticketSlugs[slug];
     if (!ticketRef) return res.status(404).json({ error: 'Evento não encontrado.' });
     const ev = EVENTOS.find(e => e.id === ticketRef.eventoId);
@@ -648,6 +720,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       const pedido = {
         id: pedidoId, eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
         comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
+        compradorUserId,
         itens: itensDetalhados, subtotal, desconto, total: 0, cupomUsado: cupomObj?.codigo || null,
         promoterRef: promoterObj?.id || null, mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString()
       };
@@ -682,6 +755,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     PEDIDOS.push({
       id: pedidoId, eventoId: ev.id, status: 'pendente',
       comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
+      compradorUserId,
       itens: itensDetalhados, subtotal, desconto, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
       marketplaceFee, mpPreferenceId: mpData.id, mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
     });
