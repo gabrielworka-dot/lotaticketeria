@@ -175,12 +175,17 @@ a{color:inherit;text-decoration:none;}
 <div class="mo" id="registroModal" onclick="if(event.target===this)closeModal('registroModal')">
   <div class="modal">
     <h2>Criar sua conta</h2>
-    <p class="sub">Compre ingressos e siga seus produtores favoritos</p>
+    <p class="sub" id="regSub">Compre ingressos e siga seus produtores favoritos</p>
+    <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:18px">
+      <button type="button" id="tabCliente" onclick="selecionarTipoCadastro('cliente')" style="flex:1;padding:9px;border:none;border-radius:8px;background:var(--p2);color:#18160F;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer">🎫 Sou Cliente</button>
+      <button type="button" id="tabProdutor" onclick="selecionarTipoCadastro('produtor')" style="flex:1;padding:9px;border:none;border-radius:8px;background:transparent;color:var(--text2);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer">🎪 Sou Produtor</button>
+    </div>
     <div class="err" id="regErr"></div>
     <div class="fg"><label>Nome</label><input class="fi" id="regNome" placeholder="Seu nome"></div>
+    <div class="fg" id="regNomePublicoWrap" style="display:none"><label>Nome público (nome da sua produtora/marca)</label><input class="fi" id="regNomePublico" placeholder="Ex: Atlética XYZ, Casa de Show ABC..."></div>
     <div class="fg"><label>E-mail</label><input class="fi" id="regEmail" type="email" placeholder="seu@email.com"></div>
     <div class="fg"><label>Senha</label><input class="fi" id="regSenha" type="password" placeholder="Mínimo 6 caracteres" onkeydown="if(event.key==='Enter')doRegistro()"></div>
-    <button class="btn bp" style="width:100%;padding:12px" onclick="doRegistro()">Criar conta →</button>
+    <button class="btn bp" style="width:100%;padding:12px" onclick="doRegistro()" id="btnRegistro">Criar conta de cliente →</button>
     <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:10px">Ao criar conta, você concorda com os <a href="/termos.html" target="_blank" style="color:var(--p2)">Termos de Uso</a> e a <a href="/privacidade.html" target="_blank" style="color:var(--p2)">Política de Privacidade</a>.</p>
     <div class="switch-auth">Já tem conta? <a onclick="closeModal('registroModal');openModal('loginModal')">Entrar</a></div>
   </div>
@@ -220,24 +225,54 @@ async function doLogin(){
     toast('Bem-vindo, '+CU.nome+'!','ok');
   }catch(e){err.textContent=e.message;err.style.display='block';}
 }
+let TIPO_CADASTRO='cliente';
+function selecionarTipoCadastro(tipo){
+  TIPO_CADASTRO=tipo;
+  const cliBtn=document.getElementById('tabCliente'), prodBtn=document.getElementById('tabProdutor');
+  const nomePublicoWrap=document.getElementById('regNomePublicoWrap');
+  const sub=document.getElementById('regSub'), btn=document.getElementById('btnRegistro');
+  if(tipo==='cliente'){
+    cliBtn.style.background='var(--p2)'; cliBtn.style.color='#18160F';
+    prodBtn.style.background='transparent'; prodBtn.style.color='var(--text2)';
+    nomePublicoWrap.style.display='none';
+    sub.textContent='Compre ingressos e siga seus produtores favoritos';
+    btn.textContent='Criar conta de cliente →';
+  }else{
+    prodBtn.style.background='var(--p2)'; prodBtn.style.color='#18160F';
+    cliBtn.style.background='transparent'; cliBtn.style.color='var(--text2)';
+    nomePublicoWrap.style.display='block';
+    sub.textContent='Crie eventos, venda ingressos e monte sua comunidade';
+    btn.textContent='Criar conta de produtor →';
+  }
+}
+
 async function doRegistro(){
   const nome=document.getElementById('regNome').value.trim();
   const email=document.getElementById('regEmail').value.trim();
   const senha=document.getElementById('regSenha').value.trim();
+  const nomePublico=document.getElementById('regNomePublico').value.trim();
   const err=document.getElementById('regErr');
   err.style.display='none';
   if(!nome||!email||!senha){err.textContent='Preencha todos os campos.';err.style.display='block';return;}
+  if(TIPO_CADASTRO==='produtor' && !nomePublico){err.textContent='Digite o nome público da sua produtora.';err.style.display='block';return;}
   try{
-    const d=await api('POST','/api/auth/registro',{nome,email,senha});
+    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:TIPO_CADASTRO,nomePublico});
     AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
-    location.href='/painel.html';
+    if(TIPO_CADASTRO==='produtor'){
+      location.href='/painel.html';
+    }else{
+      closeModal('registroModal');
+      initLoggedIn();
+      toast('Conta criada! Bem-vindo, '+CU.nome+'!','ok');
+    }
   }catch(e){err.textContent=e.message;err.style.display='block';}
 }
 function doLogout(){AT=null;CU=null;localStorage.removeItem('role_token');location.reload();}
 
 function initLoggedIn(){
   const el=document.getElementById('hdrActions');
-  el.innerHTML='<button class="btn bo btn-sm" onclick="location.href=\'/meus-ingressos.html\'">🎫 Meus Ingressos</button>'
+  el.innerHTML=(CU.isAdmin?'<button class="btn bo btn-sm" onclick="location.href=\'/admin.html\'">⚙️ Administração</button>':'')
+    +'<button class="btn bo btn-sm" onclick="location.href=\'/meus-ingressos.html\'">🎫 Meus Ingressos</button>'
     +'<button class="btn bo btn-sm" onclick="location.href=\'/painel.html\'">'+(CU.isOrganizador?'🎛️ Painel':'✨ Criar evento')+'</button>'
     +'<div class="user-chip" onclick="location.href=\'/painel.html\'"><div class="av">'+esc(CU.nome.charAt(0).toUpperCase())+'</div><span class="txt">'+esc(CU.nome.split(' ')[0])+'</span></div>';
   document.getElementById('feedSection').style.display='block';
