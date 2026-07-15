@@ -81,6 +81,7 @@ a{color:inherit;text-decoration:none;}
 .modal h2{font-size:19px;font-weight:800;margin-bottom:4px;}
 .modal p.sub{font-size:12px;color:var(--text2);margin-bottom:20px;}
 .fg{margin-bottom:13px;}
+.fg2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
 .fi{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;color:var(--text);font-family:inherit;font-size:16px;outline:none;}
 .fi:focus{border-color:var(--p2);}
@@ -133,8 +134,11 @@ a{color:inherit;text-decoration:none;}
   <p>Shows, festas e experiências perto de você — ou crie o seu e venda ingressos com sua comunidade.</p>
 </div>
 
-<div class="filters" id="filtros">
-  <div class="filter-chip active" onclick="filtrarCategoria('',this)">Todos</div>
+<div class="filters" id="filtros" style="align-items:center">
+  <select id="cidadeSelect" onchange="filtrarCidade(this.value)" style="padding:8px 14px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
+    <option value="">📍 Todas as cidades</option>
+  </select>
+  <div class="filter-chip active" onclick="filtrarCategoria('',this)">Todos os gêneros</div>
   <div class="filter-chip" onclick="filtrarCategoria('Festas e shows',this)">Festas e shows</div>
   <div class="filter-chip" onclick="filtrarCategoria('Espetáculos',this)">Espetáculos</div>
   <div class="filter-chip" onclick="filtrarCategoria('Stand-up',this)">Stand-up</div>
@@ -151,7 +155,23 @@ a{color:inherit;text-decoration:none;}
   <div class="event-grid" id="eventGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando eventos...</p></div></div>
 </div>
 
-<div class="footer">© 2025 Lota Ticketeria — Todos os direitos reservados · <a href="/termos.html" style="color:var(--text2)">Termos de Uso</a> · <a href="/privacidade.html" style="color:var(--text2)">Privacidade</a> · <a href="mailto:suporte@lotaticketeria.com.br" style="color:var(--text2)">Suporte</a></div>
+<footer style="margin-top:40px;padding:28px 20px 24px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);text-align:center">
+  <div style="display:flex;justify-content:center;gap:50px;flex-wrap:wrap;margin-bottom:18px;text-align:left;max-width:600px;margin-left:auto;margin-right:auto">
+    <div>
+      <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
+      <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
+      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+      <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
+    </div>
+    <div>
+      <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">INFORMAÇÕES</div>
+      <div style="margin-bottom:4px"><a href="/sobre-nos.html" style="color:var(--text3);text-decoration:none">Sobre nós</a></div>
+      <div style="margin-bottom:4px"><a href="/privacidade.html" style="color:var(--text3);text-decoration:none">Política de Privacidade</a></div>
+      <div><a href="/termos.html" style="color:var(--text3);text-decoration:none">Termos de Uso</a></div>
+    </div>
+  </div>
+  <div>© 2025 Lota Ticketeria — Todos os direitos reservados</div>
+</footer>
 
 <!-- LOGIN MODAL -->
 <div class="mo" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
@@ -192,6 +212,10 @@ a{color:inherit;text-decoration:none;}
     <div class="err" id="regErr"></div>
     <div class="fg"><label>Nome</label><input class="fi" id="regNome" placeholder="Seu nome"></div>
     <div class="fg" id="regNomePublicoWrap" style="display:none"><label>Nome público (nome da sua produtora/marca)</label><input class="fi" id="regNomePublico" placeholder="Ex: Atlética XYZ, Casa de Show ABC..."></div>
+    <div class="fg2" id="regDocWrap" style="display:none">
+      <div class="fg"><label>Tipo</label><select class="fi" id="regTipoDoc"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option></select></div>
+      <div class="fg"><label>Número</label><input class="fi" id="regCpfCnpj" placeholder="Só números"></div>
+    </div>
     <div class="fg"><label>E-mail</label><input class="fi" id="regEmail" type="email" placeholder="seu@email.com"></div>
     <div class="fg"><label>Senha</label><input class="fi" id="regSenha" type="password" placeholder="Mínimo 6 caracteres" onkeydown="if(event.key==='Enter')doRegistro()"></div>
     <button class="btn bp" style="width:100%;padding:12px" onclick="doRegistro()" id="btnRegistro">Criar conta de cliente →</button>
@@ -239,17 +263,20 @@ function selecionarTipoCadastro(tipo){
   TIPO_CADASTRO=tipo;
   const cliBtn=document.getElementById('tabCliente'), prodBtn=document.getElementById('tabProdutor');
   const nomePublicoWrap=document.getElementById('regNomePublicoWrap');
+  const docWrap=document.getElementById('regDocWrap');
   const sub=document.getElementById('regSub'), btn=document.getElementById('btnRegistro');
   if(tipo==='cliente'){
     cliBtn.style.background='var(--p2)'; cliBtn.style.color='#18160F';
     prodBtn.style.background='transparent'; prodBtn.style.color='var(--text2)';
     nomePublicoWrap.style.display='none';
+    docWrap.style.display='none';
     sub.textContent='Compre ingressos e siga seus produtores favoritos';
     btn.textContent='Criar conta de cliente →';
   }else{
     prodBtn.style.background='var(--p2)'; prodBtn.style.color='#18160F';
     cliBtn.style.background='transparent'; cliBtn.style.color='var(--text2)';
     nomePublicoWrap.style.display='block';
+    docWrap.style.display='grid';
     sub.textContent='Crie eventos, venda ingressos e monte sua comunidade';
     btn.textContent='Criar conta de produtor →';
   }
@@ -260,19 +287,22 @@ async function doRegistro(){
   const email=document.getElementById('regEmail').value.trim();
   const senha=document.getElementById('regSenha').value.trim();
   const nomePublico=document.getElementById('regNomePublico').value.trim();
+  const cpfCnpj=document.getElementById('regCpfCnpj').value.trim();
+  const tipoDocumento=document.getElementById('regTipoDoc').value;
   const err=document.getElementById('regErr');
   err.style.display='none';
   if(!nome||!email||!senha){err.textContent='Preencha todos os campos.';err.style.display='block';return;}
   if(TIPO_CADASTRO==='produtor' && !nomePublico){err.textContent='Digite o nome público da sua produtora.';err.style.display='block';return;}
+  if(TIPO_CADASTRO==='produtor' && !cpfCnpj){err.textContent='Digite seu CPF ou CNPJ.';err.style.display='block';return;}
   try{
-    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:TIPO_CADASTRO,nomePublico});
+    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:TIPO_CADASTRO,nomePublico,cpfCnpj,tipoDocumento});
     AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
     if(TIPO_CADASTRO==='produtor'){
       location.href='/painel.html';
     }else{
       closeModal('registroModal');
       initLoggedIn();
-      toast('Conta criada! Bem-vindo, '+CU.nome+'!','ok');
+      toast('Conta criada! Verifique seu e-mail para confirmar o cadastro.','ok');
     }
   }catch(e){err.textContent=e.message;err.style.display='block';}
 }
@@ -334,11 +364,13 @@ async function loadFeed(){
 
 // ─── MARKETPLACE ────────────────────────────────────────────
 let categoriaAtual='';
+let cidadeAtual='';
 async function carregarEventos(busca){
   const el=document.getElementById('eventGrid');
   try{
     const params=new URLSearchParams();
     if(categoriaAtual) params.set('categoria',categoriaAtual);
+    if(cidadeAtual) params.set('cidade',cidadeAtual);
     if(busca) params.set('busca',busca);
     const d=await api('GET','/api/public/eventos?'+params.toString());
     if(!d.eventos.length){el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento encontrado.</p></div>';return;}
@@ -361,6 +393,17 @@ function filtrarCategoria(cat,el){
   el.classList.add('active');
   carregarEventos();
 }
+function filtrarCidade(cidade){
+  cidadeAtual=cidade;
+  carregarEventos();
+}
+async function carregarCidades(){
+  try{
+    const d=await api('GET','/api/public/cidades');
+    const sel=document.getElementById('cidadeSelect');
+    d.cidades.forEach(c=>{ const opt=document.createElement('option'); opt.value=c; opt.textContent=c; sel.appendChild(opt); });
+  }catch(e){}
+}
 function buscar(){ carregarEventos(document.getElementById('searchInput').value.trim()); }
 
 (async function(){
@@ -368,6 +411,7 @@ function buscar(){ carregarEventos(document.getElementById('searchInput').value.
     try{ const d=await api('GET','/api/auth/me'); CU=d.user; initLoggedIn(); }
     catch(e){ AT=null; localStorage.removeItem('role_token'); }
   }
+  carregarCidades();
   carregarEventos();
 })();
 </script>
