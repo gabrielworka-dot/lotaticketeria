@@ -108,6 +108,7 @@ a{color:inherit;}
     <div class="ni active" onclick="gp('overview',this)">📊 Visão Geral</div>
     <div class="ni" onclick="gp('usuarios',this)">🎪 Produtores</div>
     <div class="ni" onclick="gp('eventos',this)">🎫 Eventos</div>
+    <div class="ni" onclick="gp('adiantamentos',this)">💸 Adiantamentos</div>
     <div class="ni" onclick="gp('financeiro',this)">💰 Financeiro</div>
     <div class="ni" onclick="gp('config',this)">⚙️ Comissão</div>
   </div>
@@ -149,11 +150,16 @@ a{color:inherit;}
     <div id="financeiroContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
+  <!-- ADIANTAMENTOS -->
+  <div class="page" id="page-adiantamentos">
+    <div id="adiantamentosContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
   <!-- CONFIG -->
   <div class="page" id="page-config">
     <div class="card" style="max-width:420px">
-      <div class="ct">Comissão da Plataforma (Split de Pagamento)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">% retido automaticamente de cada venda de ingresso feita por qualquer produtor conectado ao Mercado Pago.</p>
+      <div class="ct">Comissão da Plataforma</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">% retido internamente sobre cada venda, usado para calcular o saldo disponível de cada produtor para adiantamento.</p>
       <div style="display:flex;gap:9px;align-items:center">
         <input type="number" id="feePercentInput" class="fi" style="width:90px" min="0" max="50" step="0.1">
         <span style="font-size:13px;color:var(--text2)">%</span>
@@ -161,6 +167,24 @@ a{color:inherit;}
       </div>
     </div>
   </div>
+
+  <footer style="padding:24px 26px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);text-align:center;margin-top:20px">
+    <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:14px;text-align:left">
+      <div>
+        <div style="font-weight:700;color:var(--text2);margin-bottom:6px;font-size:10px;letter-spacing:1px">SAC</div>
+        <div>WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
+        <div>E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+        <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:var(--text2);margin-bottom:6px;font-size:10px;letter-spacing:1px">INFORMAÇÕES</div>
+        <div><a href="/sobre-nos.html" style="color:var(--text3);text-decoration:none">Sobre nós</a></div>
+        <div><a href="/privacidade.html" style="color:var(--text3);text-decoration:none">Política de Privacidade</a></div>
+        <div><a href="/termos.html" style="color:var(--text3);text-decoration:none">Termos de Uso</a></div>
+      </div>
+    </div>
+    <div>© 2025 Lota Ticketeria</div>
+  </footer>
 
 </div>
 
@@ -185,7 +209,7 @@ function toggleSb(){document.getElementById('sbNav').classList.toggle('open');do
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
-const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',financeiro:'Financeiro',config:'Comissão da Plataforma'};
+const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',adiantamentos:'Adiantamentos',financeiro:'Financeiro',config:'Comissão da Plataforma'};
 function gp(id,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
@@ -195,6 +219,7 @@ function gp(id,el){
   if(id==='overview') carregarOverview();
   if(id==='usuarios') carregarUsuarios();
   if(id==='eventos') carregarEventos();
+  if(id==='adiantamentos') carregarAdiantamentos();
   if(id==='financeiro') carregarFinanceiro();
   if(id==='config') carregarFee();
   closeSb();
@@ -228,13 +253,13 @@ async function carregarOverview(){
         <div class="met-c"><div class="met-l">Usuários Totais</div><div class="met-v">${d.totalUsuarios}</div></div>
         <div class="met-c"><div class="met-l">Produtores</div><div class="met-v" style="color:var(--p2)">${d.totalProdutores}</div></div>
         <div class="met-c"><div class="met-l">Clientes</div><div class="met-v" style="color:var(--blue)">${d.totalClientes}</div></div>
-        <div class="met-c"><div class="met-l">Produtores c/ Mercado Pago</div><div class="met-v">${d.produtoresConectados}</div></div>
+        <div class="met-c"><div class="met-l">Produtores c/ PIX Cadastrado</div><div class="met-v">${d.produtoresComPix}</div></div>
       </div>
       <div class="met-g">
         <div class="met-c"><div class="met-l">Eventos Criados</div><div class="met-v">${d.totalEventos}</div></div>
         <div class="met-c"><div class="met-l">Eventos Publicados</div><div class="met-v" style="color:var(--green)">${d.eventosPublicados}</div></div>
         <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidosPagos}</div></div>
-        <div class="met-c"><div class="met-l">Comissão % Atual</div><div class="met-v">${d.feePercent}%</div></div>
+        <div class="met-c"><div class="met-l">Adiantamentos Pendentes</div><div class="met-v" style="color:${d.adiantamentosPendentes>0?'var(--red)':'var(--text)'}">${d.adiantamentosPendentes}</div></div>
       </div>
       <div class="card">
         <div class="ct">Financeiro da Plataforma</div>
@@ -260,6 +285,44 @@ async function carregarUsuarios(){
 }
 async function toggleUsuario(id,ativo){
   try{ await api('PATCH','/api/admin/usuarios/'+id+'/ativo',{ativo}); toast(ativo?'Produtor ativado!':'Produtor desativado.','ok'); carregarUsuarios(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+// ── ADIANTAMENTOS ──
+async function carregarAdiantamentos(){
+  const el=document.getElementById('adiantamentosContent');
+  try{
+    const d=await api('GET','/api/admin/adiantamentos');
+    const pendentes=d.adiantamentos.filter(a=>a.status==='pendente');
+    const outros=d.adiantamentos.filter(a=>a.status!=='pendente');
+    const tipoChaveLabel={cpf:'CPF',cnpj:'CNPJ',email:'E-mail',telefone:'Telefone',aleatoria:'Chave Aleatória'};
+    function linhaAdiant(a,comAcoes){
+      const prazo=new Date(a.prazoLimite);
+      const vencido=comAcoes && prazo<new Date();
+      return '<tr><td>'+esc(a.produtorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(a.produtorEmail)+'</span></td>'
+        +'<td style="font-weight:700">R$'+a.valor.toFixed(2)+'</td>'
+        +'<td><div style="font-size:11px">'+(tipoChaveLabel[a.tipoChavePix]||a.tipoChavePix)+': <strong>'+esc(a.chavePix)+'</strong></div><div style="font-size:10px;color:var(--text3)">Titular: '+esc(a.nomeTitular)+' · Doc: '+esc(a.cpfCnpj)+'</div></td>'
+        +'<td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td>'
+        +'<td style="color:'+(vencido?'var(--red)':'var(--text2)')+'">'+new Date(a.prazoLimite).toLocaleDateString('pt-BR')+(vencido?' ⚠️':'')+'</td>'
+        +'<td>'+(comAcoes?'<div style="display:flex;gap:6px"><button class="btn bgreen btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'pago\')">✅ Marcar Pago</button><button class="btn bdng btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'recusado\')">Recusar</button></div>':(a.status==='pago'?'<span class="st-on">✅ Pago</span>':'<span class="st-off">❌ Recusado</span>'))+'</td></tr>';
+    }
+    el.innerHTML=`
+      <div class="card">
+        <div class="ct">Pendentes de Pagamento (${pendentes.length})</div>
+        ${pendentes.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo (2 dias)</th><th>Ações</th></tr></thead><tbody>'+pendentes.map(a=>linhaAdiant(a,true)).join('')+'</tbody></table></div>'
+          :'<div class="empty" style="padding:20px"><p>Nenhum pedido pendente.</p></div>'}
+      </div>
+      <div class="card">
+        <div class="ct">Histórico</div>
+        ${outros.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo</th><th>Status</th></tr></thead><tbody>'+outros.map(a=>linhaAdiant(a,false)).join('')+'</tbody></table></div>'
+          :'<div class="empty" style="padding:20px"><p>Sem histórico ainda.</p></div>'}
+      </div>`;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function processarAdiantamento(id,status){
+  const msg=status==='pago'?'Confirmar que o PIX foi enviado e marcar este adiantamento como PAGO?':'Recusar este pedido de adiantamento?';
+  if(!confirm(msg)) return;
+  try{ await api('PATCH','/api/admin/adiantamentos/'+id,{status}); toast(status==='pago'?'Marcado como pago!':'Recusado.','ok'); carregarAdiantamentos(); }
   catch(e){ toast(e.message,'err'); }
 }
 
