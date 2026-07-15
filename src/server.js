@@ -633,7 +633,8 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
     if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
     try {
       const refResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}/refunds`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json' }
+        method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': uuidv4() },
+        body: JSON.stringify({})
       });
       if (!refResp.ok) {
         const errData = await refResp.json().catch(() => ({}));
