@@ -148,9 +148,9 @@ a{color:inherit;}
     <div class="ni active" onclick="gp('eventos',this)">📋 Meus Eventos</div>
     <div class="ni" onclick="gp('novo',this)">✨ Criar Evento</div>
     <div class="sb-sec">Conta</div>
-    <div class="ni" onclick="gp('pagamento',this)">💳 Mercado Pago</div>
+    <div class="ni" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
     <div class="ni" id="navComunidade" onclick="gp('comunidade',this)">📣 Comunidade</div>
-    <div class="ni" onclick="gp('perfil',this)">👤 Perfil</div>
+    <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
     <div id="navAdminSec" style="display:none">
       <div class="sb-sec">Plataforma</div>
       <div class="ni" onclick="location.href='/admin.html'">⚙️ Administração</div>
@@ -204,9 +204,9 @@ a{color:inherit;}
     <div id="eventoDetalhe" data-id=""></div>
   </div>
 
-  <!-- MERCADO PAGO -->
-  <div class="page" id="page-pagamento">
-    <div class="card" style="max-width:520px" id="mpCard"></div>
+  <!-- SALDO E ADIANTAMENTO -->
+  <div class="page" id="page-saldo">
+    <div id="saldoContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
   <!-- COMUNIDADE -->
@@ -227,6 +227,24 @@ a{color:inherit;}
       <div id="perfilForm"></div>
     </div>
   </div>
+
+  <footer style="padding:24px 26px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);text-align:center;margin-top:20px">
+    <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:14px;text-align:left">
+      <div>
+        <div style="font-weight:700;color:var(--text2);margin-bottom:6px;font-size:10px;letter-spacing:1px">SAC</div>
+        <div>WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
+        <div>E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+        <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:var(--text2);margin-bottom:6px;font-size:10px;letter-spacing:1px">INFORMAÇÕES</div>
+        <div><a href="/sobre-nos.html" style="color:var(--text3);text-decoration:none">Sobre nós</a></div>
+        <div><a href="/privacidade.html" style="color:var(--text3);text-decoration:none">Política de Privacidade</a></div>
+        <div><a href="/termos.html" style="color:var(--text3);text-decoration:none">Termos de Uso</a></div>
+      </div>
+    </div>
+    <div>© 2025 Lota Ticketeria</div>
+  </footer>
 
 </div>
 
@@ -322,7 +340,7 @@ function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 
-const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},pagamento:{t:'Mercado Pago',bk:false},comunidade:{t:'Comunidade',bk:false},perfil:{t:'Meu Perfil',bk:false}};
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},comunidade:{t:'Comunidade',bk:false},perfil:{t:'Meu Perfil',bk:false}};
 
 function gp(id,el){
   const prev=document.querySelector('.page.active');
@@ -344,7 +362,7 @@ function gp(id,el){
   if(mobBack) mobBack.classList.toggle('show', showBack);
   if(mobHam) mobHam.style.display = showBack ? 'none' : 'flex';
   if(id==='eventos') carregarEventos();
-  if(id==='pagamento') carregarMP();
+  if(id==='saldo') carregarSaldo();
   if(id==='comunidade') carregarMeusPosts();
   if(id==='perfil') carregarPerfil();
   closeSb();
@@ -447,6 +465,7 @@ function renderEventoDetalhe(){
     <div class="tabs">
       <div class="tab active" onclick="evTab('geral',this)">📋 Geral</div>
       <div class="tab" onclick="evTab('lotes',this)">🎟️ Lotes</div>
+      <div class="tab" onclick="evTab('assentos',this)">🪑 Mapa de Assentos</div>
       <div class="tab" onclick="evTab('cupons',this)">🏷️ Cupons</div>
       <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
@@ -456,6 +475,7 @@ function renderEventoDetalhe(){
     </div>
     <div id="evTabGeral"></div>
     <div id="evTabLotes" style="display:none"></div>
+    <div id="evTabAssentos" style="display:none"></div>
     <div id="evTabCupons" style="display:none"></div>
     <div id="evTabPromoters" style="display:none"></div>
     <div id="evTabPixels" style="display:none"></div>
@@ -467,11 +487,12 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Cupons','Promoters','Pixels','Pedidos','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Pedidos','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   if(tab==='lotes') renderTabLotes();
+  if(tab==='assentos') renderTabAssentos();
   if(tab==='cupons') renderTabCupons();
   if(tab==='promoters') renderTabPromoters();
   if(tab==='pixels') renderTabPixels();
@@ -507,6 +528,8 @@ function renderTabGeral(){
         </div>
         <input type="hidden" id="edImg" value="${esc(EV_ATUAL.imagemCapa)}">
       </div>
+      <div class="fg"><label>Vídeo do YouTube (opcional)</label><input class="fi" id="edVideo" value="${esc(EV_ATUAL.videoUrl||'')}" placeholder="https://youtube.com/watch?v=..."></div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Cole o link do vídeo (trailer, apresentação do espetáculo, etc). Ele aparece na página pública do evento.</div>
       <button class="btn bp" onclick="salvarGeral()">💾 Salvar Alterações</button>
     </div>
     <div class="card" style="border-color:var(--rbg)">
@@ -517,7 +540,7 @@ function renderTabGeral(){
 }
 async function salvarGeral(){
   try{
-    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg')});
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),videoUrl:gv('edVideo')});
     EV_ATUAL=d.evento; toast('Salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
@@ -575,6 +598,85 @@ function salvarLote(){
 async function salvarLotes(){
   try{ const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/lotes',{lotes:_lotesTemp}); EV_ATUAL=d.evento; toast('Lotes salvos!','ok'); }
   catch(e){ toast(e.message,'err'); }
+}
+
+// ── MAPA DE ASSENTOS ──
+let _setoresTemp=[];
+function renderTabAssentos(){
+  const ma=EV_ATUAL.mapaAssentos||{ativo:false,palco:'PALCO',setores:[]};
+  _setoresTemp=JSON.parse(JSON.stringify(ma.setores||[]));
+  const lotesDisponiveis=EV_ATUAL.lotes||[];
+  const el=document.getElementById('evTabAssentos');
+  el.innerHTML=`
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="ct" style="margin-bottom:0">Mapa de Assentos Marcados</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2)"><input type="checkbox" id="assentosAtivo" ${ma.ativo?'checked':''}> Ativar lugares marcados</label>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Quando ativo, o comprador escolhe o assento específico em vez de apenas a quantidade. Cada setor abaixo é vinculado a um lote (preço).</p>
+      ${lotesDisponiveis.length?'':'<div class="empty" style="padding:16px"><p>Crie ao menos um lote na aba "Lotes" antes de configurar o mapa.</p></div>'}
+      <div class="fg"><label>Nome do palco/frente</label><input class="fi" id="assentosPalco" value="${esc(ma.palco||'PALCO')}" style="max-width:240px"></div>
+      <div id="setoresListEl"></div>
+      <div class="br"><button class="btn bo btn-sm" onclick="addSetorTemp()" ${!lotesDisponiveis.length?'disabled':''}>+ Adicionar Setor</button><button class="btn bp" onclick="salvarMapaAssentos()">💾 Salvar Mapa</button></div>
+    </div>
+    <div class="card" id="previewMapaCard" style="display:none">
+      <div class="ct">Pré-visualização</div>
+      <div id="previewMapa" style="overflow-x:auto"></div>
+    </div>`;
+  renderSetoresLista();
+}
+function renderSetoresLista(){
+  const el=document.getElementById('setoresListEl');
+  const lotesDisponiveis=EV_ATUAL.lotes||[];
+  if(!_setoresTemp.length){ el.innerHTML='<div class="empty" style="padding:14px"><p>Nenhum setor configurado.</p></div>'; document.getElementById('previewMapaCard').style.display='none'; return; }
+  el.innerHTML=_setoresTemp.map((s,i)=>{
+    const loteNome=lotesDisponiveis.find(l=>l.id===s.loteId)?.nome||'—';
+    return '<div class="promoter-row" style="flex-wrap:wrap;gap:10px">'
+      +'<input type="text" class="fi" style="max-width:140px" value="'+esc(s.nome)+'" placeholder="Nome do setor" onchange="_setoresTemp['+i+'].nome=this.value">'
+      +'<select class="fs" style="max-width:160px" onchange="_setoresTemp['+i+'].loteId=this.value">'+lotesDisponiveis.map(l=>'<option value="'+l.id+'" '+(l.id===s.loteId?'selected':'')+'>'+esc(l.nome)+' (R$'+l.preco.toFixed(2)+')</option>').join('')+'</select>'
+      +'<input type="number" class="fi" style="max-width:90px" value="'+s.linhas+'" min="1" max="30" placeholder="Linhas" onchange="_setoresTemp['+i+'].linhas=parseInt(this.value)||1">'
+      +'<input type="number" class="fi" style="max-width:110px" value="'+s.assentosPorLinha+'" min="1" max="40" placeholder="Assentos/linha" onchange="_setoresTemp['+i+'].assentosPorLinha=parseInt(this.value)||1">'
+      +'<input type="color" value="'+(s.cor||'#C47B14')+'" style="width:40px;height:38px;border-radius:8px;border:1px solid var(--border);background:none;cursor:pointer" onchange="_setoresTemp['+i+'].cor=this.value">'
+      +'<button class="btn bdng btn-sm" onclick="_setoresTemp.splice('+i+',1);renderSetoresLista()">✕</button>'
+      +'<div style="font-size:11px;color:var(--text3);width:100%">'+s.linhas+' linhas × '+s.assentosPorLinha+' assentos = '+(s.linhas*s.assentosPorLinha)+' lugares · vinculado a '+esc(loteNome)+'</div>'
+      +'</div>';
+  }).join('');
+  renderPreviewMapa();
+}
+function addSetorTemp(){
+  const primeiroLote=(EV_ATUAL.lotes||[])[0];
+  if(!primeiroLote){ toast('Crie um lote primeiro.','err'); return; }
+  _setoresTemp.push({id:'novo-'+Date.now(),nome:'Setor '+(_setoresTemp.length+1),loteId:primeiroLote.id,linhas:5,assentosPorLinha:10,cor:'#C47B14'});
+  renderSetoresLista();
+}
+function renderPreviewMapa(){
+  const card=document.getElementById('previewMapaCard');
+  const el=document.getElementById('previewMapa');
+  if(!_setoresTemp.length){ card.style.display='none'; return; }
+  card.style.display='block';
+  const palco=gv('assentosPalco')||'PALCO';
+  let html='<div style="text-align:center;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:16px;font-size:11px;letter-spacing:2px;color:var(--text3);font-weight:700">'+esc(palco)+'</div>';
+  _setoresTemp.forEach(s=>{
+    html+='<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">'+esc(s.nome)+'</div>';
+    for(let r=0;r<Math.min(s.linhas,6);r++){
+      html+='<div style="display:flex;gap:3px;margin-bottom:3px;justify-content:center">';
+      for(let c=0;c<Math.min(s.assentosPorLinha,20);c++){
+        html+='<div style="width:16px;height:16px;border-radius:3px;background:'+(s.cor||'#C47B14')+';opacity:0.7"></div>';
+      }
+      html+='</div>';
+    }
+    if(s.linhas>6) html+='<div style="font-size:10px;color:var(--text3);text-align:center">+ '+(s.linhas-6)+' linhas...</div>';
+    html+='</div>';
+  });
+  el.innerHTML=html;
+}
+async function salvarMapaAssentos(){
+  const ativo=document.getElementById('assentosAtivo').checked;
+  const palco=gv('assentosPalco');
+  try{
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/mapa-assentos',{ativo,palco,setores:_setoresTemp});
+    EV_ATUAL=d.evento; toast('Mapa de assentos salvo!','ok');
+  }catch(e){ toast(e.message,'err'); }
 }
 
 // ── CUPONS ──
@@ -754,27 +856,51 @@ async function iniciarScanner(){
   }catch(e){ document.getElementById('scanStatus').textContent='Erro: '+e.message; }
 }
 
-// ─── MERCADO PAGO ───────────────────────────────────────────
-async function carregarMP(){
-  const el=document.getElementById('mpCard');
+// ─── SALDO E ADIANTAMENTO ────────────────────────────────────
+async function carregarSaldo(){
+  const el=document.getElementById('saldoContent');
   try{
-    const d=await api('GET','/api/mp/status');
-    el.innerHTML='<div class="ct">Conta de Recebimento</div>'
-      +(d.connected
-        ?'<div style="font-size:13px;color:var(--green);margin-bottom:12px">✅ Mercado Pago conectada'+(d.testMode?' <span style="background:var(--pbg);color:var(--p2);border-radius:20px;padding:2px 9px;font-size:10px;margin-left:6px">🧪 TESTE</span>':'')+'</div><div style="font-size:11px;color:var(--text3);margin-bottom:14px">Comissão da plataforma: '+d.feePercent+'%</div><button class="btn bdng" onclick="desconectarMP()">Desconectar</button>'
-        :'<p style="font-size:13px;color:var(--text2);margin-bottom:16px">Conecte sua conta para receber pagamentos e publicar eventos.</p><button class="btn bp" onclick="conectarMP()">🔗 Conectar Mercado Pago</button>');
-  }catch(e){ el.innerHTML='<p>'+esc(e.message)+'</p>'; }
+    const [saldo,adiant]=await Promise.all([
+      api('GET','/api/produtor/saldo'),
+      api('GET','/api/produtor/adiantamentos')
+    ]);
+    const temPix=!!(CU.pagamentoInfo?.chavePix);
+    const temDoc=!!(CU.cpfCnpj);
+    el.innerHTML=`
+      <div class="met-g" style="grid-template-columns:repeat(3,1fr)">
+        <div class="met-c"><div class="met-l">Saldo Disponível</div><div class="met-v" style="color:var(--green)">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Pendente de Aprovação</div><div class="met-v" style="color:var(--p2)">R$ ${saldo.totalPendente.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Já Recebido</div><div class="met-v">R$ ${saldo.totalJaPago.toFixed(2)}</div></div>
+      </div>
+      ${(!temPix||!temDoc)?'<div class="card" style="border-color:var(--pb);background:var(--pbg)"><div style="font-size:13px;color:var(--p2);font-weight:700;margin-bottom:6px">⚠️ Complete seu cadastro para solicitar adiantamento</div><div style="font-size:12px;color:var(--text2);margin-bottom:12px">Falta cadastrar '+(!temDoc?'CPF/CNPJ':'')+((!temDoc&&!temPix)?' e ':'')+(!temPix?'chave PIX':'')+' no seu perfil.</div><button class="btn bp btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button></div>':''}
+      <div class="card">
+        <div class="ct">Solicitar Adiantamento</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Peça o repasse do seu saldo disponível. O pagamento é feito manualmente via PIX pelo administrador, em até <strong>2 dias úteis</strong> após a solicitação.</p>
+        <div class="fg2">
+          <div class="fg"><label>Valor a solicitar (R$)</label><input type="number" class="fi" id="valorAdiantamento" min="0.01" step="0.01" max="${saldo.saldoDisponivel}" placeholder="0,00"></div>
+          <div class="fg" style="display:flex;align-items:flex-end"><button class="btn bp" style="width:100%" onclick="solicitarAdiantamento()" ${(!temPix||!temDoc)?'disabled':''}>Solicitar →</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ct">Histórico de Solicitações</div>
+        ${adiant.adiantamentos.length?'<div class="tw"><table class="tbl"><thead><tr><th>Valor</th><th>Status</th><th>Solicitado em</th><th>Prazo</th></tr></thead><tbody>'
+          +adiant.adiantamentos.map(a=>{
+            const stMap={pendente:['','⏳ Pendente'],pago:['st-on','✅ Pago'],recusado:['st-off','❌ Recusado']};
+            const [cls,lbl]=stMap[a.status]||['',a.status];
+            return '<tr><td>R$'+a.valor.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td><td>'+(a.status==='pendente'?new Date(a.prazoLimite).toLocaleDateString('pt-BR'):'—')+'</td></tr>';
+          }).join('')+'</tbody></table></div>'
+          :'<div class="empty" style="padding:20px"><p>Nenhuma solicitação ainda.</p></div>'}
+      </div>`;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
-async function conectarMP(){
+async function solicitarAdiantamento(){
+  const valor=parseFloat(document.getElementById('valorAdiantamento').value);
+  if(!valor||valor<=0){ toast('Informe um valor válido.','err'); return; }
   try{
-    const d=await api('GET','/api/mp/oauth/connect');
-    const win=window.open(d.url,'mp_oauth','width=520,height=680');
-    const timer=setInterval(()=>{ if(win.closed){ clearInterval(timer); setTimeout(carregarMP,600); } },700);
+    await api('POST','/api/produtor/adiantamento',{valor});
+    toast('Solicitação enviada! Você será pago em até 2 dias.','ok');
+    carregarSaldo();
   }catch(e){ toast(e.message,'err'); }
-}
-async function desconectarMP(){
-  if(!confirm('Desconectar sua conta Mercado Pago?')) return;
-  try{ await api('POST','/api/mp/disconnect'); toast('Desconectado.','ok'); carregarMP(); }catch(e){ toast(e.message,'err'); }
 }
 
 // ─── COMUNIDADE ─────────────────────────────────────────────
@@ -824,12 +950,36 @@ function carregarPerfil(){
     </div>
     <div class="fg"><label>Instagram</label><input class="fi" id="pfInsta" value="${esc(CU.redesSociais?.instagram||'')}"></div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Sua página pública: <a href="/o/${CU.organizadorSlug}" target="_blank" style="color:var(--p2)">/o/${CU.organizadorSlug}</a></div>
+
+    <div style="border-top:1px solid var(--border);margin:18px 0;padding-top:16px">
+      <div class="ct">Documento (obrigatório para receber adiantamentos)</div>
+      <div class="fg2">
+        <div class="fg"><label>Tipo</label><select class="fs" id="pfTipoDoc"><option value="cpf" ${CU.tipoDocumento!=='cnpj'?'selected':''}>CPF</option><option value="cnpj" ${CU.tipoDocumento==='cnpj'?'selected':''}>CNPJ</option></select></div>
+        <div class="fg"><label>Número</label><input class="fi" id="pfCpfCnpj" value="${esc(CU.cpfCnpj||'')}" placeholder="Só números"></div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin-bottom:16px;padding-top:16px">
+      <div class="ct">Dados para Recebimento (PIX)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Usado para receber seus adiantamentos de vendas.</p>
+      <div class="fg2">
+        <div class="fg"><label>Tipo de Chave</label><select class="fs" id="pfTipoPix"><option value="cpf" ${CU.pagamentoInfo?.tipoChavePix==='cpf'?'selected':''}>CPF</option><option value="cnpj" ${CU.pagamentoInfo?.tipoChavePix==='cnpj'?'selected':''}>CNPJ</option><option value="email" ${CU.pagamentoInfo?.tipoChavePix==='email'?'selected':''}>E-mail</option><option value="telefone" ${CU.pagamentoInfo?.tipoChavePix==='telefone'?'selected':''}>Telefone</option><option value="aleatoria" ${CU.pagamentoInfo?.tipoChavePix==='aleatoria'?'selected':''}>Chave Aleatória</option></select></div>
+        <div class="fg"><label>Chave PIX</label><input class="fi" id="pfChavePix" value="${esc(CU.pagamentoInfo?.chavePix||'')}" placeholder="Sua chave PIX"></div>
+      </div>
+      <div class="fg"><label>Nome do Titular da Conta</label><input class="fi" id="pfTitular" value="${esc(CU.pagamentoInfo?.nomeTitular||'')}" placeholder="Nome completo ou razão social"></div>
+    </div>
+
     <button class="btn bp" onclick="salvarPerfil()">💾 Salvar</button>
   `;
 }
+function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
 async function salvarPerfil(){
   try{
-    const d=await api('PATCH','/api/auth/perfil',{nome:gv('pfNome'),bio:gv('pfBio'),avatarUrl:gv('pfAvatar'),bannerUrl:gv('pfBanner'),redesSociais:{instagram:gv('pfInsta')}});
+    const d=await api('PATCH','/api/auth/perfil',{
+      nome:gv('pfNome'),bio:gv('pfBio'),avatarUrl:gv('pfAvatar'),bannerUrl:gv('pfBanner'),redesSociais:{instagram:gv('pfInsta')},
+      tipoDocumento:gv('pfTipoDoc'),cpfCnpj:gv('pfCpfCnpj'),
+      pagamentoInfo:{tipoChavePix:gv('pfTipoPix'),chavePix:gv('pfChavePix'),nomeTitular:gv('pfTitular')}
+    });
     CU=d.user; toast('Perfil salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
