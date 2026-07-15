@@ -149,7 +149,7 @@ a{color:inherit;}
     <div class="ni" onclick="gp('novo',this)">✨ Criar Evento</div>
     <div class="sb-sec">Conta</div>
     <div class="ni" onclick="gp('pagamento',this)">💳 Mercado Pago</div>
-    <div class="ni" onclick="gp('comunidade',this)">📣 Comunidade</div>
+    <div class="ni" id="navComunidade" onclick="gp('comunidade',this)">📣 Comunidade</div>
     <div class="ni" onclick="gp('perfil',this)">👤 Perfil</div>
     <div id="navAdminSec" style="display:none">
       <div class="sb-sec">Plataforma</div>
@@ -394,7 +394,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     gp('eventos');
-    if(CU.isAdmin){ const s=document.getElementById('navAdminSec'); if(s) s.style.display='block'; }
+    if(CU.isAdmin){
+      const s=document.getElementById('navAdminSec'); if(s) s.style.display='block';
+      const nc=document.getElementById('navComunidade'); if(nc) nc.style.display='none';
+    }
   }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
 })();
 
