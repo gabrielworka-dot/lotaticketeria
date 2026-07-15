@@ -866,12 +866,15 @@ async function carregarSaldo(){
     ]);
     const temPix=!!(CU.pagamentoInfo?.chavePix);
     const temDoc=!!(CU.cpfCnpj);
+    const aReceberDaLota=Math.max(0,Math.round((saldo.saldoBruto-saldo.totalJaPago)*100)/100);
     el.innerHTML=`
-      <div class="met-g" style="grid-template-columns:repeat(3,1fr)">
-        <div class="met-c"><div class="met-l">Saldo Disponível</div><div class="met-v" style="color:var(--green)">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
-        <div class="met-c"><div class="met-l">Pendente de Aprovação</div><div class="met-v" style="color:var(--p2)">R$ ${saldo.totalPendente.toFixed(2)}</div></div>
-        <div class="met-c"><div class="met-l">Já Recebido</div><div class="met-v">R$ ${saldo.totalJaPago.toFixed(2)}</div></div>
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Valor Total em Vendas</div><div class="met-v">R$ ${saldo.saldoBruto.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Pagamentos Efetuados</div><div class="met-v" style="color:var(--green)">R$ ${saldo.totalJaPago.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">A Receber da Lota</div><div class="met-v" style="color:var(--p2)">R$ ${aReceberDaLota.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Disponível p/ Solicitar</div><div class="met-v">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
       </div>
+      ${saldo.totalPendente>0?'<div style="font-size:11px;color:var(--text3);margin:-6px 0 14px">Desse total a receber, <strong style="color:var(--p2)">R$ '+saldo.totalPendente.toFixed(2)+'</strong> já está com solicitação de adiantamento em análise.</div>':''}
       ${(!temPix||!temDoc)?'<div class="card" style="border-color:var(--pb);background:var(--pbg)"><div style="font-size:13px;color:var(--p2);font-weight:700;margin-bottom:6px">⚠️ Complete seu cadastro para solicitar adiantamento</div><div style="font-size:12px;color:var(--text2);margin-bottom:12px">Falta cadastrar '+(!temDoc?'CPF/CNPJ':'')+((!temDoc&&!temPix)?' e ':'')+(!temPix?'chave PIX':'')+' no seu perfil.</div><button class="btn bp btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button></div>':''}
       <div class="card">
         <div class="ct">Solicitar Adiantamento</div>
