@@ -10,6 +10,8 @@ const fetch   = require('node-fetch');
 const fs      = require('fs');
 const path    = require('path');
 const { v4: uuidv4 } = require('uuid');
+const PDFDocument = require('pdfkit');
+const QRCode  = require('qrcode');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -550,7 +552,7 @@ app.patch('/api/eventos/:id/pixels', auth, (req, res) => {
 function calcularSaldoProdutor(userId) {
   const eventosDoProdutor = EVENTOS.filter(e => e.organizadorId === userId).map(e => e.id);
   const pedidosPagos = PEDIDOS.filter(p => eventosDoProdutor.includes(p.eventoId) && p.status === 'pago');
-  const saldoBruto = pedidosPagos.reduce((s, p) => s + (p.total - (p.marketplaceFee || 0)), 0);
+  const saldoBruto = pedidosPagos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : (p.total - ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))))), 0);
   const meusAdiantamentos = ADIANTAMENTOS.filter(a => a.produtorId === userId);
   const totalJaPago = meusAdiantamentos.filter(a => a.status === 'pago').reduce((s, a) => s + a.valor, 0);
   const totalPendente = meusAdiantamentos.filter(a => a.status === 'pendente').reduce((s, a) => s + a.valor, 0);
@@ -828,6 +830,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     local: ev.local, cidade: ev.cidade, categoria: ev.categoria, imagemCapa: ev.imagemCapa, cores: ev.cores,
     videoYoutubeId: extrairYoutubeId(ev.videoUrl || ''),
     lotes: lotesPublicos, pixels: ev.pixels, testMode: isTestToken(MP_PLATFORM_TOKEN),
+    feePercent: db.marketplaceFeePercent || 10,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug }
@@ -892,25 +895,30 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       desconto = cupomObj.tipo === 'fixo' ? cupomObj.valor : Math.round(subtotal * (cupomObj.valor/100) * 100) / 100;
       desconto = Math.min(desconto, subtotal);
     }
-    const total = Math.round((subtotal - desconto) * 100) / 100;
+    // valorIngressos é o que o produtor recebe integralmente (100%).
+    // A taxa administrativa é cobrada À PARTE, como acréscimo pago pelo comprador — não sai do valor do produtor.
+    const valorIngressos = Math.round((subtotal - desconto) * 100) / 100;
+    const feePercent = db.marketplaceFeePercent || 10;
+    const taxaAdministrativa = Math.round(valorIngressos * (feePercent/100) * 100) / 100;
+    const total = Math.round((valorIngressos + taxaAdministrativa) * 100) / 100;
 
     // Promoter (referência de venda)
     let promoterObj = ref ? ev.promoters.find(p => p.codigoRef === ref && p.ativo) : null;
 
     const pedidoId = uuidv4();
 
-    // CORTESIA / total zero — não precisa Mercado Pago, aprova na hora
-    if (total <= 0) {
+    // CORTESIA / valor zero — não precisa Mercado Pago, aprova na hora (sem taxa, pois não há cobrança)
+    if (valorIngressos <= 0) {
       const pedido = {
         id: pedidoId, eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
         comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
         compradorUserId,
-        itens: itensDetalhados, subtotal, desconto, total: 0, cupomUsado: cupomObj?.codigo || null,
+        itens: itensDetalhados, subtotal, desconto, valorIngressos: 0, taxaAdministrativa: 0, total: 0, cupomUsado: cupomObj?.codigo || null,
         promoterRef: promoterObj?.id || null, mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString()
       };
       gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
       PEDIDOS.push(pedido); persistPedidos(); persistEventos();
-      await enviarEmailIngressos(pedido, ev.nome);
+      await enviarEmailIngressos(pedido, ev);
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
@@ -918,13 +926,10 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const baseUrl = `${proto}://${host}`;
-    const feePercent = db.marketplaceFeePercent || 10;
-    // A comissão aqui é só para cálculo interno de quanto repassar ao produtor via adiantamento —
-    // não é mais enviada ao Mercado Pago como split, pois o pagamento cai direto na conta única da plataforma.
-    const marketplaceFee = Math.round(total * (feePercent/100) * 100) / 100;
 
     const mpItems = itensDetalhados.map(it => ({ title: `${ev.nome} — ${it.loteNome}`, quantity: it.qtd, unit_price: it.precoUnit, currency_id: 'BRL' }));
     if (desconto > 0) mpItems.push({ title: 'Desconto (cupom ' + (cupomObj?.codigo||'') + ')', quantity: 1, unit_price: -desconto, currency_id: 'BRL' });
+    mpItems.push({ title: `Taxa administrativa (${feePercent}%)`, quantity: 1, unit_price: taxaAdministrativa, currency_id: 'BRL' });
 
     const prefBody = {
       items: mpItems, payer: { name: sanitize(comprador.nome,100), email: comprador.email },
@@ -942,8 +947,8 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       id: pedidoId, eventoId: ev.id, status: 'pendente',
       comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
       compradorUserId,
-      itens: itensDetalhados, subtotal, desconto, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
-      marketplaceFee, mpPreferenceId: mpData.id, mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
+      itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
+      mpPreferenceId: mpData.id, mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
     });
     persistPedidos();
     res.json({ ok: true, pedidoId, init_point: mpData.init_point, testMode: isTestToken(MP_PLATFORM_TOKEN) });
@@ -968,12 +973,51 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
   ev.updatedAt = new Date().toISOString();
 }
 
-async function enviarEmailIngressos(pedido, nomeEvento) {
+async function gerarPdfIngressos(pedido, ev) {
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const chunks = [];
+  doc.on('data', c => chunks.push(c));
+  const done = new Promise((resolve, reject) => { doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject); });
+
+  const tickets = pedido.tickets || [];
+  for (let i = 0; i < tickets.length; i++) {
+    const t = tickets[i];
+    if (i > 0) doc.addPage();
+    doc.fontSize(20).fillColor('#C47B14').text('Lota Ticketeria', { align: 'left' });
+    doc.moveDown(0.6);
+    doc.fontSize(18).fillColor('#111').text(ev.nome || 'Evento', { align: 'left' });
+    doc.moveDown(0.2);
+    const dataStr = ev.dataEvento ? new Date(ev.dataEvento).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : '';
+    doc.fontSize(11).fillColor('#555').text(`${dataStr}${ev.horaEvento ? ' às ' + ev.horaEvento : ''}`);
+    if (ev.local) doc.text(`${ev.local}${ev.cidade ? ', ' + ev.cidade : ''}`);
+    doc.moveDown(1);
+
+    doc.fontSize(12).fillColor('#111').text(`Comprador: ${pedido.comprador?.nome || ''}`);
+    doc.fontSize(12).text(`Lote: ${t.loteNome || ''}${t.assento ? ' — Assento ' + t.assento : ''}`);
+    doc.moveDown(1);
+
+    try {
+      const qrDataUrl = await QRCode.toDataURL(t.codigo, { width: 220, margin: 1 });
+      const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
+      doc.image(qrBuffer, 40, doc.y, { width: 160 });
+    } catch (e) {}
+
+    doc.fontSize(13).fillColor('#C47B14').text(t.codigo, 220, doc.y - 100, { width: 300 });
+    doc.moveDown(6);
+    doc.fontSize(9).fillColor('#888').text('Apresente este QR Code (impresso ou no celular) na entrada do evento.', 40, doc.y);
+    doc.text('Vendido com Lota Ticketeria.', 40, doc.y + 14);
+  }
+  doc.end();
+  return done;
+}
+
+async function enviarEmailIngressos(pedido, ev) {
   if (!RESEND_API_KEY || !pedido.comprador?.email) return;
+  const nomeEvento = ev.nome || 'Evento';
   const ticketsHtml = (pedido.tickets || []).map(t => `
     <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:16px;background:#161410;">
       <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(t.codigo)}" width="90" height="90" style="border-radius:8px;background:#fff;padding:4px" />
-      <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}</div></div>
+      <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · Assento '+esc(t.assento):''}</div></div>
     </div>`).join('');
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
     <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:4px;">🎟️ Lota Ticketeria</div>
@@ -982,10 +1026,15 @@ async function enviarEmailIngressos(pedido, nomeEvento) {
     <p style="font-size:20px;font-weight:800;color:#fff;margin-bottom:20px;">${esc(nomeEvento)}</p>
     <p style="font-size:13px;color:#A09880;margin-bottom:16px;">Olá ${esc(pedido.comprador.nome)}, aqui estão seus ingressos:</p>
     ${ticketsHtml}
-    <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada.</p>
+    <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada. Seu ingresso também está anexado em PDF neste e-mail.</p>
     </div></div>`;
+  const payload = { from: RESEND_FROM, to: pedido.comprador.email, subject: `🎟️ Seus ingressos — ${nomeEvento}`, html };
   try {
-    await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify({ from: RESEND_FROM, to: pedido.comprador.email, subject: `🎟️ Seus ingressos — ${nomeEvento}`, html }) });
+    const pdfBuffer = await gerarPdfIngressos(pedido, ev);
+    payload.attachments = [{ filename: `ingresso-${(ev.slug || 'lota')}.pdf`, content: pdfBuffer.toString('base64') }];
+  } catch (e) { console.error('Erro ao gerar PDF do ingresso:', e.message); }
+  try {
+    await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
   } catch(e) { console.error('Erro e-mail:', e.message); }
 }
 
@@ -1015,7 +1064,7 @@ app.post('/api/mp/webhook', async (req, res) => {
         const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
         gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
         persistEventos();
-        await enviarEmailIngressos(pedido, ev.nome);
+        await enviarEmailIngressos(pedido, ev);
       }
     } else if (['rejected','cancelled'].includes(payment.status)) {
       pedido.status = 'recusado';
@@ -1064,7 +1113,7 @@ app.get('/api/admin/overview', auth, adminOnly, (req, res) => {
   const eventosPublicados = EVENTOS.filter(e => e.status === 'publicado').length;
   const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
   const receitaTotal = pedidosPagos.reduce((s, p) => s + p.total, 0);
-  const comissaoTotal = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+  const comissaoTotal = pedidosPagos.reduce((s, p) => s + ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))), 0);
   const produtoresComPix = db.users.filter(u => u.isOrganizador && u.pagamentoInfo?.chavePix).length;
   const adiantamentosPendentes = ADIANTAMENTOS.filter(a => a.status === 'pendente').length;
   res.json({
@@ -1081,7 +1130,7 @@ app.get('/api/admin/eventos', auth, adminOnly, (req, res) => {
     const organizador = db.users.find(u => u.id === ev.organizadorId);
     const pedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
     const receita = pedidosPagos.reduce((s, p) => s + p.total, 0);
-    const comissao = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+    const comissao = pedidosPagos.reduce((s, p) => s + ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))), 0);
     const ingressos = pedidosPagos.reduce((s, p) => s + (p.tickets || []).length, 0);
     return {
       id: ev.id, nome: ev.nome, slug: ev.slug, status: ev.status, dataEvento: ev.dataEvento,
@@ -1137,14 +1186,14 @@ app.get('/api/admin/emails-todos.csv', auth, adminOnly, (req, res) => {
 app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
   const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
   const totalReceita = pedidosPagos.reduce((s, p) => s + p.total, 0);
-  const totalComissao = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+  const totalComissao = pedidosPagos.reduce((s, p) => s + ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))), 0);
 
   // Por evento
   const porEventoMap = {};
   pedidosPagos.forEach(p => {
     if (!porEventoMap[p.eventoId]) porEventoMap[p.eventoId] = { receita: 0, comissao: 0, pedidos: 0 };
     porEventoMap[p.eventoId].receita += p.total;
-    porEventoMap[p.eventoId].comissao += (p.marketplaceFee || 0);
+    porEventoMap[p.eventoId].comissao += ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)));
     porEventoMap[p.eventoId].pedidos += 1;
   });
   const porEvento = Object.entries(porEventoMap).map(([eventoId, d]) => {
@@ -1159,7 +1208,7 @@ app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
     const mes = (p.pagoEm || p.createdAt).slice(0, 7); // YYYY-MM
     if (!porMesMap[mes]) porMesMap[mes] = { receita: 0, comissao: 0, pedidos: 0 };
     porMesMap[mes].receita += p.total;
-    porMesMap[mes].comissao += (p.marketplaceFee || 0);
+    porMesMap[mes].comissao += ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)));
     porMesMap[mes].pedidos += 1;
   });
   const porMes = Object.entries(porMesMap).map(([mes, d]) => ({ mes, ...d })).sort((a, b) => a.mes.localeCompare(b.mes));
@@ -1181,7 +1230,7 @@ app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
   pedidosPagos.forEach(p => {
     const ev = EVENTOS.find(e => e.id === p.eventoId);
     const organizador = db.users.find(u => u.id === ev?.organizadorId);
-    const comissao = p.marketplaceFee || 0;
+    const comissao = (p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0));
     totalBruto += p.total; totalComissao += comissao;
     linhas.push([ev?.nome || '—', organizador?.nomePublico || organizador?.nome || '—', p.id.slice(0, 8), p.comprador?.nome || '', p.total.toFixed(2).replace('.', ','), comissao.toFixed(2).replace('.', ','), new Date(p.createdAt).toLocaleDateString('pt-BR')]);
   });
