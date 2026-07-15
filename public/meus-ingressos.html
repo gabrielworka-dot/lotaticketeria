@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#0F0E0C;--card:#161410;--border:#2A2822;--text:#F0EDE8;--text2:#A09880;--text3:#605848;--p:#C47B14;--p2:#E8961A;--pbg:rgba(196,123,20,.12);--pb:rgba(196,123,20,.3);}
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;width:100%;}
 a{color:inherit;text-decoration:none;}
 .topbar{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
 .logo{font-size:18px;font-weight:900;color:var(--p2);}
@@ -92,6 +92,7 @@ async function init(){
             <div class="ticket-qr" id="qr-${p.pedidoId}-${i}"></div>
             <div><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':''}</div>
           </div>`).join('')}
+        <a href="/api/public/pedido/${p.pedidoId}/pdf" target="_blank" style="display:block;text-align:center;margin-top:10px;padding:10px;background:var(--p2);color:#18160F;font-weight:700;border-radius:8px;text-decoration:none;font-size:13px">📄 Abrir ingresso em PDF</a>
       </div>`).join('');
     d.pedidos.forEach(p => p.tickets.forEach((t,i) => gerarQR(t.codigo, 'qr-'+p.pedidoId+'-'+i)));
   }catch(e){
