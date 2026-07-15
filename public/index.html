@@ -383,7 +383,8 @@ async function carregarEventos(busca){
         +'<div class="event-date-badge">'+dia+'<br>'+mes+'</div></div>'
         +'<div class="event-body"><div class="event-cat">'+esc(ev.categoria)+'</div><div class="event-name">'+esc(ev.nome)+'</div>'
         +'<div class="event-meta">📍 '+esc(ev.cidade||ev.local||'')+(ev.horaEvento?' · '+ev.horaEvento:'')+'</div>'
-        +'<div class="event-price">'+(ev.precoMin>0?'A partir de R$'+ev.precoMin.toFixed(2).replace('.',','):'Gratuito')+'</div></div></div>';
+        +'<div class="event-price">'+(ev.precoMin>0?'A partir de R$'+ev.precoMin.toFixed(2).replace('.',','):'Gratuito')+'</div>'
+        +(ev.precoMin>0?'<div style="font-size:9px;color:var(--text3);margin-top:2px">Pague em até 12x</div>':'')+'</div></div>';
     }).join('');
   }catch(e){el.innerHTML='<div class="empty"><p>Erro ao carregar eventos.</p></div>';}
 }
