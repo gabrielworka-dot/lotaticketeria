@@ -179,7 +179,7 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
     nomePublico: ehProdutor ? nomePublicoInformado : '',
     organizadorSlug: ehProdutor ? gerarSlugUnico(nomePublicoInformado, slugsExistentes) : '',
     cpfCnpj: ehProdutor ? cpfCnpj : '', tipoDocumento: ehProdutor ? tipoDocumento : '',
-    pagamentoInfo: { chavePix: '', tipoChavePix: '', nomeTitular: '' },
+    pagamentoInfo: { chavePix: '', tipoChavePix: '', nomeTitular: '', nomeBanco: '', numeroAgencia: '', tipoConta: '' },
     bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {},
     createdAt: new Date().toISOString()
   };
@@ -258,7 +258,10 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
     user.pagamentoInfo = {
       chavePix: sanitize(pagamentoInfo.chavePix || '', 140),
       tipoChavePix: sanitize(pagamentoInfo.tipoChavePix || '', 20),
-      nomeTitular: sanitize(pagamentoInfo.nomeTitular || '', 100)
+      nomeTitular: sanitize(pagamentoInfo.nomeTitular || '', 100),
+      nomeBanco: sanitize(pagamentoInfo.nomeBanco || '', 80),
+      numeroAgencia: sanitize(pagamentoInfo.numeroAgencia || '', 20),
+      tipoConta: sanitize(pagamentoInfo.tipoConta || '', 20)
     };
   }
   if (novaSenha) {
@@ -293,12 +296,13 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota Ticketeria <onboarding@resend.dev>';
 
 async function enviarEmailGenerico(destinatario, assunto, html) {
-  if (!RESEND_API_KEY || !destinatario) return false;
+  if (!RESEND_API_KEY || !destinatario) { console.error('Resend não configurado ou destinatário ausente ao tentar enviar:', assunto); return false; }
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
       body: JSON.stringify({ from: RESEND_FROM, to: destinatario, subject: assunto, html })
     });
+    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o e-mail:', assunto, r.status, errBody); }
     return r.ok;
   } catch(e) { console.error('Erro e-mail:', e.message); return false; }
 }
@@ -582,6 +586,7 @@ app.post('/api/produtor/adiantamento', auth, organizadorOnly, (req, res) => {
     id: uuidv4(), produtorId: req.user.id, valor,
     chavePix: req.user.pagamentoInfo.chavePix, tipoChavePix: req.user.pagamentoInfo.tipoChavePix,
     nomeTitular: req.user.pagamentoInfo.nomeTitular, cpfCnpj: req.user.cpfCnpj,
+    nomeBanco: req.user.pagamentoInfo.nomeBanco || '', numeroAgencia: req.user.pagamentoInfo.numeroAgencia || '', tipoConta: req.user.pagamentoInfo.tipoConta || '',
     status: 'pendente', solicitadoEm: agora.toISOString(), prazoLimite: prazoLimite.toISOString(),
     pagoEm: null, observacoesAdmin: ''
   };
@@ -1034,50 +1039,94 @@ async function enviarEmailIngressos(pedido, ev) {
     payload.attachments = [{ filename: `ingresso-${(ev.slug || 'lota')}.pdf`, content: pdfBuffer.toString('base64') }];
   } catch (e) { console.error('Erro ao gerar PDF do ingresso:', e.message); }
   try {
-    await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
+    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o envio do e-mail de ingressos:', r.status, errBody); }
   } catch(e) { console.error('Erro e-mail:', e.message); }
 }
 
 // ── WEBHOOK MERCADO PAGO ──
+async function processarPagamentoAprovado(pedido, paymentId) {
+  if (pedido.status === 'pago') return;
+  pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
+  pedido.mpPaymentId = String(paymentId);
+  const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+  if (ev) {
+    const cupomObj = pedido.cupomUsado ? ev.cupons.find(c => c.codigo === pedido.cupomUsado) : null;
+    const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
+    gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
+    persistEventos();
+    await enviarEmailIngressos(pedido, ev);
+    pedido.emailEnviado = true;
+  }
+  persistPedidos();
+}
+
 app.post('/api/mp/webhook', async (req, res) => {
   try {
-    const paymentId = req.body?.data?.id || req.query['data.id'];
-    const type = req.body?.type || req.query.type;
-    if (type !== 'payment' || !paymentId) return res.sendStatus(200);
+    // O Mercado Pago pode notificar em dois formatos diferentes:
+    // novo:  type=payment  & data.id=X   (no corpo JSON ou na query)
+    // antigo (IPN): topic=payment & id=X (só na query)
+    const paymentId = req.body?.data?.id || req.query['data.id'] || (req.query.topic === 'payment' ? req.query.id : null);
+    const isPaymentNotif = req.body?.type === 'payment' || req.query.type === 'payment' || req.query.topic === 'payment';
+    if (!isPaymentNotif || !paymentId) return res.sendStatus(200);
     const { ped: pedidoId } = req.query;
-    if (!pedidoId || !MP_PLATFORM_TOKEN) return res.sendStatus(200);
+    if (!MP_PLATFORM_TOKEN) return res.sendStatus(200);
 
     const payResp = await fetch(`${MP_API}/v1/payments/${paymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
     const payment = await payResp.json();
     if (!payResp.ok) return res.sendStatus(200);
 
-    const pedido = PEDIDOS.find(p => p.id === pedidoId);
+    // Se o pedidoId não veio na URL (por algum motivo), localizamos pelo external_reference do próprio pagamento
+    const pedido = PEDIDOS.find(p => p.id === (pedidoId || payment.external_reference));
     if (!pedido) return res.sendStatus(200);
     if (pedido.mpPaymentId === String(paymentId) && pedido.status === 'pago') return res.sendStatus(200);
-    pedido.mpPaymentId = String(paymentId);
 
-    if (payment.status === 'approved' && pedido.status !== 'pago') {
-      pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
-      const ev = EVENTOS.find(e => e.id === pedido.eventoId);
-      if (ev) {
-        const cupomObj = pedido.cupomUsado ? ev.cupons.find(c => c.codigo === pedido.cupomUsado) : null;
-        const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
-        gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
-        persistEventos();
-        await enviarEmailIngressos(pedido, ev);
-      }
+    if (payment.status === 'approved') {
+      await processarPagamentoAprovado(pedido, paymentId);
     } else if (['rejected','cancelled'].includes(payment.status)) {
+      pedido.mpPaymentId = String(paymentId);
       pedido.status = 'recusado';
+      persistPedidos();
     }
-    persistPedidos();
     res.sendStatus(200);
-  } catch(e) { res.sendStatus(200); }
+  } catch(e) { console.error('Erro no webhook do Mercado Pago:', e.message); res.sendStatus(200); }
 });
 
-app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), (req, res) => {
+app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) => {
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  // Rede de segurança: se o webhook do Mercado Pago não chegou por algum motivo,
+  // confirmamos ativamente o status do pagamento aqui quando o comprador está aguardando confirmação.
+  if (pedido.status === 'pendente' && pedido.mpPreferenceId && MP_PLATFORM_TOKEN) {
+    try {
+      const searchResp = await fetch(`${MP_API}/v1/payments/search?external_reference=${pedido.id}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+      const searchData = await searchResp.json();
+      const pagamentoAprovado = (searchData.results || []).find(p => p.status === 'approved');
+      if (pagamentoAprovado) await processarPagamentoAprovado(pedido, pagamentoAprovado.id);
+      else {
+        const pagamentoRecusado = (searchData.results || []).find(p => ['rejected','cancelled'].includes(p.status));
+        if (pagamentoRecusado) { pedido.status = 'recusado'; pedido.mpPaymentId = String(pagamentoRecusado.id); persistPedidos(); }
+      }
+    } catch(e) { console.error('Erro ao verificar pagamento:', e.message); }
+  }
   res.json({ status: pedido.status, total: pedido.total, tickets: pedido.tickets || [], comprador: { nome: pedido.comprador.nome } });
+});
+
+// Abre o ingresso como PDF dentro do navegador — mais fácil de mostrar no scanner da portaria
+app.get('/api/public/pedido/:pedidoId/pdf', async (req, res) => {
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
+  if (!pedido) return res.status(404).send('Pedido não encontrado.');
+  if (pedido.status !== 'pago') return res.status(400).send('Este pedido ainda não foi confirmado.');
+  const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+  if (!ev) return res.status(404).send('Evento não encontrado.');
+  try {
+    const pdfBuffer = await gerarPdfIngressos(pedido, ev);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="ingresso-${ev.slug || 'lota'}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    res.status(500).send('Erro ao gerar o PDF do ingresso.');
+  }
 });
 
 // Rota pública amigável /e/:slug e /o/:slug
