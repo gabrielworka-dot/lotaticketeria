@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirmar E-mail — Lota Ticketeria</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:#0F0E0C;color:#F0EDE8;font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;}
+body{display:flex;align-items:center;justify-content:center;padding:20px;}
+.card{background:#161410;border:1px solid #2A2822;border-radius:16px;padding:32px;width:100%;max-width:400px;text-align:center;}
+.logo{font-size:20px;font-weight:900;color:#E8961A;margin-bottom:20px;}
+.ic{font-size:44px;margin-bottom:14px;}
+h2{font-size:18px;font-weight:800;margin-bottom:8px;}
+p{font-size:13px;color:#A09880;line-height:1.6;margin-bottom:20px;}
+a.btn{display:inline-block;padding:12px 24px;background:#E8961A;color:#18160F;font-weight:800;border-radius:9px;text-decoration:none;font-size:14px;}
+.spinner{width:32px;height:32px;border:3px solid rgba(232,150,26,.2);border-top-color:#E8961A;border-radius:50%;animation:spin 1s linear infinite;margin:20px auto;}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🎟️ Lota Ticketeria</div>
+  <div id="content"><div class="spinner"></div><p>Confirmando seu e-mail...</p></div>
+</div>
+<script>
+const token=new URLSearchParams(location.search).get('token');
+async function confirmar(){
+  const el=document.getElementById('content');
+  if(!token){
+    el.innerHTML='<div class="ic">⚠️</div><h2>Link inválido</h2><p>O link de confirmação está incompleto ou expirado.</p><a href="/" class="btn">Voltar ao início</a>';
+    return;
+  }
+  try{
+    const r=await fetch('/api/auth/verificar-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Erro ao confirmar.');
+    el.innerHTML='<div class="ic">✅</div><h2>E-mail confirmado!</h2><p>Sua conta foi verificada com sucesso.</p><a href="/" class="btn">Ir para a plataforma →</a>';
+  }catch(e){
+    el.innerHTML='<div class="ic">❌</div><h2>Não foi possível confirmar</h2><p>'+e.message+'</p><a href="/" class="btn">Voltar ao início</a>';
+  }
+}
+confirmar();
+</script>
+</body>
+</html>
