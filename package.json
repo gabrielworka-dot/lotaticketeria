@@ -3,13 +3,19 @@
   "version": "1.0.0",
   "description": "Lota Ticketeria — Plataforma de ingressos e comunidade",
   "main": "src/server.js",
-  "scripts": { "start": "node src/server.js" },
+  "scripts": {
+    "start": "node src/server.js"
+  },
   "dependencies": {
-    "express": "^4.18.2",
     "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^2.7.0",
+    "pdfkit": "^0.15.2",
+    "qrcode": "^1.5.4",
     "uuid": "^9.0.0"
   },
-  "engines": { "node": ">=18.0.0" }
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
