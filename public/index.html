@@ -32,8 +32,17 @@ a{color:inherit;text-decoration:none;}
 .bo{background:transparent;border-color:var(--border2);color:var(--text2);}
 .bo:hover{border-color:var(--p2);color:var(--p2);}
 .btn-sm{padding:6px 12px;font-size:12px;}
-.user-chip{display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px;border-radius:20px;transition:background .2s;}
+.user-chip{display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px;border-radius:20px;transition:background .2s;position:relative;}
 .user-chip:hover{background:var(--bg3);}
+.user-menu{position:absolute;top:calc(100% + 8px);right:0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.5);min-width:200px;display:none;z-index:100;overflow:hidden;}
+.user-menu.show{display:block;}
+.user-menu-hdr{padding:14px 16px;border-bottom:1px solid var(--border);}
+.user-menu-nome{font-size:13px;font-weight:700;color:var(--text);}
+.user-menu-email{font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.user-menu-item{display:flex;align-items:center;gap:9px;padding:11px 16px;font-size:13px;color:var(--text2);cursor:pointer;transition:background .2s;}
+.user-menu-item:hover{background:var(--bg3);color:var(--text);}
+.user-menu-item.danger{color:#F87171;border-top:1px solid var(--border);}
+.user-menu-item.danger:hover{background:rgba(239,68,68,.08);}
 .av{width:30px;height:30px;border-radius:50%;background:var(--p);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#18160F;}
 
 /* HERO */
@@ -274,10 +283,29 @@ function initLoggedIn(){
   el.innerHTML=(CU.isAdmin?'<button class="btn bo btn-sm" onclick="location.href=\'/admin.html\'">⚙️ Administração</button>':'')
     +'<button class="btn bo btn-sm" onclick="location.href=\'/meus-ingressos.html\'">🎫 Meus Ingressos</button>'
     +'<button class="btn bo btn-sm" onclick="location.href=\'/painel.html\'">'+(CU.isOrganizador?'🎛️ Painel':'✨ Criar evento')+'</button>'
-    +'<div class="user-chip" onclick="location.href=\'/painel.html\'"><div class="av">'+esc(CU.nome.charAt(0).toUpperCase())+'</div><span class="txt">'+esc(CU.nome.split(' ')[0])+'</span></div>';
+    +'<div class="user-chip" id="userChip" onclick="toggleUserMenu(event)">'
+    +'<div class="av">'+esc(CU.nome.charAt(0).toUpperCase())+'</div><span class="txt">'+esc(CU.nome.split(' ')[0])+'</span>'
+    +'<div class="user-menu" id="userMenu">'
+    +'<div class="user-menu-hdr"><div class="user-menu-nome">'+esc(CU.nome)+'</div><div class="user-menu-email">'+esc(CU.email)+'</div></div>'
+    +'<div class="user-menu-item" onclick="location.href=\'/meus-ingressos.html\'">🎫 Meus Ingressos</div>'
+    +(CU.isOrganizador?'<div class="user-menu-item" onclick="location.href=\'/painel.html\'">🎛️ Meu Painel</div>':'<div class="user-menu-item" onclick="location.href=\'/painel.html\'">✨ Quero vender ingressos</div>')
+    +(CU.isAdmin?'<div class="user-menu-item" onclick="location.href=\'/admin.html\'">⚙️ Administração</div>':'')
+    +'<div class="user-menu-item danger" onclick="doLogout()">🚪 Sair da conta</div>'
+    +'</div></div>';
   document.getElementById('feedSection').style.display='block';
   loadFeed();
 }
+function toggleUserMenu(ev){
+  ev.stopPropagation();
+  document.getElementById('userMenu').classList.toggle('show');
+}
+document.addEventListener('click', function(ev){
+  const menu=document.getElementById('userMenu');
+  const chip=document.getElementById('userChip');
+  if(menu && menu.classList.contains('show') && chip && !chip.contains(ev.target)){
+    menu.classList.remove('show');
+  }
+});
 
 async function enviarRecuperacao(){
   const email=document.getElementById('esqueciEmail').value.trim();
