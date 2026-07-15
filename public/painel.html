@@ -17,7 +17,7 @@
   --sh:0 4px 16px rgba(0,0,0,.3);--shl:0 12px 32px rgba(0,0,0,.5);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;overflow-x:hidden;width:100%;}
 body{display:flex;overflow:hidden;}
 a{color:inherit;}
 
@@ -970,6 +970,11 @@ function carregarPerfil(){
         <div class="fg"><label>Chave PIX</label><input class="fi" id="pfChavePix" value="${esc(CU.pagamentoInfo?.chavePix||'')}" placeholder="Sua chave PIX"></div>
       </div>
       <div class="fg"><label>Nome do Titular da Conta</label><input class="fi" id="pfTitular" value="${esc(CU.pagamentoInfo?.nomeTitular||'')}" placeholder="Nome completo ou razão social"></div>
+      <div class="fg2">
+        <div class="fg"><label>Banco</label><input class="fi" id="pfBanco" value="${esc(CU.pagamentoInfo?.nomeBanco||'')}" placeholder="Ex: Nubank, Banco do Brasil..."></div>
+        <div class="fg"><label>Número da Agência</label><input class="fi" id="pfAgencia" value="${esc(CU.pagamentoInfo?.numeroAgencia||'')}" placeholder="Ex: 0001"></div>
+      </div>
+      <div class="fg"><label>Tipo de Conta</label><select class="fs" id="pfTipoConta"><option value="corrente" ${CU.pagamentoInfo?.tipoConta==='corrente'?'selected':''}>Conta Corrente</option><option value="poupanca" ${CU.pagamentoInfo?.tipoConta==='poupanca'?'selected':''}>Conta Poupança</option></select></div>
     </div>
 
     <button class="btn bp" onclick="salvarPerfil()">💾 Salvar</button>
@@ -981,7 +986,7 @@ async function salvarPerfil(){
     const d=await api('PATCH','/api/auth/perfil',{
       nome:gv('pfNome'),bio:gv('pfBio'),avatarUrl:gv('pfAvatar'),bannerUrl:gv('pfBanner'),redesSociais:{instagram:gv('pfInsta')},
       tipoDocumento:gv('pfTipoDoc'),cpfCnpj:gv('pfCpfCnpj'),
-      pagamentoInfo:{tipoChavePix:gv('pfTipoPix'),chavePix:gv('pfChavePix'),nomeTitular:gv('pfTitular')}
+      pagamentoInfo:{tipoChavePix:gv('pfTipoPix'),chavePix:gv('pfChavePix'),nomeTitular:gv('pfTitular'),nomeBanco:gv('pfBanco'),numeroAgencia:gv('pfAgencia'),tipoConta:gv('pfTipoConta')}
     });
     CU=d.user; toast('Perfil salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
