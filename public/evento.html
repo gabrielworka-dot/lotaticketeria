@@ -157,6 +157,7 @@ function renderEvento(){
       <div class="lote-info">
         <div class="lote-nome">${esc(l.nome)}</div>
         <div class="lote-preco ${l.cortesia?'gratis':''}">${l.cortesia?'Cortesia':'R$ '+l.preco.toFixed(2).replace('.',',')}</div>
+        ${!l.cortesia?'<div style="font-size:10px;color:#605848;margin-top:1px">Pague em até 12x</div>':''}
         <div class="lote-disp">${l.disponivel} disponíveis</div>
       </div>
       <div class="qtd-ctrl">
@@ -178,6 +179,7 @@ function renderEvento(){
           <span>📅 ${new Date(EVENTO.dataEvento).toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'})}${EVENTO.horaEvento?' às '+EVENTO.horaEvento:''}</span>
           ${EVENTO.local?'<span>📍 '+esc(EVENTO.local)+(EVENTO.cidade?', '+esc(EVENTO.cidade):'')+'</span>':''}
         </div>
+        <div style="font-size:10px;color:#605848;margin-top:4px">Pague em até 12x</div>
         ${EVENTO.organizador?.nome?'<div class="hero-organizador"><span>Por <a href="/o/'+esc(EVENTO.organizador.slug)+'" style="color:#E8961A;font-weight:700">'+esc(EVENTO.organizador.nome)+'</a></span></div>':''}
         ${EVENTO.descricao?'<div class="hero-desc">'+esc(EVENTO.descricao)+'</div>':''}
         ${EVENTO.videoYoutubeId?'<div style="margin-top:16px;border-radius:10px;overflow:hidden;aspect-ratio:16/9"><iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+EVENTO.videoYoutubeId+'" title="Vídeo do evento" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;height:100%;display:block"></iframe></div>':''}
@@ -198,6 +200,7 @@ function renderEvento(){
       </div>
       <div class="total-row"><span>Subtotal</span><span id="subtotalVal">R$ 0,00</span></div>
       <div class="total-row" id="descontoRow" style="display:none"><span>Desconto</span><span id="descontoVal" style="color:#4ADE80">- R$ 0,00</span></div>
+      <div class="total-row" id="taxaRow" style="display:none"><span>Taxa administrativa</span><span id="taxaVal">R$ 0,00</span></div>
       <div class="total-row final"><span>Total</span><span class="total-val" id="totalVal">R$ 0,00</span></div>
     </div>
     <div class="card" id="dadosCard" style="display:none">
@@ -274,12 +277,18 @@ function atualizarTotal(){
     desconto=cupomAplicado.tipo==='fixo'?cupomAplicado.valor:Math.round(subtotal*(cupomAplicado.valor/100)*100)/100;
     desconto=Math.min(desconto,subtotal);
   }
-  const total=Math.max(0,subtotal-desconto);
+  const valorIngressos=Math.max(0,subtotal-desconto);
+  const feePercent=EVENTO?.feePercent||10;
+  const taxa=valorIngressos>0?Math.round(valorIngressos*(feePercent/100)*100)/100:0;
+  const total=Math.round((valorIngressos+taxa)*100)/100;
   document.getElementById('subtotalVal').textContent='R$ '+subtotal.toFixed(2).replace('.',',');
   document.getElementById('totalVal').textContent='R$ '+total.toFixed(2).replace('.',',');
   const dRow=document.getElementById('descontoRow');
   if(desconto>0){ dRow.style.display='flex'; document.getElementById('descontoVal').textContent='- R$ '+desconto.toFixed(2).replace('.',','); }
   else dRow.style.display='none';
+  const tRow=document.getElementById('taxaRow');
+  if(taxa>0){ tRow.style.display='flex'; document.getElementById('taxaVal').textContent='R$ '+taxa.toFixed(2).replace('.',','); }
+  else tRow.style.display='none';
   document.getElementById('dadosCard').style.display=temItem?'block':'none';
 }
 
