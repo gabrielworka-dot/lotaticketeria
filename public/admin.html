@@ -17,7 +17,7 @@
   --sh:0 4px 16px rgba(0,0,0,.3);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;overflow-x:hidden;width:100%;}
 body{display:flex;overflow:hidden;}
 a{color:inherit;}
 
@@ -301,7 +301,7 @@ async function carregarAdiantamentos(){
       const vencido=comAcoes && prazo<new Date();
       return '<tr><td>'+esc(a.produtorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(a.produtorEmail)+'</span></td>'
         +'<td style="font-weight:700">R$'+a.valor.toFixed(2)+'</td>'
-        +'<td><div style="font-size:11px">'+(tipoChaveLabel[a.tipoChavePix]||a.tipoChavePix)+': <strong>'+esc(a.chavePix)+'</strong></div><div style="font-size:10px;color:var(--text3)">Titular: '+esc(a.nomeTitular)+' · Doc: '+esc(a.cpfCnpj)+'</div></td>'
+        +'<td><div style="font-size:11px">'+(tipoChaveLabel[a.tipoChavePix]||a.tipoChavePix)+': <strong>'+esc(a.chavePix)+'</strong></div><div style="font-size:10px;color:var(--text3)">Titular: '+esc(a.nomeTitular)+' · Doc: '+esc(a.cpfCnpj)+'</div><div style="font-size:10px;color:var(--text3)">'+(a.nomeBanco?esc(a.nomeBanco)+' · ':'')+(a.numeroAgencia?'Ag. '+esc(a.numeroAgencia)+' · ':'')+(a.tipoConta?(a.tipoConta==='poupanca'?'Poupança':'Corrente'):'')+'</div></td>'
         +'<td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td>'
         +'<td style="color:'+(vencido?'var(--red)':'var(--text2)')+'">'+new Date(a.prazoLimite).toLocaleDateString('pt-BR')+(vencido?' ⚠️':'')+'</td>'
         +'<td>'+(comAcoes?'<div style="display:flex;gap:6px"><button class="btn bgreen btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'pago\')">✅ Marcar Pago</button><button class="btn bdng btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'recusado\')">Recusar</button></div>':(a.status==='pago'?'<span class="st-on">✅ Pago</span>':'<span class="st-off">❌ Recusado</span>'))+'</td></tr>';
