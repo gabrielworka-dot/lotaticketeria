@@ -78,6 +78,12 @@ function gerarCodigoTicket() {
 function gerarCodigoPromoter() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
+// Extrai o ID de um vídeo do YouTube a partir de qualquer formato de link comum
+function extrairYoutubeId(url) {
+  if (!url || typeof url !== 'string') return '';
+  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : '';
+}
 
 // ── Database (usuários) ───────────────────────────────────
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -111,10 +117,12 @@ let EVENTOS  = loadColecao('eventos');
 let PEDIDOS  = loadColecao('pedidos');
 let POSTS    = loadColecao('posts');
 let FOLLOWS  = loadColecao('follows');
+let ADIANTAMENTOS = loadColecao('adiantamentos');
 function persistEventos() { saveColecao('eventos', EVENTOS); }
 function persistPedidos() { saveColecao('pedidos', PEDIDOS); }
 function persistPosts()   { saveColecao('posts', POSTS); }
 function persistFollows() { saveColecao('follows', FOLLOWS); }
+function persistAdiantamentos() { saveColecao('adiantamentos', ADIANTAMENTOS); }
 
 // ── Auth helpers ──────────────────────────────────────────
 function auth(req, res, next) {
@@ -137,7 +145,7 @@ function adminOnly(req, res, next) {
   if (!req.user.isAdmin) return res.status(403).json({ error: 'Acesso restrito.' });
   next();
 }
-function safe(u) { const { senha, mpAccount, ...r } = u; return { ...r, mpConectado: !!mpAccount?.accessToken }; }
+function safe(u) { const { senha, ...r } = u; return r; }
 function eventoDoUsuario(eventoId, userId) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev || ev.organizadorId !== userId) return null;
@@ -147,31 +155,52 @@ function eventoDoUsuario(eventoId, userId) {
 // ════════════════════════════════════════════════════════
 // AUTH
 // ════════════════════════════════════════════════════════
-app.post('/api/auth/registro', rateLimit(60000, 10), (req, res) => {
+app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   const nome = sanitize(req.body.nome || '', 100);
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   const senha = (req.body.senha || '').slice(0, 200);
   const ehProdutor = req.body.tipo === 'produtor';
   const nomePublicoInformado = sanitize(req.body.nomePublico || '', 100);
+  const cpfCnpj = sanitize(req.body.cpfCnpj || '', 20).replace(/[^\d]/g, '');
+  const tipoDocumento = req.body.tipoDocumento === 'cnpj' ? 'cnpj' : 'cpf';
   if (!nome || !email || !senha) return res.status(400).json({ error: 'Preencha todos os campos.' });
   if (senha.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-mail inválido.' });
   if (ehProdutor && !nomePublicoInformado) return res.status(400).json({ error: 'Nome público obrigatório para produtores.' });
+  if (ehProdutor && !cpfCnpj) return res.status(400).json({ error: 'CPF ou CNPJ obrigatório para produtores.' });
   if (db.users.find(u => u.email === email)) return res.status(400).json({ error: 'E-mail já cadastrado.' });
   const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
   const user = {
     id: uuidv4(), nome, email, senha: bcrypt.hashSync(senha, 12),
-    isAdmin: false, ativo: true,
+    isAdmin: false, ativo: true, emailVerificado: false,
     isOrganizador: ehProdutor,
     nomePublico: ehProdutor ? nomePublicoInformado : '',
     organizadorSlug: ehProdutor ? gerarSlugUnico(nomePublicoInformado, slugsExistentes) : '',
+    cpfCnpj: ehProdutor ? cpfCnpj : '', tipoDocumento: ehProdutor ? tipoDocumento : '',
+    pagamentoInfo: { chavePix: '', tipoChavePix: '', nomeTitular: '' },
     bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {},
     createdAt: new Date().toISOString()
   };
   db.users.push(user); saveDB(db);
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
+  const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
+  enviarEmailVerificacao(user, proto, host).catch(() => {});
   res.status(201).json({ token, user: safe(user) });
 });
+
+async function enviarEmailVerificacao(user, proto, host) {
+  const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
+  const link = `${proto}://${host}/verificar-email.html?token=${verifyToken}`;
+  const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">🎟️ Lota Ticketeria</div>
+    <h2 style="font-size:18px;margin-bottom:12px;">Confirme seu e-mail</h2>
+    <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Clique no botão abaixo para confirmar seu cadastro. O link expira em 3 dias.</p>
+    <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Confirmar e-mail →</a>
+    <p style="font-size:11px;color:#605848;margin-top:24px;">Se não foi você quem se cadastrou, ignore este e-mail.</p>
+    </div></div>`;
+  return enviarEmailGenerico(user.email, '✅ Confirme seu e-mail — Lota Ticketeria', html);
+}
+
 
 app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
   const email = sanitize(req.body.email || '', 150).toLowerCase();
@@ -193,14 +222,43 @@ app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: safe(req.user) }));
 
+app.post('/api/auth/verificar-email', rateLimit(60000, 10), (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token ausente.' });
+  let dec;
+  try { dec = jwt.verify(token, JWT_SECRET); } catch(e) { return res.status(400).json({ error: 'Link inválido ou expirado.' }); }
+  if (dec.tipo !== 'verificacao') return res.status(400).json({ error: 'Link inválido.' });
+  const user = db.users.find(u => u.id === dec.uid);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  user.emailVerificado = true;
+  saveDB(db);
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/reenviar-verificacao', auth, rateLimit(60000, 3), async (req, res) => {
+  if (req.user.emailVerificado) return res.json({ ok: true, jaVerificado: true });
+  const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
+  await enviarEmailVerificacao(req.user, proto, host).catch(() => {});
+  res.json({ ok: true });
+});
+
 app.patch('/api/auth/perfil', auth, (req, res) => {
   const user = db.users.find(u => u.id === req.user.id);
-  const { nome, bio, avatarUrl, bannerUrl, redesSociais, senhaAtual, novaSenha } = req.body;
+  const { nome, bio, avatarUrl, bannerUrl, redesSociais, senhaAtual, novaSenha, cpfCnpj, tipoDocumento, pagamentoInfo } = req.body;
   if (nome) user.nome = sanitize(nome, 100);
   if (bio !== undefined) user.bio = sanitize(bio, 500);
   if (avatarUrl !== undefined) user.avatarUrl = sanitizeImagem(avatarUrl);
   if (bannerUrl !== undefined) user.bannerUrl = sanitizeImagem(bannerUrl);
   if (redesSociais) user.redesSociais = { instagram: sanitize(redesSociais.instagram||'',60), tiktok: sanitize(redesSociais.tiktok||'',60), site: sanitize(redesSociais.site||'',200) };
+  if (cpfCnpj !== undefined) user.cpfCnpj = sanitize(cpfCnpj, 20).replace(/[^\d]/g, '');
+  if (tipoDocumento !== undefined) user.tipoDocumento = tipoDocumento === 'cnpj' ? 'cnpj' : 'cpf';
+  if (pagamentoInfo) {
+    user.pagamentoInfo = {
+      chavePix: sanitize(pagamentoInfo.chavePix || '', 140),
+      tipoChavePix: sanitize(pagamentoInfo.tipoChavePix || '', 20),
+      nomeTitular: sanitize(pagamentoInfo.nomeTitular || '', 100)
+    };
+  }
   if (novaSenha) {
     if (!senhaAtual || !bcrypt.compareSync(senhaAtual, user.senha)) return res.status(401).json({ error: 'Senha atual incorreta.' });
     if (novaSenha.length < 6) return res.status(400).json({ error: 'Nova senha muito curta.' });
@@ -227,8 +285,7 @@ app.post('/api/auth/tornar-organizador', auth, (req, res) => {
 // ════════════════════════════════════════════════════════
 // MERCADO PAGO OAUTH (marketplace/split — mesmo padrão validado no Lota)
 // ════════════════════════════════════════════════════════
-const MP_CLIENT_ID     = process.env.MP_CLIENT_ID || '';
-const MP_CLIENT_SECRET = process.env.MP_CLIENT_SECRET || '';
+// (MP_CLIENT_ID/MP_CLIENT_SECRET não são mais necessários — pagamento único via MP_ACCESS_TOKEN)
 const MP_API = 'https://api.mercadopago.com';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota Ticketeria <onboarding@resend.dev>';
@@ -293,50 +350,10 @@ app.get('/api/meus-ingressos', auth, (req, res) => {
   res.json({ pedidos: comEvento });
 });
 
-app.get('/api/mp/oauth/connect', auth, (req, res) => {
-  if (!MP_CLIENT_ID) return res.status(400).json({ error: 'Marketplace do Mercado Pago não configurado (MP_CLIENT_ID ausente).' });
-  const state = jwt.sign({ uid: req.user.id }, JWT_SECRET, { expiresIn: '15m' });
-  const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
-  const redirectUri = `${proto}://${host}/api/mp/oauth/callback`;
-  const url = `https://auth.mercadopago.com/authorization?client_id=${MP_CLIENT_ID}&response_type=code&platform_id=mp&state=${encodeURIComponent(state)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
-  res.json({ url });
-});
-
-app.get('/api/mp/oauth/callback', async (req, res) => {
-  try {
-    const { code, state } = req.query;
-    if (!code || !state) return res.status(400).send('Parâmetros inválidos.');
-    let uid; try { uid = jwt.verify(state, JWT_SECRET).uid; } catch(e) { return res.status(400).send('Sessão expirada, tente novamente.'); }
-    const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
-    const redirectUri = `${proto}://${host}/api/mp/oauth/callback`;
-    const tokenResp = await fetch(`${MP_API}/oauth/token`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: MP_CLIENT_ID, client_secret: MP_CLIENT_SECRET, grant_type: 'authorization_code', code, redirect_uri: redirectUri })
-    });
-    const tokenData = await tokenResp.json();
-    if (!tokenResp.ok) return res.status(400).send('Erro ao conectar: ' + (tokenData.message || 'tente novamente'));
-    const user = db.users.find(u => u.id === uid);
-    if (user) {
-      user.mpAccount = {
-        accessToken: tokenData.access_token, refreshToken: tokenData.refresh_token,
-        mpUserId: tokenData.user_id, testMode: tokenData.live_mode === false,
-        connectedAt: new Date().toISOString()
-      };
-      saveDB(db);
-    }
-    res.send(`<html><body style="background:#0F0E0C;color:#F0EDE8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><div style="font-size:40px;margin-bottom:12px">✅</div><h2>Conta Mercado Pago conectada!</h2><p style="color:#A09880">Pode fechar esta janela e voltar à Lota Ticketeria.</p></div></body></html>`);
-  } catch(e) { res.status(500).send('Erro: ' + e.message); }
-});
-
-app.get('/api/mp/status', auth, (req, res) => {
-  const acc = req.user.mpAccount;
-  res.json({ connected: !!acc?.accessToken, mpUserId: acc?.mpUserId || null, testMode: !!acc?.testMode, feePercent: db.marketplaceFeePercent });
-});
-app.post('/api/mp/disconnect', auth, (req, res) => {
-  const user = db.users.find(u => u.id === req.user.id);
-  if (user) { delete user.mpAccount; saveDB(db); }
-  res.json({ ok: true });
-});
+// Pagamentos agora são recebidos numa ÚNICA conta da plataforma (não mais OAuth por produtor).
+// O valor devido a cada produtor é calculado internamente e pago por PIX manual via pedido de adiantamento.
+const MP_PLATFORM_TOKEN = process.env.MP_ACCESS_TOKEN || '';
+function isTestToken(token) { return /^TEST-/i.test(token || ''); }
 
 // ════════════════════════════════════════════════════════
 // EVENTOS (organizador)
@@ -346,7 +363,7 @@ app.get('/api/meus-eventos', auth, organizadorOnly, (req, res) => {
 });
 
 app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
-  const { nome, descricao, dataEvento, horaEvento, local, cidade, categoria, imagemCapa } = req.body;
+  const { nome, descricao, dataEvento, horaEvento, local, cidade, categoria, imagemCapa, videoUrl } = req.body;
   if (!nome || !dataEvento) return res.status(400).json({ error: 'Nome e data obrigatórios.' });
   const slugsExistentes = Object.keys(db.ticketSlugs);
   const slug = gerarSlugUnico(nome, slugsExistentes);
@@ -357,11 +374,14 @@ app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
     local: sanitize(local || '', 150), cidade: sanitize(cidade || '', 80),
     categoria: sanitize(categoria || 'Festas e shows', 40),
     imagemCapa: sanitizeImagem(imagemCapa || ''),
+    videoUrl: extrairYoutubeId(videoUrl || '') ? sanitize(videoUrl, 200) : '',
     status: 'rascunho',
     cores: { primaria: '#C47B14', fundo: '#18160F' },
     lotes: [], cupons: [], promoters: [],
     pixels: { metaPixelId: '', tiktokPixelId: '', gaMeasurementId: '', googleAdsConversionId: '', googleAdsConversionLabel: '' },
     politicaCancelamento: 'sem-cancelamento',
+    mapaAssentos: { ativo: false, palco: 'PALCO', setores: [] },
+    assentosOcupados: [],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
   };
   EVENTOS.push(evento);
@@ -382,7 +402,29 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   const campos = ['nome','descricao','dataEvento','horaEvento','local','cidade','categoria','politicaCancelamento'];
   campos.forEach(c => { if (req.body[c] !== undefined) ev[c] = typeof req.body[c] === 'string' ? sanitize(req.body[c], c === 'descricao' ? 2000 : 150) : req.body[c]; });
   if (req.body.imagemCapa !== undefined) ev.imagemCapa = sanitizeImagem(req.body.imagemCapa);
+  if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
+  ev.updatedAt = new Date().toISOString();
+  persistEventos();
+  res.json({ evento: ev });
+});
+
+// ── MAPA DE ASSENTOS ──
+app.patch('/api/eventos/:id/mapa-assentos', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { ativo, palco, setores } = req.body;
+  if (!ev.mapaAssentos) ev.mapaAssentos = { ativo: false, palco: 'PALCO', setores: [] };
+  if (ativo !== undefined) ev.mapaAssentos.ativo = !!ativo;
+  if (palco !== undefined) ev.mapaAssentos.palco = sanitize(palco, 40);
+  if (Array.isArray(setores)) {
+    ev.mapaAssentos.setores = setores.map(s => ({
+      id: s.id || uuidv4(), nome: sanitize(s.nome || 'Setor', 40), loteId: s.loteId || '',
+      linhas: Math.max(1, Math.min(30, parseInt(s.linhas) || 1)),
+      assentosPorLinha: Math.max(1, Math.min(40, parseInt(s.assentosPorLinha) || 1)),
+      cor: sanitize(s.cor || '#C47B14', 10)
+    }));
+  }
   ev.updatedAt = new Date().toISOString();
   persistEventos();
   res.json({ evento: ev });
@@ -391,7 +433,6 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
 app.patch('/api/eventos/:id/publicar', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
-  if (req.body.publicar && !req.user.mpAccount?.accessToken) return res.status(400).json({ error: 'Conecte sua conta Mercado Pago antes de publicar.' });
   ev.status = req.body.publicar ? 'publicado' : 'rascunho';
   ev.updatedAt = new Date().toISOString();
   persistEventos();
@@ -504,6 +545,71 @@ app.patch('/api/eventos/:id/pixels', auth, (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════
+// SALDO E ADIANTAMENTO (repasse manual via PIX pelo administrador)
+// ════════════════════════════════════════════════════════
+function calcularSaldoProdutor(userId) {
+  const eventosDoProdutor = EVENTOS.filter(e => e.organizadorId === userId).map(e => e.id);
+  const pedidosPagos = PEDIDOS.filter(p => eventosDoProdutor.includes(p.eventoId) && p.status === 'pago');
+  const saldoBruto = pedidosPagos.reduce((s, p) => s + (p.total - (p.marketplaceFee || 0)), 0);
+  const meusAdiantamentos = ADIANTAMENTOS.filter(a => a.produtorId === userId);
+  const totalJaPago = meusAdiantamentos.filter(a => a.status === 'pago').reduce((s, a) => s + a.valor, 0);
+  const totalPendente = meusAdiantamentos.filter(a => a.status === 'pendente').reduce((s, a) => s + a.valor, 0);
+  const saldoDisponivel = Math.max(0, Math.round((saldoBruto - totalJaPago - totalPendente) * 100) / 100);
+  return { saldoBruto, totalJaPago, totalPendente, saldoDisponivel };
+}
+
+app.get('/api/produtor/saldo', auth, organizadorOnly, (req, res) => {
+  res.json(calcularSaldoProdutor(req.user.id));
+});
+
+app.get('/api/produtor/adiantamentos', auth, organizadorOnly, (req, res) => {
+  const lista = ADIANTAMENTOS.filter(a => a.produtorId === req.user.id).sort((a, b) => new Date(b.solicitadoEm) - new Date(a.solicitadoEm));
+  res.json({ adiantamentos: lista });
+});
+
+app.post('/api/produtor/adiantamento', auth, organizadorOnly, (req, res) => {
+  const valor = Math.round((parseFloat(req.body.valor) || 0) * 100) / 100;
+  if (valor <= 0) return res.status(400).json({ error: 'Informe um valor válido.' });
+  if (!req.user.pagamentoInfo?.chavePix) return res.status(400).json({ error: 'Cadastre sua chave PIX no perfil antes de solicitar um adiantamento.' });
+  if (!req.user.cpfCnpj) return res.status(400).json({ error: 'Cadastre seu CPF/CNPJ no perfil antes de solicitar um adiantamento.' });
+  const { saldoDisponivel } = calcularSaldoProdutor(req.user.id);
+  if (valor > saldoDisponivel) return res.status(400).json({ error: `Valor solicitado maior que o saldo disponível (R$ ${saldoDisponivel.toFixed(2)}).` });
+  const agora = new Date();
+  const prazoLimite = new Date(agora.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 dias
+  const adiantamento = {
+    id: uuidv4(), produtorId: req.user.id, valor,
+    chavePix: req.user.pagamentoInfo.chavePix, tipoChavePix: req.user.pagamentoInfo.tipoChavePix,
+    nomeTitular: req.user.pagamentoInfo.nomeTitular, cpfCnpj: req.user.cpfCnpj,
+    status: 'pendente', solicitadoEm: agora.toISOString(), prazoLimite: prazoLimite.toISOString(),
+    pagoEm: null, observacoesAdmin: ''
+  };
+  ADIANTAMENTOS.push(adiantamento);
+  persistAdiantamentos();
+  res.status(201).json({ adiantamento });
+});
+
+// ── ADMIN — processar adiantamentos ──
+app.get('/api/admin/adiantamentos', auth, adminOnly, (req, res) => {
+  const lista = ADIANTAMENTOS.map(a => {
+    const produtor = db.users.find(u => u.id === a.produtorId);
+    return { ...a, produtorNome: produtor?.nomePublico || produtor?.nome || '—', produtorEmail: produtor?.email || '—' };
+  }).sort((a, b) => new Date(b.solicitadoEm) - new Date(a.solicitadoEm));
+  res.json({ adiantamentos: lista });
+});
+
+app.patch('/api/admin/adiantamentos/:id', auth, adminOnly, (req, res) => {
+  const a = ADIANTAMENTOS.find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'Pedido de adiantamento não encontrado.' });
+  const { status, observacoes } = req.body;
+  if (!['pago', 'recusado'].includes(status)) return res.status(400).json({ error: 'Status inválido.' });
+  a.status = status;
+  if (status === 'pago') a.pagoEm = new Date().toISOString();
+  if (observacoes !== undefined) a.observacoesAdmin = sanitize(observacoes, 300);
+  persistAdiantamentos();
+  res.json({ ok: true, adiantamento: a });
+});
+
+// ════════════════════════════════════════════════════════
 // RELATÓRIOS, PARTICIPANTES, BORDERÔ
 // ════════════════════════════════════════════════════════
 app.get('/api/eventos/:id/pedidos', auth, (req, res) => {
@@ -524,11 +630,10 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
   const semPagamentoReal = pedido.mpPaymentId === 'CORTESIA' || String(pedido.mpPaymentId || '').startsWith('SIMULADO');
 
   if (!semPagamentoReal) {
-    const producerToken = req.user.mpAccount?.accessToken;
-    if (!producerToken) return res.status(400).json({ error: 'Conta Mercado Pago não conectada.' });
+    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
     try {
       const refResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}/refunds`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${producerToken}`, 'Content-Type': 'application/json' }
+        method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json' }
       });
       if (!refResp.ok) {
         const errData = await refResp.json().catch(() => ({}));
@@ -539,7 +644,7 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
     }
   }
 
-  // Marca pedido como reembolsado, invalida ingressos e libera as vagas do lote
+  // Marca pedido como reembolsado, invalida ingressos e libera as vagas do lote (e assentos, se houver)
   pedido.status = 'reembolsado';
   pedido.reembolsadoEm = new Date().toISOString();
   (pedido.tickets || []).forEach(t => { t.cancelado = true; });
@@ -547,6 +652,7 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
   for (const it of (pedido.itens || [])) {
     const lote = ev.lotes.find(l => l.id === it.loteId);
     if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd);
+    if (it.assento && ev.assentosOcupados) ev.assentosOcupados = ev.assentosOcupados.filter(a => a !== it.assento);
   }
   if (pedido.cupomUsado) {
     const c = ev.cupons.find(c => c.codigo === pedido.cupomUsado);
@@ -690,6 +796,11 @@ app.delete('/api/posts/:id', auth, (req, res) => {
 // ════════════════════════════════════════════════════════
 // MARKETPLACE PÚBLICO
 // ════════════════════════════════════════════════════════
+app.get('/api/public/cidades', rateLimit(60000, 60), (req, res) => {
+  const cidades = [...new Set(EVENTOS.filter(e => e.status === 'publicado' && e.cidade).map(e => e.cidade))].sort();
+  res.json({ cidades });
+});
+
 app.get('/api/public/eventos', rateLimit(60000, 60), (req, res) => {
   const { cidade, categoria, busca } = req.query;
   let lista = EVENTOS.filter(e => e.status === 'publicado' && new Date(e.dataEvento) >= new Date(Date.now() - 86400000));
@@ -714,7 +825,10 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   res.json({
     nome: ev.nome, descricao: ev.descricao, dataEvento: ev.dataEvento, horaEvento: ev.horaEvento,
     local: ev.local, cidade: ev.cidade, categoria: ev.categoria, imagemCapa: ev.imagemCapa, cores: ev.cores,
-    lotes: lotesPublicos, pixels: ev.pixels, testMode: !!organizador?.mpAccount?.testMode,
+    videoYoutubeId: extrairYoutubeId(ev.videoUrl || ''),
+    lotes: lotesPublicos, pixels: ev.pixels, testMode: isTestToken(MP_PLATFORM_TOKEN),
+    mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
+    assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug }
   });
 });
@@ -745,12 +859,23 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Selecione ao menos um ingresso.' });
 
     const organizador = db.users.find(u => u.id === ev.organizadorId);
-    const producerToken = organizador?.mpAccount?.accessToken;
+    const assentosOcupadosAtuais = ev.assentosOcupados || [];
+    const assentosSelecionadosNestePedido = [];
 
     let subtotal = 0, itensDetalhados = [];
     for (const it of itens) {
       const lote = ev.lotes.find(l => l.id === it.loteId);
       if (!lote || !lote.ativo) return res.status(400).json({ error: 'Lote indisponível.' });
+      if (it.assento) {
+        // Compra com assento marcado — cada assento é único, sem quantidade agregada
+        if (assentosOcupadosAtuais.includes(it.assento) || assentosSelecionadosNestePedido.includes(it.assento)) {
+          return res.status(400).json({ error: `O assento ${it.assento} já foi vendido. Escolha outro.` });
+        }
+        assentosSelecionadosNestePedido.push(it.assento);
+        subtotal += lote.preco;
+        itensDetalhados.push({ loteId: lote.id, qtd: 1, precoUnit: lote.preco, loteNome: lote.nome, assento: it.assento });
+        continue;
+      }
       const qtd = Math.max(1, parseInt(it.qtd) || 1);
       if (lote.vendidos + qtd > lote.qtdTotal) return res.status(400).json({ error: `Apenas ${lote.qtdTotal - lote.vendidos} disponíveis em "${lote.nome}".` });
       subtotal += lote.preco * qtd;
@@ -788,11 +913,13 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
-    if (!producerToken) return res.status(500).json({ error: 'Este produtor ainda não conectou uma conta de pagamento.' });
+    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const baseUrl = `${proto}://${host}`;
     const feePercent = db.marketplaceFeePercent || 10;
+    // A comissão aqui é só para cálculo interno de quanto repassar ao produtor via adiantamento —
+    // não é mais enviada ao Mercado Pago como split, pois o pagamento cai direto na conta única da plataforma.
     const marketplaceFee = Math.round(total * (feePercent/100) * 100) / 100;
 
     const mpItems = itensDetalhados.map(it => ({ title: `${ev.nome} — ${it.loteNome}`, quantity: it.qtd, unit_price: it.precoUnit, currency_id: 'BRL' }));
@@ -800,13 +927,13 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     const prefBody = {
       items: mpItems, payer: { name: sanitize(comprador.nome,100), email: comprador.email },
-      external_reference: pedidoId, marketplace_fee: marketplaceFee,
+      external_reference: pedidoId,
       back_urls: { success: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=success`, pending: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=pending`, failure: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=failure` },
       auto_return: 'approved',
-      notification_url: `${baseUrl}/api/mp/webhook?uid=${organizador.id}&ped=${pedidoId}`,
+      notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`,
       statement_descriptor: 'LOTA TICKETS'
     };
-    const mpResp = await fetch(`${MP_API}/checkout/preferences`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${producerToken}` }, body: JSON.stringify(prefBody) });
+    const mpResp = await fetch(`${MP_API}/checkout/preferences`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` }, body: JSON.stringify(prefBody) });
     const mpData = await mpResp.json();
     if (!mpResp.ok) return res.status(400).json({ error: mpData.message || 'Erro ao criar pagamento.' });
 
@@ -818,16 +945,22 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       marketplaceFee, mpPreferenceId: mpData.id, mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
     });
     persistPedidos();
-    res.json({ ok: true, pedidoId, init_point: mpData.init_point, testMode: !!organizador?.mpAccount?.testMode });
+    res.json({ ok: true, pedidoId, init_point: mpData.init_point, testMode: isTestToken(MP_PLATFORM_TOKEN) });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
   pedido.tickets = [];
+  if (!ev.assentosOcupados) ev.assentosOcupados = [];
   for (const it of pedido.itens) {
     const lote = ev.lotes.find(l => l.id === it.loteId);
     if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd;
-    for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null });
+    if (it.assento) {
+      ev.assentosOcupados.push(it.assento);
+      pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null });
+    } else {
+      for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null });
+    }
   }
   if (cupomObj) cupomObj.usosAtuais = (cupomObj.usosAtuais || 0) + 1;
   if (promoterObj) { promoterObj.vendas = (promoterObj.vendas || 0) + pedido.tickets.length; promoterObj.receita = (promoterObj.receita || 0) + pedido.total; }
@@ -861,13 +994,10 @@ app.post('/api/mp/webhook', async (req, res) => {
     const paymentId = req.body?.data?.id || req.query['data.id'];
     const type = req.body?.type || req.query.type;
     if (type !== 'payment' || !paymentId) return res.sendStatus(200);
-    const { uid, ped: pedidoId } = req.query;
-    if (!uid || !pedidoId) return res.sendStatus(200);
-    const organizador = db.users.find(u => u.id === uid);
-    const producerToken = organizador?.mpAccount?.accessToken;
-    if (!producerToken) return res.sendStatus(200);
+    const { ped: pedidoId } = req.query;
+    if (!pedidoId || !MP_PLATFORM_TOKEN) return res.sendStatus(200);
 
-    const payResp = await fetch(`${MP_API}/v1/payments/${paymentId}`, { headers: { 'Authorization': `Bearer ${producerToken}` } });
+    const payResp = await fetch(`${MP_API}/v1/payments/${paymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
     const payment = await payResp.json();
     if (!payResp.ok) return res.sendStatus(200);
 
@@ -934,12 +1064,13 @@ app.get('/api/admin/overview', auth, adminOnly, (req, res) => {
   const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
   const receitaTotal = pedidosPagos.reduce((s, p) => s + p.total, 0);
   const comissaoTotal = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
-  const produtoresConectados = db.users.filter(u => u.isOrganizador && u.mpAccount?.accessToken).length;
+  const produtoresComPix = db.users.filter(u => u.isOrganizador && u.pagamentoInfo?.chavePix).length;
+  const adiantamentosPendentes = ADIANTAMENTOS.filter(a => a.status === 'pendente').length;
   res.json({
     totalUsuarios, totalProdutores, totalClientes,
     totalEventos: EVENTOS.length, eventosPublicados,
     totalPedidosPagos: pedidosPagos.length, receitaTotal, comissaoTotal,
-    produtoresConectados, feePercent: db.marketplaceFeePercent
+    produtoresComPix, adiantamentosPendentes, feePercent: db.marketplaceFeePercent
   });
 });
 
@@ -1066,7 +1197,7 @@ app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok', app: 'Lota Ticketeria', users: db.users.length, eventos: EVENTOS.length,
-    mercadopago_oauth: (MP_CLIENT_ID && MP_CLIENT_SECRET) ? '✅' : '❌ (configure MP_CLIENT_ID e MP_CLIENT_SECRET)',
+    mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
     uptime: Math.round(process.uptime()) + 's'
   });
@@ -1080,6 +1211,6 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n🎟️  LOTA TICKETERIA rodando na porta ${PORT}`);
-  console.log(`   Mercado Pago: ${(MP_CLIENT_ID && MP_CLIENT_SECRET) ? '✅' : '❌'}`);
+  console.log(`   Mercado Pago: ${MP_PLATFORM_TOKEN ? '✅' : '❌'}`);
   console.log(`   Resend: ${RESEND_API_KEY ? '✅' : '❌'}\n`);
 });
