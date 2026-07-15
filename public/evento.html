@@ -65,7 +65,23 @@ a{color:inherit;}
 <body>
 <div class="topbar"><a href="/" class="logo">🎟️ Lota Ticketeria</a></div>
 <div class="wrap" id="app"><div class="spinner"></div></div>
-<div class="copyw">🎟️ Vendido com Lota Ticketeria</div>
+<footer style="margin-top:30px;padding:24px 20px;border-top:1px solid #2A2822;font-size:12px;color:#605848;text-align:center;width:100%;max-width:520px">
+  <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:16px;text-align:left">
+    <div>
+      <div style="font-weight:700;color:#A09880;margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
+      <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:#E8961A;text-decoration:none">+55 21 99857-9651</a></div>
+      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:#E8961A;text-decoration:none">sac@workamusic.com.br</a></div>
+      <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:#E8961A;text-decoration:none">@lota_evento</a></div>
+    </div>
+    <div>
+      <div style="font-weight:700;color:#A09880;margin-bottom:8px;font-size:11px;letter-spacing:1px">INFORMAÇÕES</div>
+      <div style="margin-bottom:4px"><a href="/sobre-nos.html" style="color:#605848;text-decoration:none">Sobre nós</a></div>
+      <div style="margin-bottom:4px"><a href="/privacidade.html" style="color:#605848;text-decoration:none">Política de Privacidade</a></div>
+      <div><a href="/termos.html" style="color:#605848;text-decoration:none">Termos de Uso</a></div>
+    </div>
+  </div>
+  <div>🎟️ Vendido com Lota Ticketeria</div>
+</footer>
 
 <script>
 const params=new URLSearchParams(location.search);
@@ -132,8 +148,11 @@ async function init(){
 
 function renderEvento(){
   const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'#C47B14';
+  const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
+  const loteIdsComAssento=temMapaAssentos?new Set(EVENTO.mapaAssentos.setores.map(s=>s.loteId)):new Set();
   const lotesFonte=PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
-  const lotesHtml=lotesFonte.length?lotesFonte.map(l=>`
+  const lotesSemAssento=lotesFonte.filter(l=>!loteIdsComAssento.has(l.id));
+  const lotesHtml=lotesSemAssento.length?lotesSemAssento.map(l=>`
     <div class="lote">
       <div class="lote-info">
         <div class="lote-nome">${esc(l.nome)}</div>
@@ -145,7 +164,7 @@ function renderEvento(){
         <span class="qtd-val" id="qtd-${l.id}">0</span>
         <button class="qtd-btn" onclick="alterarQtd('${l.id}',1,${l.disponivel})">+</button>
       </div>
-    </div>`).join(''):'<div class="empty">Nenhum lote disponível.</div>';
+    </div>`).join(''):(temMapaAssentos?'':'<div class="empty">Nenhum lote disponível.</div>');
 
   document.getElementById('app').innerHTML=`
     ${EVENTO.testMode?'<div style="background:#C47B14;color:#18160F;font-weight:700;font-size:12px;text-align:center;padding:8px;border-radius:8px;margin-bottom:12px">🧪 MODO TESTE — nenhuma cobrança real será feita</div>':''}
@@ -161,10 +180,12 @@ function renderEvento(){
         </div>
         ${EVENTO.organizador?.nome?'<div class="hero-organizador"><span>Por <a href="/o/'+esc(EVENTO.organizador.slug)+'" style="color:#E8961A;font-weight:700">'+esc(EVENTO.organizador.nome)+'</a></span></div>':''}
         ${EVENTO.descricao?'<div class="hero-desc">'+esc(EVENTO.descricao)+'</div>':''}
+        ${EVENTO.videoYoutubeId?'<div style="margin-top:16px;border-radius:10px;overflow:hidden;aspect-ratio:16/9"><iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+EVENTO.videoYoutubeId+'" title="Vídeo do evento" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;height:100%;display:block"></iframe></div>':''}
       </div>
     </div>
+    ${temMapaAssentos?renderMapaAssentosHtml():''}
     <div class="card">
-      <div class="card-title">Escolha seus ingressos</div>
+      <div class="card-title">${temMapaAssentos&&lotesSemAssento.length?'Outros ingressos':'Escolha seus ingressos'}</div>
       ${lotesHtml}
       <div style="margin-top:14px">
         <label style="font-size:11px;font-weight:600;color:#A09880;display:block;margin-bottom:5px">Cupom de desconto</label>
@@ -202,6 +223,44 @@ function alterarQtd(loteId,delta,max){
 
 function getLotesFonte(){ return PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes; }
 
+// ── MAPA DE ASSENTOS ──
+let assentosSelecionados={}; // { seatCode: { loteId, preco, nome } }
+function renderMapaAssentosHtml(){
+  const ma=EVENTO.mapaAssentos;
+  const ocupados=new Set(EVENTO.assentosOcupados||[]);
+  let html='<div class="card"><div class="card-title">Escolha seu assento</div>'
+    +'<div style="text-align:center;background:#0F0E0C;border:1px solid #2A2822;border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:#605848;font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
+  ma.setores.forEach(s=>{
+    const lote=EVENTO.lotes.find(l=>l.id===s.loteId);
+    const preco=lote?lote.preco:0;
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:#F0EDE8;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'#C47B14')+'"></span>'+esc(s.nome)+' — R$ '+preco.toFixed(2).replace('.',',')+'</div>';
+    html+='<div style="overflow-x:auto"><div style="display:inline-block">';
+    for(let r=0;r<s.linhas;r++){
+      const letra=String.fromCharCode(65+r);
+      html+='<div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">';
+      html+='<span style="font-size:9px;color:#605848;width:16px;text-align:center">'+letra+'</span>';
+      for(let c=1;c<=s.assentosPorLinha;c++){
+        const seatCode=s.id+'-'+letra+c;
+        const ocupado=ocupados.has(seatCode);
+        const selecionado=!!assentosSelecionados[seatCode];
+        const cor=ocupado?'#3A3630':(selecionado?(s.cor||'#C47B14'):'#1E1C18');
+        html+='<div onclick="'+(ocupado?'':'toggleAssento(\''+seatCode+'\',\''+s.loteId+'\','+preco+',\''+esc(s.nome)+'\')')+'" title="'+seatCode+'" style="width:22px;height:22px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'#C47B14'):'#2A2822')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
+      }
+      html+='</div>';
+    }
+    html+='</div></div></div>';
+  });
+  html+='<div style="display:flex;gap:16px;font-size:11px;color:#A09880;margin-top:8px"><span><span style="display:inline-block;width:10px;height:10px;background:#1E1C18;border:1px solid #2A2822;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-block;width:10px;height:10px;background:#C47B14;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-block;width:10px;height:10px;background:#3A3630;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Ocupado</span></div>';
+  html+='</div>';
+  return html;
+}
+function toggleAssento(seatCode,loteId,preco,setorNome){
+  if(assentosSelecionados[seatCode]) delete assentosSelecionados[seatCode];
+  else assentosSelecionados[seatCode]={loteId,preco,nome:setorNome};
+  renderEvento();
+  atualizarTotal();
+}
+
 function atualizarTotal(){
   let subtotal=0, temItem=false;
   const lotes=getLotesFonte();
@@ -209,6 +268,7 @@ function atualizarTotal(){
     const qtd=selecoes[loteId];
     if(qtd>0){ temItem=true; const lote=lotes.find(l=>l.id===loteId); if(lote) subtotal+=lote.preco*qtd; }
   }
+  Object.values(assentosSelecionados).forEach(a=>{ subtotal+=a.preco; temItem=true; });
   let desconto=0;
   if(cupomAplicado){
     desconto=cupomAplicado.tipo==='fixo'?cupomAplicado.valor:Math.round(subtotal*(cupomAplicado.valor/100)*100)/100;
@@ -246,6 +306,7 @@ async function finalizarCompra(){
   errEl.style.display='none';
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
   const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
+  Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
 
   const btn=document.getElementById('btnComprar');
