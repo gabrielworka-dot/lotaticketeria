@@ -87,7 +87,7 @@ function loadDB() {
     users: [{
       id: 'admin-001', nome: 'Administrador', email: 'admin@role.com',
       senha: bcrypt.hashSync('admin123', 12),
-      isAdmin: true, isOrganizador: true, organizadorSlug: 'role-admin',
+      isAdmin: true, ativo: true, isOrganizador: true, organizadorSlug: 'role-admin',
       bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {},
       createdAt: new Date().toISOString()
     }],
@@ -124,6 +124,7 @@ function auth(req, res, next) {
     const dec = jwt.verify(token, JWT_SECRET);
     const user = db.users.find(u => u.id === dec.id);
     if (!user) return res.status(401).json({ error: 'Sessão inválida.' });
+    if (user.ativo === false) return res.status(403).json({ error: 'Esta conta foi desativada.' });
     req.user = user;
     next();
   } catch(e) { return res.status(401).json({ error: 'Token inválido ou expirado.' }); }
@@ -150,13 +151,20 @@ app.post('/api/auth/registro', rateLimit(60000, 10), (req, res) => {
   const nome = sanitize(req.body.nome || '', 100);
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   const senha = (req.body.senha || '').slice(0, 200);
+  const ehProdutor = req.body.tipo === 'produtor';
+  const nomePublicoInformado = sanitize(req.body.nomePublico || '', 100);
   if (!nome || !email || !senha) return res.status(400).json({ error: 'Preencha todos os campos.' });
   if (senha.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-mail inválido.' });
+  if (ehProdutor && !nomePublicoInformado) return res.status(400).json({ error: 'Nome público obrigatório para produtores.' });
   if (db.users.find(u => u.email === email)) return res.status(400).json({ error: 'E-mail já cadastrado.' });
+  const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
   const user = {
     id: uuidv4(), nome, email, senha: bcrypt.hashSync(senha, 12),
-    isAdmin: false, isOrganizador: false, organizadorSlug: '',
+    isAdmin: false, ativo: true,
+    isOrganizador: ehProdutor,
+    nomePublico: ehProdutor ? nomePublicoInformado : '',
+    organizadorSlug: ehProdutor ? gerarSlugUnico(nomePublicoInformado, slugsExistentes) : '',
     bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {},
     createdAt: new Date().toISOString()
   };
@@ -177,6 +185,7 @@ app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
     db.loginAttempts[ip] = { count: (attempts.count || 0) + 1, lastAttempt: now }; saveDB(db);
     return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
   }
+  if (user.ativo === false) return res.status(403).json({ error: 'Esta conta foi desativada. Entre em contato com o suporte.' });
   delete db.loginAttempts[ip]; saveDB(db);
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
   res.json({ token, user: safe(user) });
@@ -906,6 +915,152 @@ app.patch('/api/admin/marketplace-fee', auth, adminOnly, (req, res) => {
   res.json({ ok: true, feePercent: v });
 });
 app.get('/api/admin/usuarios', auth, adminOnly, (req, res) => res.json({ usuarios: db.users.map(safe) }));
+
+app.patch('/api/admin/usuarios/:id/ativo', auth, adminOnly, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  if (user.isAdmin) return res.status(400).json({ error: 'Não é possível desativar uma conta de administrador.' });
+  user.ativo = !!req.body.ativo;
+  saveDB(db);
+  res.json({ ok: true, usuario: safe(user) });
+});
+
+// ── VISÃO GERAL ──
+app.get('/api/admin/overview', auth, adminOnly, (req, res) => {
+  const totalUsuarios = db.users.length;
+  const totalProdutores = db.users.filter(u => u.isOrganizador && !u.isAdmin).length;
+  const totalClientes = db.users.filter(u => !u.isOrganizador && !u.isAdmin).length;
+  const eventosPublicados = EVENTOS.filter(e => e.status === 'publicado').length;
+  const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
+  const receitaTotal = pedidosPagos.reduce((s, p) => s + p.total, 0);
+  const comissaoTotal = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+  const produtoresConectados = db.users.filter(u => u.isOrganizador && u.mpAccount?.accessToken).length;
+  res.json({
+    totalUsuarios, totalProdutores, totalClientes,
+    totalEventos: EVENTOS.length, eventosPublicados,
+    totalPedidosPagos: pedidosPagos.length, receitaTotal, comissaoTotal,
+    produtoresConectados, feePercent: db.marketplaceFeePercent
+  });
+});
+
+// ── EVENTOS — lista e detalhe completo (visão de administrador) ──
+app.get('/api/admin/eventos', auth, adminOnly, (req, res) => {
+  const lista = EVENTOS.map(ev => {
+    const organizador = db.users.find(u => u.id === ev.organizadorId);
+    const pedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+    const receita = pedidosPagos.reduce((s, p) => s + p.total, 0);
+    const comissao = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+    const ingressos = pedidosPagos.reduce((s, p) => s + (p.tickets || []).length, 0);
+    return {
+      id: ev.id, nome: ev.nome, slug: ev.slug, status: ev.status, dataEvento: ev.dataEvento,
+      cidade: ev.cidade, categoria: ev.categoria,
+      organizadorNome: organizador?.nomePublico || organizador?.nome || '—',
+      organizadorEmail: organizador?.email || '—',
+      receita, comissao, ingressos, totalPedidos: pedidosPagos.length, createdAt: ev.createdAt
+    };
+  }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ eventos: lista });
+});
+
+app.get('/api/admin/eventos/:id', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const organizador = db.users.find(u => u.id === ev.organizadorId);
+  const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id);
+  res.json({ evento: ev, organizador: organizador ? { nome: organizador.nomePublico || organizador.nome, email: organizador.email } : null, pedidos });
+});
+
+// ── DOWNLOAD DE E-MAILS (participantes de um evento) — acesso irrestrito de admin ──
+app.get('/api/admin/eventos/:id/participantes.csv', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+  const linhas = [['Nome', 'E-mail', 'Telefone', 'Lote', 'Código Ingresso', 'Usado', 'Data da Compra']];
+  pedidos.forEach(p => (p.tickets || []).forEach(t => {
+    linhas.push([p.comprador?.nome || '', p.comprador?.email || '', p.comprador?.telefone || '', t.loteNome || '', t.codigo, t.usado ? 'Sim' : 'Não', new Date(p.createdAt).toLocaleString('pt-BR')]);
+  }));
+  const csv = linhas.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="emails-${ev.slug}.csv"`);
+  res.send('\uFEFF' + csv);
+});
+
+// ── TODOS OS E-MAILS DE TODOS OS EVENTOS EM UM ARQUIVO SÓ ──
+app.get('/api/admin/emails-todos.csv', auth, adminOnly, (req, res) => {
+  const linhas = [['Nome', 'E-mail', 'Telefone', 'Evento', 'Produtor', 'Lote', 'Data da Compra']];
+  PEDIDOS.filter(p => p.status === 'pago').forEach(p => {
+    const ev = EVENTOS.find(e => e.id === p.eventoId);
+    const organizador = db.users.find(u => u.id === ev?.organizadorId);
+    (p.tickets || []).forEach(t => {
+      linhas.push([p.comprador?.nome || '', p.comprador?.email || '', p.comprador?.telefone || '', ev?.nome || '—', organizador?.nomePublico || organizador?.nome || '—', t.loteNome || '', new Date(p.createdAt).toLocaleString('pt-BR')]);
+    });
+  });
+  const csv = linhas.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="emails-todos-eventos.csv"`);
+  res.send('\uFEFF' + csv);
+});
+
+// ── RELATÓRIO FINANCEIRO — comissões recebidas pela plataforma ──
+app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
+  const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
+  const totalReceita = pedidosPagos.reduce((s, p) => s + p.total, 0);
+  const totalComissao = pedidosPagos.reduce((s, p) => s + (p.marketplaceFee || 0), 0);
+
+  // Por evento
+  const porEventoMap = {};
+  pedidosPagos.forEach(p => {
+    if (!porEventoMap[p.eventoId]) porEventoMap[p.eventoId] = { receita: 0, comissao: 0, pedidos: 0 };
+    porEventoMap[p.eventoId].receita += p.total;
+    porEventoMap[p.eventoId].comissao += (p.marketplaceFee || 0);
+    porEventoMap[p.eventoId].pedidos += 1;
+  });
+  const porEvento = Object.entries(porEventoMap).map(([eventoId, d]) => {
+    const ev = EVENTOS.find(e => e.id === eventoId);
+    const organizador = db.users.find(u => u.id === ev?.organizadorId);
+    return { eventoId, eventoNome: ev?.nome || '—', organizadorNome: organizador?.nomePublico || organizador?.nome || '—', ...d };
+  }).sort((a, b) => b.comissao - a.comissao);
+
+  // Por mês
+  const porMesMap = {};
+  pedidosPagos.forEach(p => {
+    const mes = (p.pagoEm || p.createdAt).slice(0, 7); // YYYY-MM
+    if (!porMesMap[mes]) porMesMap[mes] = { receita: 0, comissao: 0, pedidos: 0 };
+    porMesMap[mes].receita += p.total;
+    porMesMap[mes].comissao += (p.marketplaceFee || 0);
+    porMesMap[mes].pedidos += 1;
+  });
+  const porMes = Object.entries(porMesMap).map(([mes, d]) => ({ mes, ...d })).sort((a, b) => a.mes.localeCompare(b.mes));
+
+  res.json({ totalReceita, totalComissao, totalPedidos: pedidosPagos.length, porEvento, porMes });
+});
+
+app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
+  const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
+  const feePercent = db.marketplaceFeePercent || 10;
+  const linhas = [
+    ['RELATÓRIO FINANCEIRO — LOTA TICKETERIA'],
+    ['Data de emissão', new Date().toLocaleString('pt-BR')],
+    ['Comissão configurada', feePercent + '%'],
+    [''],
+    ['Evento', 'Produtor', 'Pedido', 'Comprador', 'Valor Bruto (R$)', 'Comissão Plataforma (R$)', 'Data']
+  ];
+  let totalBruto = 0, totalComissao = 0;
+  pedidosPagos.forEach(p => {
+    const ev = EVENTOS.find(e => e.id === p.eventoId);
+    const organizador = db.users.find(u => u.id === ev?.organizadorId);
+    const comissao = p.marketplaceFee || 0;
+    totalBruto += p.total; totalComissao += comissao;
+    linhas.push([ev?.nome || '—', organizador?.nomePublico || organizador?.nome || '—', p.id.slice(0, 8), p.comprador?.nome || '', p.total.toFixed(2).replace('.', ','), comissao.toFixed(2).replace('.', ','), new Date(p.createdAt).toLocaleDateString('pt-BR')]);
+  });
+  linhas.push(['']);
+  linhas.push(['TOTAL', '', '', '', totalBruto.toFixed(2).replace('.', ','), totalComissao.toFixed(2).replace('.', ','), '']);
+  const csv = linhas.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="financeiro-lota-ticketeria.csv"`);
+  res.send('\uFEFF' + csv);
+});
+
 
 // ════════════════════════════════════════════════════════
 app.get('/health', (req, res) => {
