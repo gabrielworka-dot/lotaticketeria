@@ -106,8 +106,9 @@ a{color:inherit;}
   <div class="sb-logo">🎟️ Lota Ticketeria<span class="tag">Administração</span></div>
   <div class="sb-nav">
     <div class="ni active" onclick="gp('overview',this)">📊 Visão Geral</div>
-    <div class="ni" onclick="gp('usuarios',this)">👥 Usuários</div>
-    <div class="ni" onclick="gp('eventos',this)">🎪 Eventos</div>
+    <div class="ni" onclick="gp('usuarios',this)">🎪 Produtores</div>
+    <div class="ni" onclick="gp('eventos',this)">🎫 Eventos</div>
+    <div class="ni" onclick="gp('financeiro',this)">💰 Financeiro</div>
     <div class="ni" onclick="gp('config',this)">⚙️ Comissão</div>
   </div>
   <div class="sb-bot">
@@ -124,10 +125,10 @@ a{color:inherit;}
     <div id="overviewContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
-  <!-- USUÁRIOS -->
+  <!-- PRODUTORES -->
   <div class="page" id="page-usuarios">
     <div class="card">
-      <div class="ct">Todos os Usuários</div>
+      <div class="ct">Produtores de Eventos Cadastrados</div>
       <div class="tw" id="usuariosTable"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
     </div>
   </div>
@@ -135,9 +136,17 @@ a{color:inherit;}
   <!-- EVENTOS -->
   <div class="page" id="page-eventos">
     <div class="card">
-      <div class="ct">Todos os Eventos da Plataforma</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+        <div class="ct" style="margin-bottom:0">Todos os Eventos da Plataforma</div>
+        <button class="btn bo btn-sm" onclick="baixarTodosEmails()">📥 Baixar e-mails de todos os eventos</button>
+      </div>
       <div class="tw" id="eventosTable"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
     </div>
+  </div>
+
+  <!-- FINANCEIRO -->
+  <div class="page" id="page-financeiro">
+    <div id="financeiroContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
   <!-- CONFIG -->
@@ -176,7 +185,7 @@ function toggleSb(){document.getElementById('sbNav').classList.toggle('open');do
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
-const PM={overview:'Visão Geral da Plataforma',usuarios:'Usuários',eventos:'Eventos',config:'Comissão da Plataforma'};
+const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',financeiro:'Financeiro',config:'Comissão da Plataforma'};
 function gp(id,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
@@ -186,6 +195,7 @@ function gp(id,el){
   if(id==='overview') carregarOverview();
   if(id==='usuarios') carregarUsuarios();
   if(id==='eventos') carregarEventos();
+  if(id==='financeiro') carregarFinanceiro();
   if(id==='config') carregarFee();
   closeSb();
 }
@@ -240,15 +250,16 @@ async function carregarUsuarios(){
   const el=document.getElementById('usuariosTable');
   try{
     const d=await api('GET','/api/admin/usuarios');
-    el.innerHTML='<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Mercado Pago</th><th>Status</th><th>Cadastro</th><th></th></tr></thead><tbody>'
-      +d.usuarios.map(u=>{
-        const tipo=u.isAdmin?'<span class="badge admin">Admin</span>':u.isOrganizador?'<span class="badge produtor">Produtor</span>':'<span class="badge cliente">Cliente</span>';
-        return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(u.email)+'</td><td>'+tipo+'</td><td>'+(u.mpConectado?'✅':'—')+'</td><td class="'+(u.ativo!==false?'st-on':'st-off')+'">'+(u.ativo!==false?'Ativo':'Inativo')+'</td><td>'+new Date(u.createdAt).toLocaleDateString('pt-BR')+'</td><td>'+(u.isAdmin?'':'<button class="btn '+(u.ativo!==false?'bdng':'bgreen')+' btn-sm" onclick="toggleUsuario(\''+u.id+'\','+(u.ativo===false)+')">'+(u.ativo!==false?'Desativar':'Ativar')+'</button>')+'</td></tr>';
+    const produtores=d.usuarios.filter(u=>u.isOrganizador && !u.isAdmin);
+    if(!produtores.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum produtor cadastrado ainda.</p></div>'; return; }
+    el.innerHTML='<table class="tbl"><thead><tr><th>Nome</th><th>Produtora</th><th>E-mail</th><th>Mercado Pago</th><th>Status</th><th>Cadastro</th><th></th></tr></thead><tbody>'
+      +produtores.map(u=>{
+        return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(u.nomePublico||'—')+'</td><td>'+esc(u.email)+'</td><td>'+(u.mpConectado?'✅':'—')+'</td><td class="'+(u.ativo!==false?'st-on':'st-off')+'">'+(u.ativo!==false?'Ativo':'Inativo')+'</td><td>'+new Date(u.createdAt).toLocaleDateString('pt-BR')+'</td><td><button class="btn '+(u.ativo!==false?'bdng':'bgreen')+' btn-sm" onclick="toggleUsuario(\''+u.id+'\','+(u.ativo===false)+')">'+(u.ativo!==false?'Desativar':'Ativar')+'</button></td></tr>';
       }).join('')+'</tbody></table>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function toggleUsuario(id,ativo){
-  try{ await api('PATCH','/api/admin/usuarios/'+id+'/ativo',{ativo}); toast(ativo?'Usuário ativado!':'Usuário desativado.','ok'); carregarUsuarios(); }
+  try{ await api('PATCH','/api/admin/usuarios/'+id+'/ativo',{ativo}); toast(ativo?'Produtor ativado!':'Produtor desativado.','ok'); carregarUsuarios(); }
   catch(e){ toast(e.message,'err'); }
 }
 
@@ -257,8 +268,49 @@ async function carregarEventos(){
   try{
     const d=await api('GET','/api/admin/eventos');
     if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento criado ainda.</p></div>'; return; }
-    el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th></th></tr></thead><tbody>'
-      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+new Date(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td>'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'</td></tr>').join('')+'</tbody></table>';
+    el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th>Comissão</th><th></th></tr></thead><tbody>'
+      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+new Date(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function baixarCsv(url, nomeArquivo){
+  try{
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+AT}});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); toast(d.error||'Erro ao baixar.','err'); return; }
+    const blob=await r.blob();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=nomeArquivo;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }catch(e){ toast('Erro ao baixar arquivo.','err'); }
+}
+function baixarEmailsEvento(id,slug){ baixarCsv('/api/admin/eventos/'+id+'/participantes.csv', 'emails-'+slug+'.csv'); }
+function baixarTodosEmails(){ baixarCsv('/api/admin/emails-todos.csv', 'emails-todos-eventos.csv'); }
+
+async function carregarFinanceiro(){
+  const el=document.getElementById('financeiroContent');
+  try{
+    const d=await api('GET','/api/admin/financeiro');
+    el.innerHTML=`
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Volume Total Transacionado</div><div class="met-v" style="color:var(--green)">R$ ${d.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Comissão Recebida (sua receita)</div><div class="met-v" style="color:var(--p2)">R$ ${d.totalComissao.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidos}</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="ct" style="margin-bottom:0">Comissão por Evento</div>
+          <button class="btn bo btn-sm" onclick="baixarCsv('/api/admin/financeiro.csv','financeiro-lota-ticketeria.csv')">📥 Exportar relatório completo</button>
+        </div>
+        <div class="tw">${d.porEvento.length?'<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Pedidos</th><th>Receita Bruta</th><th>Comissão</th></tr></thead><tbody>'
+          +d.porEvento.map(e=>'<tr><td>'+esc(e.eventoNome)+'</td><td>'+esc(e.organizadorNome)+'</td><td>'+e.pedidos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2);font-weight:700">R$'+e.comissao.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'
+          :'<div class="empty" style="padding:20px"><p>Nenhuma venda registrada ainda.</p></div>'}</div>
+      </div>
+      <div class="card">
+        <div class="ct">Comissão por Mês</div>
+        <div class="tw">${d.porMes.length?'<table class="tbl"><thead><tr><th>Mês</th><th>Pedidos</th><th>Receita Bruta</th><th>Comissão</th></tr></thead><tbody>'
+          +d.porMes.map(m=>'<tr><td>'+m.mes+'</td><td>'+m.pedidos+'</td><td>R$'+m.receita.toFixed(2)+'</td><td style="color:var(--p2);font-weight:700">R$'+m.comissao.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'
+          :'<div class="empty" style="padding:20px"><p>Sem dados ainda.</p></div>'}</div>
+      </div>`;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 
