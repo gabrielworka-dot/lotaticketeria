@@ -253,6 +253,13 @@ function renderEvento(){
       <p style="font-size:12px;color:#605848;margin-top:14px">Assim que o pagamento for confirmado (geralmente poucos segundos), seus ingressos aparecem aqui automaticamente.</p>
     </div>
   `;
+  // O formulário só existe no DOM a partir daqui (foi criado agora, via innerHTML acima) —
+  // por isso o listener é anexado aqui, e não em DOMContentLoaded (que já teria passado).
+  const form=document.getElementById('form-checkout');
+  if(form && !form.dataset.listenerAnexado){
+    form.addEventListener('submit', event => { event.preventDefault(); processarSubmit(); });
+    form.dataset.listenerAnexado='1';
+  }
 }
 
 function alterarQtd(loteId,delta,max){
@@ -366,7 +373,11 @@ function selecionarMetodo(metodo){
 
 function montarCardFormSeNecessario(){
   if(CARD_FORM_MONTADO) return;
-  if(!EVENTO?.mpPublicKey){ console.warn('Public Key do Mercado Pago não configurada.'); return; }
+  if(!EVENTO?.mpPublicKey){
+    const errEl=document.getElementById('errMsg');
+    if(errEl){ errEl.textContent='Pagamento com cartão indisponível no momento (chave pública do Mercado Pago não configurada). Use o PIX ou avise o produtor.'; errEl.style.display='block'; }
+    return;
+  }
   if(typeof MercadoPago==='undefined'){ setTimeout(montarCardFormSeNecessario,300); return; }
   try{
     MP_INSTANCE=new MercadoPago(EVENTO.mpPublicKey,{locale:'pt-BR'});
@@ -385,12 +396,14 @@ function montarCardFormSeNecessario(){
       },
       callbacks: {
         onFormMounted: error => { if(error) console.warn('Erro ao montar formulário de cartão:', error); },
-        onSubmit: event => { event.preventDefault(); processarSubmit(); },
       }
     });
     CARD_FORM_MONTADO=true;
   }catch(e){ console.warn('Erro ao iniciar Mercado Pago SDK:', e); }
 }
+
+// (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
+// formulário ser criado no DOM — ver final dessa função.)
 
 async function processarSubmit(){
   const nome=document.getElementById('cNome').value.trim();
