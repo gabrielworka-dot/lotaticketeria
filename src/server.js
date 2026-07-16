@@ -454,6 +454,7 @@ app.get('/api/meus-ingressos', auth, (req, res) => {
 // Pagamentos agora são recebidos numa ÚNICA conta da plataforma (não mais OAuth por produtor).
 // O valor devido a cada produtor é calculado internamente e pago por PIX manual via pedido de adiantamento.
 const MP_PLATFORM_TOKEN = process.env.MP_ACCESS_TOKEN || '';
+const MP_PUBLIC_KEY = process.env.MP_PUBLIC_KEY || '';
 function isTestToken(token) { return /^TEST-/i.test(token || ''); }
 
 // ════════════════════════════════════════════════════════
@@ -957,6 +958,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     videoYoutubeId: extrairYoutubeId(ev.videoUrl || ''),
     lotes: lotesPublicos, pixels: ev.pixels, testMode: isTestToken(MP_PLATFORM_TOKEN),
     feePercent: db.marketplaceFeePercent || 10,
+    mpPublicKey: MP_PUBLIC_KEY,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
@@ -1050,36 +1052,83 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
+    const { metodo, cpf, token, installments, paymentMethodId, issuerId } = req.body;
+    const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
+    if (!cpfLimpo || cpfLimpo.length !== 11) return res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
+
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const baseUrl = `${proto}://${host}`;
+    const descricao = `${ev.nome} — ${itensDetalhados.map(it => it.loteNome).join(', ')}`.slice(0, 250);
 
-    const mpItems = itensDetalhados.map(it => ({ title: `${ev.nome} — ${it.loteNome}`, quantity: it.qtd, unit_price: it.precoUnit, currency_id: 'BRL' }));
-    if (desconto > 0) mpItems.push({ title: 'Desconto (cupom ' + (cupomObj?.codigo||'') + ')', quantity: 1, unit_price: -desconto, currency_id: 'BRL' });
-    mpItems.push({ title: `Taxa administrativa (${feePercent}%)`, quantity: 1, unit_price: taxaAdministrativa, currency_id: 'BRL' });
-
-    const prefBody = {
-      items: mpItems, payer: { name: sanitize(comprador.nome,100), email: comprador.email },
-      external_reference: pedidoId,
-      back_urls: { success: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=success`, pending: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=pending`, failure: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=failure` },
-      auto_return: 'approved',
-      notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`,
-      statement_descriptor: 'LOTA TICKETS'
-    };
-    const mpResp = await fetch(`${MP_API}/checkout/preferences`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` }, body: JSON.stringify(prefBody) });
-    const mpData = await mpResp.json();
-    if (!mpResp.ok) return res.status(400).json({ error: mpData.message || 'Erro ao criar pagamento.' });
-
-    PEDIDOS.push({
+    const pedidoBase = {
       id: pedidoId, eventoId: ev.id, status: 'pendente',
-      comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
+      comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30), cpf: cpfLimpo },
       compradorUserId,
       itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
-      mpPreferenceId: mpData.id, mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
-    });
-    persistPedidos();
-    res.json({ ok: true, pedidoId, init_point: mpData.init_point, testMode: isTestToken(MP_PLATFORM_TOKEN) });
+      mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
+    };
+
+    if (metodo === 'pix') {
+      const pixBody = {
+        transaction_amount: total, description: descricao, payment_method_id: 'pix',
+        payer: { email: comprador.email, first_name: sanitize(comprador.nome,50), identification: { type: 'CPF', number: cpfLimpo } },
+        external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
+      };
+      const pixResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(pixBody) });
+      const pixData = await pixResp.json();
+      if (!pixResp.ok) return res.status(400).json({ error: pixData.message || 'Erro ao gerar PIX.' });
+      pedidoBase.mpPaymentId = String(pixData.id);
+      PEDIDOS.push(pedidoBase); persistPedidos();
+      const td = pixData.point_of_interaction?.transaction_data || {};
+      return res.json({ ok: true, pedidoId, metodo: 'pix', qrCode: td.qr_code || '', qrCodeBase64: td.qr_code_base64 || '', testMode: isTestToken(MP_PLATFORM_TOKEN) });
+    }
+
+    // Cartão
+    if (!token || !paymentMethodId) return res.status(400).json({ error: 'Dados do cartão incompletos.' });
+    const cardBody = {
+      transaction_amount: total, token, description: descricao,
+      installments: Math.max(1, parseInt(installments) || 1),
+      payment_method_id: paymentMethodId, issuer_id: issuerId || undefined,
+      payer: { email: comprador.email, identification: { type: 'CPF', number: cpfLimpo } },
+      external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
+    };
+    const cardResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(cardBody) });
+    const cardData = await cardResp.json();
+    if (!cardResp.ok) return res.status(400).json({ error: cardData.message || 'Erro ao processar pagamento.' });
+
+    pedidoBase.mpPaymentId = String(cardData.id);
+    PEDIDOS.push(pedidoBase); persistPedidos();
+    const pedidoSalvo = PEDIDOS.find(p => p.id === pedidoId);
+
+    if (cardData.status === 'approved') {
+      await processarPagamentoAprovado(pedidoSalvo, cardData.id);
+      return res.json({ ok: true, pedidoId, status: 'approved', tickets: pedidoSalvo.tickets });
+    } else if (cardData.status === 'in_process' || cardData.status === 'pending') {
+      return res.json({ ok: true, pedidoId, status: 'pending' });
+    } else {
+      pedidoSalvo.status = 'recusado';
+      persistPedidos();
+      return res.json({ ok: false, pedidoId, status: 'rejected', motivo: traduzirMotivoRecusa(cardData.status_detail) });
+    }
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+function traduzirMotivoRecusa(detalhe) {
+  const mapa = {
+    cc_rejected_insufficient_amount: 'Saldo ou limite insuficiente.',
+    cc_rejected_bad_filled_security_code: 'CVV incorreto. Confira os 3 (ou 4) dígitos no verso do cartão.',
+    cc_rejected_bad_filled_date: 'Data de validade incorreta.',
+    cc_rejected_bad_filled_other: 'Dados do cartão incorretos. Revise e tente novamente.',
+    cc_rejected_bad_filled_card_number: 'Número do cartão incorreto.',
+    cc_rejected_call_for_authorize: 'Seu banco precisa autorizar essa compra. Ligue para o banco ou tente outro cartão.',
+    cc_rejected_card_disabled: 'Cartão desabilitado. Entre em contato com seu banco.',
+    cc_rejected_duplicated_payment: 'Pagamento duplicado — você já tentou pagar esse valor recentemente.',
+    cc_rejected_high_risk: 'Pagamento recusado por segurança. Tente outro cartão.',
+    cc_rejected_max_attempts: 'Você atingiu o limite de tentativas. Tente outro cartão.',
+    cc_rejected_other_reason: 'Seu banco recusou o pagamento. Tente outro cartão.'
+  };
+  return mapa[detalhe] || 'Pagamento não aprovado. Tente outro cartão ou use o PIX.';
+}
 
 function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
   pedido.tickets = [];
@@ -1216,17 +1265,15 @@ app.post('/api/mp/webhook', async (req, res) => {
 app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) => {
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
-  // Rede de segurança: se o webhook do Mercado Pago não chegou por algum motivo,
-  // confirmamos ativamente o status do pagamento aqui quando o comprador está aguardando confirmação.
-  if (pedido.status === 'pendente' && pedido.mpPreferenceId && MP_PLATFORM_TOKEN) {
+  // Rede de segurança: se o webhook do Mercado Pago não chegou por algum motivo (comum em PIX,
+  // que pode demorar pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
+  if (pedido.status === 'pendente' && pedido.mpPaymentId && MP_PLATFORM_TOKEN) {
     try {
-      const searchResp = await fetch(`${MP_API}/v1/payments/search?external_reference=${pedido.id}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
-      const searchData = await searchResp.json();
-      const pagamentoAprovado = (searchData.results || []).find(p => p.status === 'approved');
-      if (pagamentoAprovado) await processarPagamentoAprovado(pedido, pagamentoAprovado.id);
-      else {
-        const pagamentoRecusado = (searchData.results || []).find(p => ['rejected','cancelled'].includes(p.status));
-        if (pagamentoRecusado) { pedido.status = 'recusado'; pedido.mpPaymentId = String(pagamentoRecusado.id); persistPedidos(); }
+      const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+      const payData = await payResp.json();
+      if (payResp.ok) {
+        if (payData.status === 'approved') await processarPagamentoAprovado(pedido, payData.id);
+        else if (['rejected','cancelled'].includes(payData.status)) { pedido.status = 'recusado'; persistPedidos(); }
       }
     } catch(e) { console.error('Erro ao verificar pagamento:', e.message); }
   }
