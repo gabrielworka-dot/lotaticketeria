@@ -12,6 +12,7 @@ const path    = require('path');
 const { v4: uuidv4 } = require('uuid');
 const PDFDocument = require('pdfkit');
 const QRCode  = require('qrcode');
+const speakeasy = require('speakeasy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -143,15 +144,27 @@ function organizadorOnly(req, res, next) {
   if (!req.user.isOrganizador) return res.status(403).json({ error: 'Apenas organizadores podem acessar isso.' });
   next();
 }
+function organizadorOuColaborador(req, res, next) {
+  if (!req.user.isOrganizador && !req.user.colaboradorDe) return res.status(403).json({ error: 'Acesso restrito a produtores e sua equipe.' });
+  next();
+}
 function adminOnly(req, res, next) {
   if (!req.user.isAdmin) return res.status(403).json({ error: 'Acesso restrito.' });
   next();
 }
-function safe(u) { const { senha, ...r } = u; return r; }
+function safe(u) { const { senha, twoFactorSecret, twoFactorSecretPendente, ...r } = u; return r; }
 function eventoDoUsuario(eventoId, userId) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev || ev.organizadorId !== userId) return null;
   return ev;
+}
+// Usado só em rotas de LEITURA — permite dono do evento OU colaborador com acesso de visualização
+function eventoVisivelPara(eventoId, user) {
+  const ev = EVENTOS.find(e => e.id === eventoId);
+  if (!ev) return null;
+  if (ev.organizadorId === user.id) return ev;
+  if (user.colaboradorDe && ev.organizadorId === user.colaboradorDe) return ev;
+  return null;
 }
 
 // ════════════════════════════════════════════════════════
@@ -174,7 +187,7 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
   const user = {
     id: uuidv4(), nome, email, senha: bcrypt.hashSync(senha, 12),
-    isAdmin: false, ativo: true, emailVerificado: false,
+    isAdmin: false, ativo: true, emailVerificado: false, verificado: false, colaboradorDe: null,
     isOrganizador: ehProdutor,
     nomePublico: ehProdutor ? nomePublicoInformado : '',
     organizadorSlug: ehProdutor ? gerarSlugUnico(nomePublicoInformado, slugsExistentes) : '',
@@ -218,8 +231,63 @@ app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
   }
   if (user.ativo === false) return res.status(403).json({ error: 'Esta conta foi desativada. Entre em contato com o suporte.' });
   delete db.loginAttempts[ip]; saveDB(db);
+  // Conta com 2FA ativo — não libera o token final ainda, exige o código do autenticador
+  if (user.twoFactorAtivo) {
+    const preAuthToken = jwt.sign({ id: user.id, tipo: 'pre2fa' }, JWT_SECRET, { expiresIn: '5m' });
+    return res.json({ precisa2FA: true, preAuthToken });
+  }
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
   res.json({ token, user: safe(user) });
+});
+
+app.post('/api/auth/2fa/verificar-login', rateLimit(60000, 10), (req, res) => {
+  const { preAuthToken, codigo } = req.body;
+  if (!preAuthToken || !codigo) return res.status(400).json({ error: 'Dados incompletos.' });
+  let dec;
+  try { dec = jwt.verify(preAuthToken, JWT_SECRET); } catch(e) { return res.status(401).json({ error: 'Sessão expirada. Faça login novamente.' }); }
+  if (dec.tipo !== 'pre2fa') return res.status(400).json({ error: 'Token inválido.' });
+  const user = db.users.find(u => u.id === dec.id);
+  if (!user || !user.twoFactorAtivo || !user.twoFactorSecret) return res.status(400).json({ error: 'Autenticação em duas etapas não está ativa.' });
+  const valido = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(codigo).trim(), window: 1 });
+  if (!valido) return res.status(401).json({ error: 'Código incorreto.' });
+  const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
+  res.json({ token, user: safe(user) });
+});
+
+app.post('/api/auth/2fa/setup', auth, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Disponível apenas para contas de administrador.' });
+  const secret = speakeasy.generateSecret({ name: `Lota Ticketeria (${req.user.email})`, length: 20 });
+  const user = db.users.find(u => u.id === req.user.id);
+  user.twoFactorSecretPendente = secret.base32;
+  saveDB(db);
+  QRCode.toDataURL(secret.otpauth_url).then(qr => {
+    res.json({ qrCode: qr, secretManual: secret.base32 });
+  }).catch(() => res.status(500).json({ error: 'Erro ao gerar QR Code.' }));
+});
+
+app.post('/api/auth/2fa/ativar', auth, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Disponível apenas para contas de administrador.' });
+  const user = db.users.find(u => u.id === req.user.id);
+  if (!user.twoFactorSecretPendente) return res.status(400).json({ error: 'Inicie a configuração antes de confirmar.' });
+  const { codigo } = req.body;
+  const valido = speakeasy.totp.verify({ secret: user.twoFactorSecretPendente, encoding: 'base32', token: String(codigo || '').trim(), window: 1 });
+  if (!valido) return res.status(400).json({ error: 'Código incorreto. Confira o app autenticador e tente novamente.' });
+  user.twoFactorSecret = user.twoFactorSecretPendente;
+  user.twoFactorAtivo = true;
+  delete user.twoFactorSecretPendente;
+  saveDB(db);
+  res.json({ ok: true, user: safe(user) });
+});
+
+app.post('/api/auth/2fa/desativar', auth, (req, res) => {
+  const user = db.users.find(u => u.id === req.user.id);
+  const { senha } = req.body;
+  if (!senha || !bcrypt.compareSync(senha, user.senha)) return res.status(401).json({ error: 'Senha incorreta.' });
+  user.twoFactorAtivo = false;
+  delete user.twoFactorSecret;
+  delete user.twoFactorSecretPendente;
+  saveDB(db);
+  res.json({ ok: true, user: safe(user) });
 });
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: safe(req.user) }));
@@ -288,8 +356,35 @@ app.post('/api/auth/tornar-organizador', auth, (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════
-// MERCADO PAGO OAUTH (marketplace/split — mesmo padrão validado no Lota)
+// EQUIPE — colaboradores com acesso somente de visualização
 // ════════════════════════════════════════════════════════
+app.get('/api/produtor/colaboradores', auth, organizadorOnly, (req, res) => {
+  const membros = db.users.filter(u => u.colaboradorDe === req.user.id).map(u => ({ id: u.id, nome: u.nome, email: u.email }));
+  res.json({ colaboradores: membros });
+});
+
+app.post('/api/produtor/colaboradores', auth, organizadorOnly, (req, res) => {
+  const email = sanitize(req.body.email || '', 150).toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
+  const pessoa = db.users.find(u => u.email === email);
+  if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
+  if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
+  if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
+  if (pessoa.colaboradorDe && pessoa.colaboradorDe !== req.user.id) return res.status(400).json({ error: 'Essa pessoa já é colaboradora de outro produtor.' });
+  pessoa.colaboradorDe = req.user.id;
+  saveDB(db);
+  res.status(201).json({ ok: true, colaborador: { id: pessoa.id, nome: pessoa.nome, email: pessoa.email } });
+});
+
+app.delete('/api/produtor/colaboradores/:userId', auth, organizadorOnly, (req, res) => {
+  const pessoa = db.users.find(u => u.id === req.params.userId && u.colaboradorDe === req.user.id);
+  if (!pessoa) return res.status(404).json({ error: 'Colaborador não encontrado.' });
+  pessoa.colaboradorDe = null;
+  saveDB(db);
+  res.json({ ok: true });
+});
+
+
 // (MP_CLIENT_ID/MP_CLIENT_SECRET não são mais necessários — pagamento único via MP_ACCESS_TOKEN)
 const MP_API = 'https://api.mercadopago.com';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
@@ -364,8 +459,9 @@ function isTestToken(token) { return /^TEST-/i.test(token || ''); }
 // ════════════════════════════════════════════════════════
 // EVENTOS (organizador)
 // ════════════════════════════════════════════════════════
-app.get('/api/meus-eventos', auth, organizadorOnly, (req, res) => {
-  res.json({ eventos: EVENTOS.filter(e => e.organizadorId === req.user.id) });
+app.get('/api/meus-eventos', auth, organizadorOuColaborador, (req, res) => {
+  const idAlvo = req.user.colaboradorDe || req.user.id;
+  res.json({ eventos: EVENTOS.filter(e => e.organizadorId === idAlvo), modoVisualizacao: !!req.user.colaboradorDe });
 });
 
 app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
@@ -397,9 +493,9 @@ app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
 });
 
 app.get('/api/eventos/:id', auth, (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
-  res.json({ evento: ev });
+  res.json({ evento: ev, somenteLeitura: ev.organizadorId !== req.user.id });
 });
 
 app.patch('/api/eventos/:id', auth, (req, res) => {
@@ -452,6 +548,31 @@ app.delete('/api/eventos/:id', auth, (req, res) => {
   delete db.ticketSlugs[ev.slug];
   saveDB(db); persistEventos();
   res.json({ ok: true });
+});
+
+app.post('/api/eventos/:id/duplicar', auth, (req, res) => {
+  const original = eventoDoUsuario(req.params.id, req.user.id);
+  if (!original) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const slugsExistentes = Object.keys(db.ticketSlugs);
+  const novoNome = original.nome + ' (cópia)';
+  const slug = gerarSlugUnico(novoNome, slugsExistentes);
+  const copia = {
+    ...JSON.parse(JSON.stringify(original)),
+    id: uuidv4(), slug, nome: novoNome, status: 'rascunho',
+    lotes: original.lotes.map(l => ({ ...l, id: uuidv4(), vendidos: 0 })),
+    cupons: original.cupons.map(c => ({ ...c, id: uuidv4(), usosAtuais: 0 })),
+    promoters: original.promoters.map(p => ({ ...p, id: uuidv4(), codigoRef: gerarCodigoPromoter(), vendas: 0, receita: 0 })),
+    assentosOcupados: [],
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+  };
+  // Reaplica os novos IDs de lote nos setores do mapa de assentos (senão ficam apontando pro lote antigo)
+  if (copia.mapaAssentos?.setores?.length) {
+    copia.mapaAssentos.setores = copia.mapaAssentos.setores.map((s, i) => ({ ...s, id: uuidv4(), loteId: copia.lotes[original.lotes.findIndex(l => l.id === s.loteId)]?.id || copia.lotes[0]?.id || '' }));
+  }
+  EVENTOS.push(copia);
+  db.ticketSlugs[slug] = { userId: req.user.id, eventoId: copia.id };
+  saveDB(db); persistEventos();
+  res.status(201).json({ evento: copia });
 });
 
 // ── LOTES ──
@@ -620,7 +741,7 @@ app.patch('/api/admin/adiantamentos/:id', auth, adminOnly, (req, res) => {
 // RELATÓRIOS, PARTICIPANTES, BORDERÔ
 // ════════════════════════════════════════════════════════
 app.get('/api/eventos/:id/pedidos', auth, (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   res.json({ pedidos: PEDIDOS.filter(p => p.eventoId === ev.id) });
 });
@@ -675,7 +796,7 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
 });
 
 app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
   const totalReceita = pedidos.reduce((s,p) => s + p.total, 0);
@@ -694,7 +815,7 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
 });
 
 app.get('/api/eventos/:id/participantes.csv', auth, (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
   const linhas = [['Nome','E-mail','Telefone','Lote','Código Ingresso','Usado','Data da Compra']];
@@ -708,7 +829,7 @@ app.get('/api/eventos/:id/participantes.csv', auth, (req, res) => {
 });
 
 app.get('/api/eventos/:id/bordero.csv', auth, (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
   const feePercent = db.marketplaceFeePercent || 10;
@@ -764,7 +885,7 @@ app.get('/api/organizadores/:slug', (req, res) => {
     try { const dec = jwt.verify(token, JWT_SECRET); jaSegue = FOLLOWS.some(f => f.userId === dec.id && f.organizadorId === user.id); } catch(e) {}
   }
   res.json({
-    organizador: { id: user.id, nome: user.nomePublico || user.nome, slug: user.organizadorSlug, bio: user.bio, avatarUrl: user.avatarUrl, bannerUrl: user.bannerUrl, redesSociais: user.redesSociais || {}, seguidores, jaSegue },
+    organizador: { id: user.id, nome: user.nomePublico || user.nome, slug: user.organizadorSlug, bio: user.bio, avatarUrl: user.avatarUrl, bannerUrl: user.bannerUrl, redesSociais: user.redesSociais || {}, seguidores, jaSegue, verificado: !!user.verificado },
     eventos: eventosPublicados.map(e => ({ id: e.id, slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, cidade: e.cidade, imagemCapa: e.imagemCapa, categoria: e.categoria })),
     posts
   });
@@ -838,7 +959,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     feePercent: db.marketplaceFeePercent || 10,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
-    organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug }
+    organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
   });
 });
 
@@ -1150,6 +1271,15 @@ app.patch('/api/admin/usuarios/:id/ativo', auth, adminOnly, (req, res) => {
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
   if (user.isAdmin) return res.status(400).json({ error: 'Não é possível desativar uma conta de administrador.' });
   user.ativo = !!req.body.ativo;
+  saveDB(db);
+  res.json({ ok: true, usuario: safe(user) });
+});
+
+app.patch('/api/admin/usuarios/:id/verificado', auth, adminOnly, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  if (!user.isOrganizador) return res.status(400).json({ error: 'Somente produtores podem ser verificados.' });
+  user.verificado = !!req.body.verificado;
   saveDB(db);
   res.json({ ok: true, usuario: safe(user) });
 });
