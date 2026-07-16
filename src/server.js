@@ -1056,6 +1056,10 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
     if (!cpfLimpo || cpfLimpo.length !== 11) return res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
 
+    // Garante um número "limpo" com exatamente 2 casas decimais — evita rejeição da API por formatação
+    const valorCobranca = Number(total.toFixed(2));
+    if (!(valorCobranca > 0)) return res.status(400).json({ error: 'Valor de cobrança inválido.' });
+
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const baseUrl = `${proto}://${host}`;
     const descricao = `${ev.nome} — ${itensDetalhados.map(it => it.loteNome).join(', ')}`.slice(0, 250);
@@ -1070,13 +1074,18 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     if (metodo === 'pix') {
       const pixBody = {
-        transaction_amount: total, description: descricao, payment_method_id: 'pix',
+        transaction_amount: valorCobranca, description: descricao, payment_method_id: 'pix',
         payer: { email: comprador.email, first_name: sanitize(comprador.nome,50), identification: { type: 'CPF', number: cpfLimpo } },
         external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
       };
+      console.log('Enviando pagamento PIX ao Mercado Pago:', JSON.stringify(pixBody));
       const pixResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(pixBody) });
       const pixData = await pixResp.json();
-      if (!pixResp.ok) return res.status(400).json({ error: pixData.message || 'Erro ao gerar PIX.' });
+      if (!pixResp.ok) {
+        console.error('Mercado Pago recusou o PIX:', pixResp.status, JSON.stringify(pixData));
+        const detalhe = Array.isArray(pixData.cause) && pixData.cause[0]?.description ? pixData.cause[0].description : pixData.message;
+        return res.status(400).json({ error: detalhe || 'Erro ao gerar PIX.' });
+      }
       pedidoBase.mpPaymentId = String(pixData.id);
       PEDIDOS.push(pedidoBase); persistPedidos();
       const td = pixData.point_of_interaction?.transaction_data || {};
@@ -1086,15 +1095,20 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     // Cartão
     if (!token || !paymentMethodId) return res.status(400).json({ error: 'Dados do cartão incompletos.' });
     const cardBody = {
-      transaction_amount: total, token, description: descricao,
+      transaction_amount: valorCobranca, token, description: descricao,
       installments: Math.max(1, parseInt(installments) || 1),
       payment_method_id: paymentMethodId, issuer_id: issuerId || undefined,
       payer: { email: comprador.email, identification: { type: 'CPF', number: cpfLimpo } },
       external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
     };
+    console.log('Enviando pagamento com cartão ao Mercado Pago:', JSON.stringify({ ...cardBody, token: '(oculto)' }));
     const cardResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(cardBody) });
     const cardData = await cardResp.json();
-    if (!cardResp.ok) return res.status(400).json({ error: cardData.message || 'Erro ao processar pagamento.' });
+    if (!cardResp.ok) {
+      console.error('Mercado Pago recusou o pagamento:', cardResp.status, JSON.stringify(cardData));
+      const detalhe = Array.isArray(cardData.cause) && cardData.cause[0]?.description ? cardData.cause[0].description : cardData.message;
+      return res.status(400).json({ error: detalhe || 'Erro ao processar pagamento.' });
+    }
 
     pedidoBase.mpPaymentId = String(cardData.id);
     PEDIDOS.push(pedidoBase); persistPedidos();
