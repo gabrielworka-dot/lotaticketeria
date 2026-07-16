@@ -146,9 +146,9 @@ a{color:inherit;}
   <div class="sb-nav">
     <div class="sb-sec">Eventos</div>
     <div class="ni active" onclick="gp('eventos',this)">📋 Meus Eventos</div>
-    <div class="ni" onclick="gp('novo',this)">✨ Criar Evento</div>
+    <div class="ni" id="navNovo" onclick="gp('novo',this)">✨ Criar Evento</div>
     <div class="sb-sec">Conta</div>
-    <div class="ni" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
+    <div class="ni" id="navSaldo" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
     <div class="ni" id="navComunidade" onclick="gp('comunidade',this)">📣 Comunidade</div>
     <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
     <div id="navAdminSec" style="display:none">
@@ -167,6 +167,7 @@ a{color:inherit;}
 
   <!-- EVENTOS -->
   <div class="page active" id="page-eventos">
+    <div id="eventosAviso"></div>
     <div class="ev-grid" id="eventosGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
@@ -335,6 +336,8 @@ function handleImageUpload(fileInput, targetInputId, previewId){
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
+function bloqueiaSomenteLeitura(){ if(SOMENTE_LEITURA){ toast('Sua conta tem acesso somente de visualização.','err'); return true; } return false; }
+
 function cm(id){document.getElementById(id).classList.remove('show');}
 function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
@@ -390,12 +393,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+let SOMENTE_LEITURA=false;
 (async function(){
   if(!AT){ location.href='/'; return; }
   try{
     const d=await api('GET','/api/auth/me');
     CU=d.user;
-    if(!CU.isOrganizador){
+    if(!CU.isOrganizador && !CU.colaboradorDe){
       if(CU.isAdmin){ location.href='/admin.html'; return; }
       // Cliente tentando acessar o painel de produtor — pede confirmação explícita, não promove sozinho
       document.body.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px">
@@ -411,6 +415,11 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
       return;
     }
+    SOMENTE_LEITURA=!CU.isOrganizador && !!CU.colaboradorDe;
+    if(SOMENTE_LEITURA){
+      document.body.classList.add('modo-leitura');
+      ['navNovo','navSaldo','navComunidade'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+    }
     gp('eventos');
     if(CU.isAdmin){
       const s=document.getElementById('navAdminSec'); if(s) s.style.display='block';
@@ -422,14 +431,26 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── EVENTOS ────────────────────────────────────────────────
 async function carregarEventos(){
   const el=document.getElementById('eventosGrid');
+  const avisoEl=document.getElementById('eventosAviso');
+  if(avisoEl) avisoEl.innerHTML=SOMENTE_LEITURA?'<div style="background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px">👁️ Modo somente visualização — você é colaborador(a) desta equipe e não pode editar dados.</div>':'';
   try{
     const d=await api('GET','/api/meus-eventos');
-    if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento ainda. Crie o primeiro!</p></div>'; return; }
-    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+new Date(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div></div>').join('');
+    if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento ainda.'+(SOMENTE_LEITURA?'':' Crie o primeiro!')+'</p></div>'; return; }
+    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+new Date(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'+(SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" style="margin-top:10px" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>')+'</div>').join('');
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function duplicarEvento(id){
+  if(bloqueiaSomenteLeitura())return;
+  if(!confirm('Duplicar este evento? Uma cópia em rascunho será criada, sem os ingressos já vendidos.')) return;
+  try{
+    const d=await api('POST','/api/eventos/'+id+'/duplicar');
+    toast('Evento duplicado!','ok');
+    abrirEvento(d.evento.id);
+  }catch(e){ toast(e.message,'err'); }
 }
 
 async function criarEvento(){
+  if(bloqueiaSomenteLeitura())return;
   const nome=gv('nvNome'), data=gv('nvData');
   if(!nome||!data){ toast('Nome e data obrigatórios.','err'); return; }
   try{
@@ -455,11 +476,12 @@ function renderEventoDetalhe(){
   const ev=EV_ATUAL;
   const el=document.getElementById('eventoDetalhe');
   el.innerHTML=`
+    ${SOMENTE_LEITURA?'<div style="background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:10px 16px;border-radius:10px;font-size:12px;margin-bottom:14px">👁️ Você está vendo este evento em modo somente visualização.</div>':''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div><div style="font-size:20px;font-weight:800">${esc(ev.nome)}</div><div style="font-size:12px;color:var(--text2)">${new Date(ev.dataEvento).toLocaleDateString('pt-BR')} · ${esc(ev.cidade||'')}</div></div>
       <div style="display:flex;gap:8px">
         <a href="/e/${ev.slug}" target="_blank" class="btn bo btn-sm">Ver página →</a>
-        <button class="btn ${ev.status==='publicado'?'bgreen':'bp'} btn-sm" onclick="togglePublicar()">${ev.status==='publicado'?'✅ Publicado':'▶️ Publicar'}</button>
+        ${SOMENTE_LEITURA?'':'<button class="btn '+(ev.status==='publicado'?'bgreen':'bp')+' btn-sm" onclick="togglePublicar()">'+(ev.status==='publicado'?'✅ Publicado':'▶️ Publicar')+'</button>'}
       </div>
     </div>
     <div class="tabs">
@@ -471,7 +493,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
       <div class="tab" onclick="evTab('pedidos',this)">📦 Pedidos</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
-      <div class="tab" onclick="evTab('checkin',this)">🚪 Check-in</div>
+      ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
     </div>
     <div id="evTabGeral"></div>
     <div id="evTabLotes" style="display:none"></div>
@@ -502,6 +524,7 @@ function evTab(tab,el){
 }
 
 async function togglePublicar(){
+  if(bloqueiaSomenteLeitura())return;
   try{
     const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/publicar',{publicar: EV_ATUAL.status!=='publicado'});
     EV_ATUAL=d.evento;
@@ -539,12 +562,14 @@ function renderTabGeral(){
   `;
 }
 async function salvarGeral(){
+  if(bloqueiaSomenteLeitura())return;
   try{
     const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),videoUrl:gv('edVideo')});
     EV_ATUAL=d.evento; toast('Salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
 async function excluirEvento(){
+  if(bloqueiaSomenteLeitura())return;
   if(!confirm('Excluir este evento permanentemente?')) return;
   try{ await api('DELETE','/api/eventos/'+EV_ATUAL.id); toast('Excluído.','ok'); goBack(); }
   catch(e){ toast(e.message,'err'); }
@@ -596,6 +621,7 @@ function salvarLote(){
   cm('loteModal'); renderLotesLista();
 }
 async function salvarLotes(){
+  if(bloqueiaSomenteLeitura())return;
   try{ const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/lotes',{lotes:_lotesTemp}); EV_ATUAL=d.evento; toast('Lotes salvos!','ok'); }
   catch(e){ toast(e.message,'err'); }
 }
@@ -671,6 +697,7 @@ function renderPreviewMapa(){
   el.innerHTML=html;
 }
 async function salvarMapaAssentos(){
+  if(bloqueiaSomenteLeitura())return;
   const ativo=document.getElementById('assentosAtivo').checked;
   const palco=gv('assentosPalco');
   try{
@@ -688,15 +715,18 @@ function renderTabCupons(){
     +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'cupomModal\').classList.add(\'show\')">+ Novo Cupom</button></div></div>';
 }
 async function salvarCupom(){
+  if(bloqueiaSomenteLeitura())return;
   try{
     const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/cupons',{codigo:gv('cupCodigo'),tipo:gv('cupTipo'),valor:gv('cupValor'),usosMax:gv('cupUsosMax')});
     EV_ATUAL=d.evento; cm('cupomModal'); renderTabCupons(); toast('Cupom criado!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
 async function toggleCupom(id,ativo){
+  if(bloqueiaSomenteLeitura())return;
   try{ const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/cupons/'+id,{ativo}); EV_ATUAL=d.evento; renderTabCupons(); }catch(e){ toast(e.message,'err'); }
 }
 async function deletarCupom(id){
+  if(bloqueiaSomenteLeitura())return;
   if(!confirm('Remover cupom?')) return;
   try{ const d=await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/cupons/'+id); EV_ATUAL=d.evento; renderTabCupons(); }catch(e){ toast(e.message,'err'); }
 }
@@ -713,12 +743,14 @@ function renderTabPromoters(){
     +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'promoterModal\').classList.add(\'show\')">+ Adicionar Promoter</button></div></div>';
 }
 async function salvarPromoter(){
+  if(bloqueiaSomenteLeitura())return;
   try{
     const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/promoters',{nome:gv('promNome'),email:gv('promEmail'),comissaoPercentual:gv('promComissao')});
     EV_ATUAL=d.evento; cm('promoterModal'); renderTabPromoters(); toast('Promoter adicionado!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
 async function deletarPromoter(id){
+  if(bloqueiaSomenteLeitura())return;
   if(!confirm('Remover promoter?')) return;
   try{ const d=await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/promoters/'+id); EV_ATUAL=d.evento; renderTabPromoters(); }catch(e){ toast(e.message,'err'); }
 }
@@ -734,6 +766,7 @@ function renderTabPixels(){
     <button class="btn bp" onclick="salvarPixels()">💾 Salvar</button></div>`;
 }
 async function salvarPixels(){
+  if(bloqueiaSomenteLeitura())return;
   try{
     const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/pixels',{metaPixelId:gv('pxMeta'),tiktokPixelId:gv('pxTiktok'),gaMeasurementId:gv('pxGa'),googleAdsConversionId:gv('pxGadsId'),googleAdsConversionLabel:gv('pxGadsLabel')});
     EV_ATUAL=d.evento; toast('Pixels salvos!','ok');
@@ -759,6 +792,7 @@ async function renderTabPedidos(){
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function reembolsarPedido(pedidoId){
+  if(bloqueiaSomenteLeitura())return;
   if(!confirm('Reembolsar este pedido? Se for um pagamento real, o valor será devolvido ao comprador via Mercado Pago e os ingressos serão invalidados. Esta ação não pode ser desfeita.')) return;
   try{
     const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/pedidos/'+pedidoId+'/reembolsar',{});
@@ -780,6 +814,7 @@ async function renderTabRelatorios(){
         <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
         <div class="met-c"><div class="met-l">Ticket Médio</div><div class="met-v">${r.totalIngressos>0?'R$'+(r.totalReceita/r.totalIngressos).toFixed(2):'—'}</div></div>
       </div>
+      <div class="card"><div class="ct">Vendas por Dia</div><div id="graficoVendas"></div></div>
       <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+d.receita.toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
       <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
       <div class="card"><div class="ct">Exportar</div><div class="br">
@@ -787,7 +822,26 @@ async function renderTabRelatorios(){
         <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'bordero.csv')">📥 Exportar Borderô</a>
       </div></div>
     `;
+    renderGraficoVendas(r.porDia);
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderGraficoVendas(porDia){
+  const el=document.getElementById('graficoVendas');
+  const dias=Object.keys(porDia).sort();
+  if(!dias.length){ el.innerHTML='<p style="color:var(--text3);font-size:13px">Sem vendas registradas ainda.</p>'; return; }
+  const W=Math.max(320,dias.length*46), H=160, padBottom=30, padTop=14;
+  const maxReceita=Math.max(...dias.map(d=>porDia[d].receita),1);
+  const barW=Math.min(34,(W/dias.length)-10);
+  let bars='', labels='';
+  dias.forEach((d,i)=>{
+    const x=i*(W/dias.length)+((W/dias.length)-barW)/2;
+    const h=Math.max(3,((porDia[d].receita/maxReceita)*(H-padBottom-padTop)));
+    const y=H-padBottom-h;
+    const dataLabel=new Date(d+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+    bars+='<rect x="'+x+'" y="'+y+'" width="'+barW+'" height="'+h+'" rx="4" fill="var(--p2,#E8961A)"><title>'+dataLabel+': R$'+porDia[d].receita.toFixed(2)+' ('+porDia[d].qtd+' ingressos)</title></rect>';
+    labels+='<text x="'+(x+barW/2)+'" y="'+(H-10)+'" font-size="9" fill="#605848" text-anchor="middle">'+dataLabel+'</text>';
+  });
+  el.innerHTML='<div style="overflow-x:auto"><svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block;min-width:100%">'+bars+labels+'</svg></div>';
 }
 async function baixarComAuth(ev,tipo){
   ev.preventDefault();
@@ -908,6 +962,7 @@ async function solicitarAdiantamento(){
 
 // ─── COMUNIDADE ─────────────────────────────────────────────
 async function publicarPost(){
+  if(bloqueiaSomenteLeitura())return;
   const texto=gv('postTexto');
   if(!texto){ toast('Escreva algo.','err'); return; }
   try{
@@ -926,6 +981,7 @@ async function carregarMeusPosts(){
   }catch(e){}
 }
 async function deletarPost(id){
+  if(bloqueiaSomenteLeitura())return;
   if(!confirm('Excluir esta publicação?')) return;
   try{ await api('DELETE','/api/posts/'+id); toast('Excluído.','ok'); carregarMeusPosts(); }catch(e){ toast(e.message,'err'); }
 }
@@ -978,7 +1034,42 @@ function carregarPerfil(){
     </div>
 
     <button class="btn bp" onclick="salvarPerfil()">💾 Salvar</button>
+
+    ${CU.isOrganizador?`
+    <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:16px">
+      <div class="ct">Equipe (acesso somente de visualização)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Adicione pessoas de confiança que possam ver seus eventos, relatórios e vendas — sem poder editar nada. A pessoa precisa já ter uma conta na Lota Ticketeria.</p>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="fi" id="colabEmail" type="email" placeholder="e-mail da pessoa">
+        <button class="btn bp btn-sm" onclick="adicionarColaborador()">+ Adicionar</button>
+      </div>
+      <div id="listaColaboradores"></div>
+    </div>` : ''}
   `;
+  if(CU.isOrganizador) carregarColaboradores();
+}
+async function carregarColaboradores(){
+  const el=document.getElementById('listaColaboradores');
+  if(!el) return;
+  try{
+    const d=await api('GET','/api/produtor/colaboradores');
+    el.innerHTML=d.colaboradores.length?d.colaboradores.map(c=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(c.nome)+' <span style="color:var(--text3)">('+esc(c.email)+')</span></span><button class="btn bdng btn-sm" onclick="removerColaborador(\''+c.id+'\')">Remover</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Nenhum colaborador ainda.</p>';
+  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">'+esc(e.message)+'</p>'; }
+}
+async function adicionarColaborador(){
+  const email=document.getElementById('colabEmail').value.trim();
+  if(!email){ toast('Digite o e-mail.','err'); return; }
+  try{
+    await api('POST','/api/produtor/colaboradores',{email});
+    document.getElementById('colabEmail').value='';
+    toast('Colaborador adicionado!','ok');
+    carregarColaboradores();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function removerColaborador(id){
+  if(!confirm('Remover o acesso dessa pessoa?')) return;
+  try{ await api('DELETE','/api/produtor/colaboradores/'+id); toast('Removido.','ok'); carregarColaboradores(); }
+  catch(e){ toast(e.message,'err'); }
 }
 function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
 async function salvarPerfil(){
