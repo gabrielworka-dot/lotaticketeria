@@ -60,6 +60,7 @@ h1{font-size:22px;font-weight:900;margin-bottom:20px;}
 <script>
 const AT=localStorage.getItem('role_token')||null;
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 async function api(m,p){
   const o={method:m,headers:{'Content-Type':'application/json'}};
   if(AT) o.headers['Authorization']='Bearer '+AT;
@@ -85,7 +86,7 @@ async function init(){
       <div class="pedido-card">
         <div class="pedido-hdr">
           <div class="pedido-img">${p.imagemCapa?'<img src="'+esc(p.imagemCapa)+'">':'🎪'}</div>
-          <div><div class="pedido-nome">${esc(p.eventoNome)}</div><div class="pedido-data">${p.dataEvento?new Date(p.dataEvento).toLocaleDateString('pt-BR'):''}${p.eventoSlug?' · <a href="/e/'+esc(p.eventoSlug)+'" style="color:#E8961A">ver evento</a>':''}</div></div>
+          <div><div class="pedido-nome">${esc(p.eventoNome)}</div><div class="pedido-data">${p.dataEvento?parseDataLocal(p.dataEvento).toLocaleDateString('pt-BR'):''}${p.eventoSlug?' · <a href="/e/'+esc(p.eventoSlug)+'" style="color:#E8961A">ver evento</a>':''}</div></div>
         </div>
         ${p.tickets.map((t,i)=>`
           <div class="ticket">
