@@ -52,6 +52,14 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.static(PUBLIC_DIR));
 
 function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// Datas no formato "AAAA-MM-DD" (sem hora) NÃO devem ser parseadas com `new Date(str)` puro —
+// isso é interpretado como meia-noite UTC e, ao exibir no fuso do Brasil, "volta" um dia.
+// Essa função monta a data usando os componentes locais, sem esse problema.
+function parseDataLocal(dataStr) {
+  if (!dataStr) return new Date();
+  const [y, m, d] = String(dataStr).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
 function sanitize(str, maxLen = 500) {
   if (typeof str !== 'string') return '';
   return str.trim().slice(0, maxLen).replace(/<[^>]*>/g, '');
@@ -314,7 +322,7 @@ app.post('/api/auth/reenviar-verificacao', auth, rateLimit(60000, 3), async (req
 
 app.patch('/api/auth/perfil', auth, (req, res) => {
   const user = db.users.find(u => u.id === req.user.id);
-  const { nome, bio, avatarUrl, bannerUrl, redesSociais, senhaAtual, novaSenha, cpfCnpj, tipoDocumento, pagamentoInfo } = req.body;
+  const { nome, bio, avatarUrl, bannerUrl, redesSociais, senhaAtual, novaSenha, novoEmail, cpfCnpj, tipoDocumento, pagamentoInfo } = req.body;
   if (nome) user.nome = sanitize(nome, 100);
   if (bio !== undefined) user.bio = sanitize(bio, 500);
   if (avatarUrl !== undefined) user.avatarUrl = sanitizeImagem(avatarUrl);
@@ -331,6 +339,15 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
       numeroAgencia: sanitize(pagamentoInfo.numeroAgencia || '', 20),
       tipoConta: sanitize(pagamentoInfo.tipoConta || '', 20)
     };
+  }
+  // Trocar e-mail ou senha exige confirmar a senha atual — proteção contra alguém mexer na conta sem autorização
+  if (novoEmail) {
+    if (!senhaAtual || !bcrypt.compareSync(senhaAtual, user.senha)) return res.status(401).json({ error: 'Senha atual incorreta.' });
+    const emailNormalizado = sanitize(novoEmail, 150).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNormalizado)) return res.status(400).json({ error: 'E-mail inválido.' });
+    if (emailNormalizado !== user.email && db.users.find(u => u.email === emailNormalizado)) return res.status(400).json({ error: 'Esse e-mail já está em uso por outra conta.' });
+    user.email = emailNormalizado;
+    user.emailVerificado = false;
   }
   if (novaSenha) {
     if (!senhaAtual || !bcrypt.compareSync(senhaAtual, user.senha)) return res.status(401).json({ error: 'Senha atual incorreta.' });
@@ -933,11 +950,11 @@ app.get('/api/public/cidades', rateLimit(60000, 60), (req, res) => {
 
 app.get('/api/public/eventos', rateLimit(60000, 60), (req, res) => {
   const { cidade, categoria, busca } = req.query;
-  let lista = EVENTOS.filter(e => e.status === 'publicado' && new Date(e.dataEvento) >= new Date(Date.now() - 86400000));
+  let lista = EVENTOS.filter(e => e.status === 'publicado' && parseDataLocal(e.dataEvento) >= new Date(Date.now() - 86400000));
   if (cidade) lista = lista.filter(e => e.cidade.toLowerCase() === String(cidade).toLowerCase());
   if (categoria) lista = lista.filter(e => e.categoria.toLowerCase() === String(categoria).toLowerCase());
   if (busca) { const b = String(busca).toLowerCase(); lista = lista.filter(e => e.nome.toLowerCase().includes(b) || e.descricao.toLowerCase().includes(b)); }
-  lista.sort((a,b) => new Date(a.dataEvento) - new Date(b.dataEvento));
+  lista.sort((a,b) => parseDataLocal(a.dataEvento) - parseDataLocal(b.dataEvento));
   res.json({ eventos: lista.map(e => {
     const precos = e.lotes.filter(l=>l.ativo && !l.cortesia).map(l=>l.preco);
     return { slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, horaEvento: e.horaEvento, cidade: e.cidade, local: e.local, categoria: e.categoria, imagemCapa: e.imagemCapa, precoMin: precos.length?Math.min(...precos):0 };
@@ -1208,7 +1225,7 @@ async function gerarPdfIngressos(pedido, ev) {
     doc.fillColor(ESCURO).fontSize(21).font('Helvetica-Bold').text(ev.nome || 'Evento', MARGIN, y, { width: CONTENT_W });
     y = doc.y + 10;
 
-    const dataStr = ev.dataEvento ? new Date(ev.dataEvento).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : '';
+    const dataStr = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : '';
     doc.fillColor(CINZA).fontSize(11).font('Helvetica').text(`Data:  ${dataStr}${ev.horaEvento ? ' às ' + ev.horaEvento : ''}`, MARGIN, y);
     y = doc.y + 4;
     if (ev.local) { doc.text(`Local:  ${ev.local}${ev.cidade ? ', ' + ev.cidade : ''}`, MARGIN, y); y = doc.y + 4; }
