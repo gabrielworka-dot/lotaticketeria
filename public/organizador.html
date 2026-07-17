@@ -79,6 +79,7 @@ async function api(m,p,b){
   return d;
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 
 async function init(){
   if(AT){ try{ const d=await api('GET','/api/auth/me'); CU=d.user; }catch(e){ AT=null; } }
@@ -100,7 +101,7 @@ function render(d){
   document.getElementById('app').innerHTML=`
     <div class="profile-hdr">
       <div class="avatar">${org.avatarUrl?'<img src="'+esc(org.avatarUrl)+'" style="width:100%;height:100%;object-fit:cover;border-radius:16px">':esc(org.nome.charAt(0).toUpperCase())}</div>
-      <div class="p-nome">${esc(org.nome)}</div>
+      <div class="p-nome">${esc(org.nome)}${org.verificado?' <span title="Produtor verificado" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:#3B9EFF;border-radius:50%;font-size:12px;vertical-align:middle">✓</span>':''}</div>
       ${org.bio?'<div class="p-bio">'+esc(org.bio)+'</div>':''}
       <div class="p-stats"><span><strong>${org.seguidores}</strong> seguidores</span><span><strong>${d.eventos.length}</strong> eventos</span></div>
       ${!ehEuMesmo?'<button class="btn '+(org.jaSegue?'bo seguindo':'bo')+'" id="btnSeguir" onclick="toggleSeguir()">'+(jaLogado?(org.jaSegue?'✓ Seguindo':'+ Seguir'):'Entre para seguir')+'</button>':''}
@@ -109,7 +110,7 @@ function render(d){
     <div class="event-grid" id="eventosGrid">${d.eventos.length?d.eventos.map(e=>`
       <div class="event-card" onclick="location.href='/e/${e.slug}'">
         <div class="event-img">${e.imagemCapa?'<img src="'+esc(e.imagemCapa)+'">':'🎪'}</div>
-        <div class="event-body"><div class="event-name">${esc(e.nome)}</div><div class="event-meta">${new Date(e.dataEvento).toLocaleDateString('pt-BR')} · ${esc(e.cidade||'')}</div></div>
+        <div class="event-body"><div class="event-name">${esc(e.nome)}</div><div class="event-meta">${parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')} · ${esc(e.cidade||'')}</div></div>
       </div>`).join(''):'<div class="empty">Nenhum evento publicado ainda.</div>'}</div>
     <div class="section-title">Novidades</div>
     <div id="postsList">${d.posts.length?d.posts.map(p=>`
