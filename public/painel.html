@@ -16,6 +16,16 @@
   --blue:#60A5FA;--bbg:rgba(96,165,250,.1);
   --sh:0 4px 16px rgba(0,0,0,.3);--shl:0 12px 32px rgba(0,0,0,.5);
 }
+html[data-theme="light"]{
+  --bg:#FAF8F5;--bg2:#FFFFFF;--bg3:#F1ECE4;--card:#FFFFFF;
+  --border:#E4DDD1;--border2:#D3C9B8;
+  --text:#211D15;--text2:#6B6151;--text3:#948A78;
+  --p:#B36A0E;--p2:#C47B14;--pbg:rgba(180,110,15,.1);--pb:rgba(180,110,15,.3);
+  --green:#16A34A;--gbg:rgba(22,163,74,.08);
+  --red:#DC2626;--rbg:rgba(220,38,38,.08);
+  --blue:#2563EB;--bbg:rgba(37,99,235,.08);
+  --sh:0 4px 16px rgba(0,0,0,.06);--shl:0 12px 32px rgba(0,0,0,.12);
+}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;overflow-x:hidden;width:100%;}
 body{display:flex;overflow:hidden;}
@@ -156,7 +166,10 @@ a{color:inherit;}
       <div class="ni" onclick="location.href='/admin.html'">⚙️ Administração</div>
     </div>
   </div>
-  <div class="sb-bot"><button class="logout-btn" onclick="doLogout()">Sair</button></div>
+  <div class="sb-bot">
+    <button class="logout-btn" onclick="alternarTema()" style="margin-bottom:8px" id="themeToggleBtn">🌙 Tema Escuro</button>
+    <button class="logout-btn" onclick="doLogout()">Sair</button>
+  </div>
 </nav>
 
 <div class="main">
@@ -296,6 +309,20 @@ a{color:inherit;}
 let AT=localStorage.getItem('role_token')||null;
 let CU=null;
 let PH=[];
+
+// ─── TEMA CLARO/ESCURO ───────────────────────────────────────
+function aplicarTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn=document.getElementById('themeToggleBtn');
+  if(btn) btn.textContent = tema==='light' ? '☀️ Tema Claro' : '🌙 Tema Escuro';
+}
+(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+function alternarTema(){
+  const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const novo = atual === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lota_tema', novo);
+  aplicarTema(novo);
+}
 
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
