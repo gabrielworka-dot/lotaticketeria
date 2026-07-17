@@ -990,6 +990,8 @@ app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (
 app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
   try {
     const { slug, itens, comprador, cupom, ref } = req.body;
+    const hostReq = req.get('host'); const protoReq = req.get('x-forwarded-proto') || 'https';
+    const baseUrl = `${protoReq}://${hostReq}`;
     // Autenticação opcional — se o comprador estiver logado, vinculamos a compra à conta dele
     let compradorUserId = null;
     const authHeader = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
@@ -1057,7 +1059,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       };
       gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
       PEDIDOS.push(pedido); persistPedidos(); persistEventos();
-      await enviarEmailIngressos(pedido, ev);
+      await enviarEmailIngressos(pedido, ev, baseUrl);
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
@@ -1071,8 +1073,6 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const valorCobranca = Number(total.toFixed(2));
     if (!(valorCobranca > 0)) return res.status(400).json({ error: 'Valor de cobrança inválido.' });
 
-    const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
-    const baseUrl = `${proto}://${host}`;
     const descricao = `${ev.nome} — ${itensDetalhados.map(it => it.loteNome).join(', ')}`.slice(0, 250);
 
     const pedidoBase = {
@@ -1131,7 +1131,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const pedidoSalvo = PEDIDOS.find(p => p.id === pedidoId);
 
     if (cardData.status === 'approved') {
-      await processarPagamentoAprovado(pedidoSalvo, cardData.id);
+      await processarPagamentoAprovado(pedidoSalvo, cardData.id, baseUrl);
       return res.json({ ok: true, pedidoId, status: 'approved', tickets: pedidoSalvo.tickets });
     } else if (cardData.status === 'in_process' || cardData.status === 'pending') {
       return res.json({ ok: true, pedidoId, status: 'pending' });
@@ -1179,73 +1179,132 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
 }
 
 async function gerarPdfIngressos(pedido, ev) {
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
   const chunks = [];
   doc.on('data', c => chunks.push(c));
   const done = new Promise((resolve, reject) => { doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject); });
 
+  const PAGE_W = doc.page.width;
+  const MARGIN = 40;
+  const CONTENT_W = PAGE_W - MARGIN * 2;
+  const LARANJA = '#C47B14';
+  const LARANJA_CLARO = '#E8961A';
+  const ESCURO = '#18160F';
+  const CINZA = '#555555';
+  const CINZA_CLARO = '#8A8378';
+  const BORDA = '#E4DDD1';
+
   const tickets = pedido.tickets || [];
   for (let i = 0; i < tickets.length; i++) {
     const t = tickets[i];
-    if (i > 0) doc.addPage();
-    doc.fontSize(20).fillColor('#C47B14').text('Lota Ticketeria', { align: 'left' });
-    doc.moveDown(0.6);
-    doc.fontSize(18).fillColor('#111').text(ev.nome || 'Evento', { align: 'left' });
-    doc.moveDown(0.2);
+    if (i > 0) doc.addPage({ size: 'A4', margin: 0 });
+
+    // ── Faixa superior colorida ──
+    doc.rect(0, 0, PAGE_W, 80).fill(LARANJA);
+    doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN, 32);
+
+    // ── Nome do evento e dados ──
+    let y = 105;
+    doc.fillColor(ESCURO).fontSize(21).font('Helvetica-Bold').text(ev.nome || 'Evento', MARGIN, y, { width: CONTENT_W });
+    y = doc.y + 10;
+
     const dataStr = ev.dataEvento ? new Date(ev.dataEvento).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : '';
-    doc.fontSize(11).fillColor('#555').text(`${dataStr}${ev.horaEvento ? ' às ' + ev.horaEvento : ''}`);
-    if (ev.local) doc.text(`${ev.local}${ev.cidade ? ', ' + ev.cidade : ''}`);
-    doc.moveDown(1);
+    doc.fillColor(CINZA).fontSize(11).font('Helvetica').text(`Data:  ${dataStr}${ev.horaEvento ? ' às ' + ev.horaEvento : ''}`, MARGIN, y);
+    y = doc.y + 4;
+    if (ev.local) { doc.text(`Local:  ${ev.local}${ev.cidade ? ', ' + ev.cidade : ''}`, MARGIN, y); y = doc.y + 4; }
 
-    doc.fontSize(12).fillColor('#111').text(`Comprador: ${pedido.comprador?.nome || ''}`);
-    doc.fontSize(12).text(`Lote: ${t.loteNome || ''}${t.assento ? ' — Assento ' + t.assento : ''}`);
-    doc.moveDown(1);
+    // ── Linha divisória ──
+    y += 14;
+    doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(BORDA).stroke();
+    y += 24;
 
+    // ── Card do ingresso (formato talão, com linha pontilhada separando o QR) ──
+    const cardH = 190;
+    const cardY = y;
+    const qrColW = 170;
+    const infoColW = CONTENT_W - qrColW;
+
+    doc.roundedRect(MARGIN, cardY, CONTENT_W, cardH, 10).lineWidth(1.2).strokeColor(BORDA).stroke();
+
+    // Linha pontilhada vertical separando as duas seções
+    const divisorX = MARGIN + infoColW;
+    doc.save();
+    doc.dash(4, { space: 4 }).moveTo(divisorX, cardY + 14).lineTo(divisorX, cardY + cardH - 14).strokeColor(BORDA).lineWidth(1.2).stroke();
+    doc.undash();
+    doc.restore();
+
+    // Furinhos decorativos nas bordas do divisor (efeito "destacável")
+    doc.circle(divisorX, cardY, 8).fill('#FFFFFF');
+    doc.circle(divisorX, cardY + cardH, 8).fill('#FFFFFF');
+
+    // ── Coluna esquerda: dados do ingresso ──
+    const padX = MARGIN + 22;
+    let iy = cardY + 22;
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('INGRESSO', padX, iy, { characterSpacing: 1.5 });
+    iy += 22;
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('COMPRADOR', padX, iy, { characterSpacing: 1 });
+    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(pedido.comprador?.nome || '', padX, iy + 13);
+    iy += 42;
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('LOTE', padX, iy, { characterSpacing: 1 });
+    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(`${t.loteNome || ''}${t.assento ? '  •  Assento ' + t.assento : ''}`, padX, iy + 13, { width: infoColW - 40 });
+    iy += 42;
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('CÓDIGO DO INGRESSO', padX, iy, { characterSpacing: 1 });
+    doc.fillColor(LARANJA).fontSize(15).font('Helvetica-Bold').text(t.codigo, padX, iy + 13);
+
+    // ── Coluna direita: QR Code ──
     try {
-      const qrDataUrl = await QRCode.toDataURL(t.codigo, { width: 220, margin: 1 });
+      const qrDataUrl = await QRCode.toDataURL(t.codigo, { width: 300, margin: 0 });
       const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
-      doc.image(qrBuffer, 40, doc.y, { width: 160 });
+      const qrSize = 118;
+      doc.image(qrBuffer, divisorX + (qrColW - qrSize) / 2, cardY + (cardH - qrSize) / 2 - 6, { width: qrSize, height: qrSize });
+      doc.fillColor(CINZA_CLARO).fontSize(8).font('Helvetica').text('Apresente na entrada', divisorX, cardY + (cardH - qrSize) / 2 + qrSize + 2, { width: qrColW, align: 'center' });
     } catch (e) {}
 
-    doc.fontSize(13).fillColor('#C47B14').text(t.codigo, 220, doc.y - 100, { width: 300 });
-    doc.moveDown(6);
-    doc.fontSize(9).fillColor('#888').text('Apresente este QR Code (impresso ou no celular) na entrada do evento.', 40, doc.y);
-    doc.text('Vendido com Lota Ticketeria.', 40, doc.y + 14);
+    // ── Rodapé ──
+    const footY = cardY + cardH + 30;
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica').text('Este ingresso é pessoal e intransferível. Apresente o QR Code (impresso ou no celular) na entrada do evento.', MARGIN, footY, { width: CONTENT_W });
+    doc.fillColor(CINZA_CLARO).fontSize(9).text('Vendido com Lota Ticketeria — lotaticketeria.com.br', MARGIN, footY + 16);
   }
   doc.end();
   return done;
 }
 
-async function enviarEmailIngressos(pedido, ev) {
-  if (!RESEND_API_KEY || !pedido.comprador?.email) return;
+async function enviarEmailIngressos(pedido, ev, baseUrl) {
+  console.log(`Preparando e-mail de ingressos para ${pedido.comprador?.email} (pedido ${pedido.id})`);
+  if (!RESEND_API_KEY) { console.error('RESEND_API_KEY não configurada — e-mail de ingressos não enviado.'); return; }
+  if (!pedido.comprador?.email) { console.error('Pedido sem e-mail de comprador — não é possível enviar.'); return; }
   const nomeEvento = ev.nome || 'Evento';
+  const linkPdf = baseUrl ? `${baseUrl}/api/public/pedido/${pedido.id}/pdf` : '';
   const ticketsHtml = (pedido.tickets || []).map(t => `
     <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:16px;background:#161410;">
       <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(t.codigo)}" width="90" height="90" style="border-radius:8px;background:#fff;padding:4px" />
       <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · Assento '+esc(t.assento):''}</div></div>
     </div>`).join('');
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:4px;">🎟️ Lota Ticketeria</div>
+    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:4px;">Lota Ticketeria</div>
     <p style="font-size:14px;color:#A09880;margin-bottom:24px;">Confirmação de compra</p>
     <h2 style="font-size:18px;margin-bottom:6px;">Seu ingresso para</h2>
     <p style="font-size:20px;font-weight:800;color:#fff;margin-bottom:20px;">${esc(nomeEvento)}</p>
     <p style="font-size:13px;color:#A09880;margin-bottom:16px;">Olá ${esc(pedido.comprador.nome)}, aqui estão seus ingressos:</p>
     ${ticketsHtml}
-    <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada. Seu ingresso também está anexado em PDF neste e-mail.</p>
+    ${linkPdf ? `<a href="${linkPdf}" style="display:block;text-align:center;background:#E8961A;color:#18160F;font-weight:800;padding:13px;border-radius:9px;text-decoration:none;font-size:14px;margin-top:18px;">📄 Abrir ingresso em PDF</a>` : ''}
+    <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada. Se o PDF anexado não abrir, use o botão acima pra acessá-lo a qualquer momento.</p>
     </div></div>`;
-  const payload = { from: RESEND_FROM, to: pedido.comprador.email, subject: `🎟️ Seus ingressos — ${nomeEvento}`, html };
+  const payload = { from: RESEND_FROM, to: pedido.comprador.email, subject: `Seus ingressos — ${nomeEvento}`, html };
   try {
     const pdfBuffer = await gerarPdfIngressos(pedido, ev);
     payload.attachments = [{ filename: `ingresso-${(ev.slug || 'lota')}.pdf`, content: pdfBuffer.toString('base64') }];
-  } catch (e) { console.error('Erro ao gerar PDF do ingresso:', e.message); }
+    console.log(`PDF do ingresso gerado com sucesso (${pdfBuffer.length} bytes) para o pedido ${pedido.id}`);
+  } catch (e) { console.error('Erro ao gerar PDF do ingresso — e-mail seguirá sem anexo, mas com o link de download:', e.message); }
   try {
     const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
     if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o envio do e-mail de ingressos:', r.status, errBody); }
-  } catch(e) { console.error('Erro e-mail:', e.message); }
+    else console.log(`E-mail de ingressos enviado com sucesso para ${pedido.comprador.email} (pedido ${pedido.id})`);
+  } catch(e) { console.error('Erro de rede ao enviar e-mail de ingressos:', e.message); }
 }
 
 // ── WEBHOOK MERCADO PAGO ──
-async function processarPagamentoAprovado(pedido, paymentId) {
+async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   if (pedido.status === 'pago') return;
   pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
   pedido.mpPaymentId = String(paymentId);
@@ -1255,7 +1314,7 @@ async function processarPagamentoAprovado(pedido, paymentId) {
     const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
     gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
     persistEventos();
-    await enviarEmailIngressos(pedido, ev);
+    await enviarEmailIngressos(pedido, ev, baseUrl);
     pedido.emailEnviado = true;
   }
   persistPedidos();
@@ -1282,7 +1341,8 @@ app.post('/api/mp/webhook', async (req, res) => {
     if (pedido.mpPaymentId === String(paymentId) && pedido.status === 'pago') return res.sendStatus(200);
 
     if (payment.status === 'approved') {
-      await processarPagamentoAprovado(pedido, paymentId);
+      const hostW = req.get('host'); const protoW = req.get('x-forwarded-proto') || 'https';
+      await processarPagamentoAprovado(pedido, paymentId, `${protoW}://${hostW}`);
     } else if (['rejected','cancelled'].includes(payment.status)) {
       pedido.mpPaymentId = String(paymentId);
       pedido.status = 'recusado';
@@ -1302,7 +1362,10 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
       const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
       const payData = await payResp.json();
       if (payResp.ok) {
-        if (payData.status === 'approved') await processarPagamentoAprovado(pedido, payData.id);
+        if (payData.status === 'approved') {
+          const hostF = req.get('host'); const protoF = req.get('x-forwarded-proto') || 'https';
+          await processarPagamentoAprovado(pedido, payData.id, `${protoF}://${hostF}`);
+        }
         else if (['rejected','cancelled'].includes(payData.status)) { pedido.status = 'recusado'; persistPedidos(); }
       }
     } catch(e) { console.error('Erro ao verificar pagamento:', e.message); }
