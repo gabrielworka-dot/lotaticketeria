@@ -7,92 +7,120 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://sdk.mercadopago.com/js/v2"></script>
 <style>
+:root{
+  --bg:#0F0E0C;--card:#161410;--bg3:#1E1C18;--border:#2A2822;
+  --text:#F0EDE8;--text2:#A09880;--text3:#605848;--text-soft:#C8C2B8;
+  --p:#C47B14;--p2:#E8961A;--p-dark:#7A4A0C;
+  --green:#4ADE80;--green2:#22C55E;--red:#F87171;--red2:#EF4444;
+  --bg-deep:#18160F;--blue:#3B9EFF;--gray-occ:#3A3630;
+}
+html[data-theme="light"]{
+  --bg:#EDE7DC;--card:#FFFFFF;--bg3:#F3EEE4;--border:#DBD0BB;
+  --text:#221D15;--text2:#5C5344;--text3:#8C8271;--text-soft:#3A342A;
+  --p:#B36A0E;--p2:#C47B14;--p-dark:#8A5410;
+  --green:#16A34A;--green2:#15803D;--red:#DC2626;--red2:#B91C1C;
+  --bg-deep:#18160F;--blue:#2563EB;--gray-occ:#D8CFB9;
+}
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{background:#0F0E0C;color:#F0EDE8;font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;overflow-x:hidden;width:100%;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;overflow-x:hidden;width:100%;}
 body{display:flex;flex-direction:column;align-items:center;padding-bottom:60px;}
 a{color:inherit;}
-.topbar{width:100%;padding:14px 20px;display:flex;align-items:center;border-bottom:1px solid #2A2822;}
-.logo{font-size:18px;font-weight:900;color:#E8961A;}
+.topbar{width:100%;padding:14px 20px;display:flex;align-items:center;border-bottom:1px solid var(--border);}
+.logo{font-size:18px;font-weight:900;color:var(--p2);}
 .wrap{width:100%;max-width:560px;padding:20px 16px 0;}
-.hero{border-radius:16px;overflow:hidden;margin-bottom:16px;background:#1E1C18;border:1px solid #2A2822;}
-.hero-img{width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#C47B14,#7A4A0C);display:flex;align-items:center;justify-content:center;font-size:40px;}
+.hero{border-radius:16px;overflow:hidden;margin-bottom:16px;background:var(--bg3);border:1px solid var(--border);}
+.hero-img{width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,var(--p),var(--p-dark));display:flex;align-items:center;justify-content:center;font-size:40px;}
 .hero-img img{width:100%;height:100%;object-fit:cover;}
 .hero-body{padding:20px;}
-.hero-cat{font-size:11px;letter-spacing:2px;color:#E8961A;font-weight:700;margin-bottom:8px;text-transform:uppercase;}
+.hero-cat{font-size:11px;letter-spacing:2px;color:var(--p2);font-weight:700;margin-bottom:8px;text-transform:uppercase;}
 .hero-nome{font-size:24px;font-weight:900;line-height:1.2;margin-bottom:12px;}
-.hero-meta{font-size:13px;color:#A09880;display:flex;flex-direction:column;gap:6px;}
-.hero-organizador{margin-top:14px;padding-top:14px;border-top:1px solid #2A2822;display:flex;align-items:center;gap:10px;font-size:13px;color:#A09880;}
-.hero-desc{margin-top:14px;font-size:13px;color:#C8C2B8;line-height:1.7;white-space:pre-wrap;}
-.card{background:#161410;border:1px solid #2A2822;border-radius:14px;padding:20px;margin-bottom:14px;}
-.card-title{font-size:12px;font-weight:700;color:#A09880;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;}
-.lote{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid #2A2822;gap:12px;}
+.hero-meta{font-size:13px;color:var(--text2);display:flex;flex-direction:column;gap:6px;}
+.hero-organizador{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);}
+.hero-desc{margin-top:14px;font-size:13px;color:var(--text-soft);line-height:1.7;white-space:pre-wrap;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:14px;}
+.card-title{font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;}
+.lote{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--border);gap:12px;}
 .lote:last-child{border-bottom:none;}
 .lote-info{flex:1;min-width:0;}
 .lote-nome{font-size:14px;font-weight:700;}
-.lote-preco{font-size:13px;color:#E8961A;margin-top:2px;font-weight:700;}
-.lote-preco.gratis{color:#22C55E;}
-.lote-disp{font-size:11px;color:#605848;margin-top:2px;}
+.lote-preco{font-size:13px;color:var(--p2);margin-top:2px;font-weight:700;}
+.lote-preco.gratis{color:var(--green2);}
+.lote-disp{font-size:11px;color:var(--text3);margin-top:2px;}
 .qtd-ctrl{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.qtd-btn{width:32px;height:32px;border-radius:8px;border:1px solid #2A2822;background:#1E1C18;color:#F0EDE8;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.qtd-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .qtd-val{font-size:15px;font-weight:700;min-width:20px;text-align:center;}
 .fg{margin-bottom:13px;}
-.fg label{font-size:11px;font-weight:600;color:#A09880;display:block;margin-bottom:5px;}
-.fi{width:100%;background:#0F0E0C;border:1.5px solid #2A2822;border-radius:9px;padding:11px 13px;color:#F0EDE8;font-family:inherit;font-size:16px;outline:none;}
-.fi-mp{width:100%;background:#0F0E0C;border:1.5px solid #2A2822;border-radius:9px;padding:11px 13px;height:44px;box-sizing:border-box;}
-.fi-mp.focused{border-color:#E8961A;}
-.fi-mp.invalid{border-color:#EF4444;}
+.fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
+.fi{width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;color:var(--text);font-family:inherit;font-size:16px;outline:none;}
+.fi-mp{width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;height:44px;box-sizing:border-box;}
+.fi-mp.focused{border-color:var(--p2);}
+.fi-mp.invalid{border-color:var(--red2);}
 .metodo-tabs{display:flex;gap:8px;margin-bottom:16px;}
-.metodo-tab{flex:1;text-align:center;padding:11px;border-radius:9px;border:1.5px solid #2A2822;font-size:13px;font-weight:700;cursor:pointer;color:#A09880;}
-.metodo-tab.active{background:rgba(232,150,26,.12);border-color:rgba(232,150,26,.4);color:#E8961A;}
+.metodo-tab{flex:1;text-align:center;padding:11px;border-radius:9px;border:1.5px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;color:var(--text2);}
+.metodo-tab.active{background:rgba(232,150,26,.12);border-color:rgba(232,150,26,.4);color:var(--p2);}
 .pix-box{text-align:center;}
 .pix-box img{width:220px;height:220px;background:#fff;border-radius:10px;padding:8px;margin:0 auto 14px;display:block;}
-.fi:focus{border-color:#E8961A;}
+.fi:focus{border-color:var(--p2);}
 .cupom-row{display:flex;gap:8px;}
 .cupom-row .fi{flex:1;}
-.cupom-aplicado{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:9px 12px;font-size:12px;color:#4ADE80;display:flex;justify-content:space-between;align-items:center;}
-.total-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px;color:#A09880;}
-.total-row.final{padding-top:14px;border-top:1px solid #2A2822;margin-top:6px;}
-.total-row.final .total-val{font-size:24px;font-weight:800;color:#E8961A;}
-.btn{width:100%;padding:15px;background:#E8961A;border:none;border-radius:10px;color:#18160F;font-family:inherit;font-size:15px;font-weight:800;cursor:pointer;margin-top:6px;}
+.cupom-aplicado{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--green);display:flex;justify-content:space-between;align-items:center;}
+.total-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px;color:var(--text2);}
+.total-row.final{padding-top:14px;border-top:1px solid var(--border);margin-top:6px;}
+.total-row.final .total-val{font-size:24px;font-weight:800;color:var(--p2);}
+.btn{width:100%;padding:15px;background:var(--p2);border:none;border-radius:10px;color:var(--bg-deep);font-family:inherit;font-size:15px;font-weight:800;cursor:pointer;margin-top:6px;}
 .btn:disabled{opacity:.4;}
-.err{font-size:12px;color:#F87171;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 13px;margin-bottom:12px;display:none;}
-.empty{text-align:center;padding:40px 20px;color:#605848;}
-.spinner{width:36px;height:36px;border:3px solid rgba(232,150,26,.2);border-top-color:#E8961A;border-radius:50%;animation:spin 1s linear infinite;margin:30px auto;}
+.err{font-size:12px;color:var(--red);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 13px;margin-bottom:12px;display:none;}
+.empty{text-align:center;padding:40px 20px;color:var(--text3);}
+.spinner{width:36px;height:36px;border:3px solid rgba(232,150,26,.2);border-top-color:var(--p2);border-radius:50%;animation:spin 1s linear infinite;margin:30px auto;}
 @keyframes spin{to{transform:rotate(360deg)}}
-.ticket{background:#1E1C18;border:1px solid #2A2822;border-radius:12px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;}
+.ticket{background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;}
 .ticket-qr{width:70px;height:70px;background:#fff;border-radius:8px;flex-shrink:0;}
-.ticket-code{font-family:monospace;font-size:13px;font-weight:700;color:#E8961A;}
-.ticket-lote{font-size:11px;color:#A09880;margin-top:3px;}
+.ticket-code{font-family:monospace;font-size:13px;font-weight:700;color:var(--p2);}
+.ticket-lote{font-size:11px;color:var(--text2);margin-top:3px;}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;margin-bottom:16px;}
-.badge.ok{background:rgba(34,197,94,.15);color:#4ADE80;}
-.badge.pending{background:rgba(232,150,26,.15);color:#E8961A;}
-.badge.fail{background:rgba(239,68,68,.15);color:#F87171;}
-.promoter-badge{background:rgba(196,123,20,.12);border:1px solid rgba(196,123,20,.3);border-radius:8px;padding:9px 12px;font-size:12px;color:#E8961A;margin-bottom:14px;text-align:center;}
-.copyw{font-size:10px;color:#605848;text-align:center;margin-top:24px;opacity:.6;}
+.badge.ok{background:rgba(34,197,94,.15);color:var(--green);}
+.badge.pending{background:rgba(232,150,26,.15);color:var(--p2);}
+.badge.fail{background:rgba(239,68,68,.15);color:var(--red);}
+.promoter-badge{background:rgba(196,123,20,.12);border:1px solid rgba(196,123,20,.3);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--p2);margin-bottom:14px;text-align:center;}
+.copyw{font-size:10px;color:var(--text3);text-align:center;margin-top:24px;opacity:.6;}
 </style>
 </head>
 <body>
-<div class="topbar"><a href="/" class="logo">🎟️ Lota Ticketeria</a></div>
+<div class="topbar" style="justify-content:space-between"><a href="/" class="logo">🎟️ Lota Ticketeria</a><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:36px;height:36px;font-size:15px;cursor:pointer">🌙</button></div>
 <div class="wrap" id="app"><div class="spinner"></div></div>
-<footer style="margin-top:30px;padding:24px 20px;border-top:1px solid #2A2822;font-size:12px;color:#605848;text-align:center;width:100%;max-width:520px">
+<footer style="margin-top:30px;padding:24px 20px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);text-align:center;width:100%;max-width:520px">
   <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:16px;text-align:left">
     <div>
-      <div style="font-weight:700;color:#A09880;margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
-      <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:#E8961A;text-decoration:none">+55 21 99857-9651</a></div>
-      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:#E8961A;text-decoration:none">sac@workamusic.com.br</a></div>
-      <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:#E8961A;text-decoration:none">@lota_evento</a></div>
+      <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
+      <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
+      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+      <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
     </div>
     <div>
-      <div style="font-weight:700;color:#A09880;margin-bottom:8px;font-size:11px;letter-spacing:1px">INFORMAÇÕES</div>
-      <div style="margin-bottom:4px"><a href="/sobre-nos.html" style="color:#605848;text-decoration:none">Sobre nós</a></div>
-      <div style="margin-bottom:4px"><a href="/privacidade.html" style="color:#605848;text-decoration:none">Política de Privacidade</a></div>
-      <div><a href="/termos.html" style="color:#605848;text-decoration:none">Termos de Uso</a></div>
+      <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">INFORMAÇÕES</div>
+      <div style="margin-bottom:4px"><a href="/sobre-nos.html" style="color:var(--text3);text-decoration:none">Sobre nós</a></div>
+      <div style="margin-bottom:4px"><a href="/privacidade.html" style="color:var(--text3);text-decoration:none">Política de Privacidade</a></div>
+      <div><a href="/termos.html" style="color:var(--text3);text-decoration:none">Termos de Uso</a></div>
     </div>
   </div>
   <div>🎟️ Vendido com Lota Ticketeria</div>
 </footer>
 
 <script>
+// ─── TEMA CLARO/ESCURO ───────────────────────────────────────
+function aplicarTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
+}
+(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+function alternarTema(){
+  const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const novo = atual === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lota_tema', novo);
+  aplicarTema(novo);
+}
+
 const params=new URLSearchParams(location.search);
 const pedidoParam=params.get('pedido');
 const statusParam=params.get('status');
@@ -156,7 +184,7 @@ async function init(){
 }
 
 function renderEvento(){
-  const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'#C47B14';
+  const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'var(--p)';
   const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
   const loteIdsComAssento=temMapaAssentos?new Set(EVENTO.mapaAssentos.setores.map(s=>s.loteId)):new Set();
   const lotesFonte=PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
@@ -166,7 +194,7 @@ function renderEvento(){
       <div class="lote-info">
         <div class="lote-nome">${esc(l.nome)}</div>
         <div class="lote-preco ${l.cortesia?'gratis':''}">${l.cortesia?'Cortesia':'R$ '+l.preco.toFixed(2).replace('.',',')}</div>
-        ${!l.cortesia?'<div style="font-size:10px;color:#605848;margin-top:1px">Pague em até 12x</div>':''}
+        ${!l.cortesia?'<div style="font-size:10px;color:var(--text3);margin-top:1px">Pague em até 12x</div>':''}
       </div>
       <div class="qtd-ctrl">
         <button class="qtd-btn" onclick="alterarQtd('${l.id}',-1)">−</button>
@@ -176,7 +204,7 @@ function renderEvento(){
     </div>`).join(''):(temMapaAssentos?'':'<div class="empty">Nenhum lote disponível.</div>');
 
   document.getElementById('app').innerHTML=`
-    ${EVENTO.testMode?'<div style="background:#C47B14;color:#18160F;font-weight:700;font-size:12px;text-align:center;padding:8px;border-radius:8px;margin-bottom:12px">🧪 MODO TESTE — nenhuma cobrança real será feita</div>':''}
+    ${EVENTO.testMode?'<div style="background:var(--p);color:var(--bg-deep);font-weight:700;font-size:12px;text-align:center;padding:8px;border-radius:8px;margin-bottom:12px">🧪 MODO TESTE — nenhuma cobrança real será feita</div>':''}
     ${PROMOTER_INFO?'<div class="promoter-badge">🎟️ Você está comprando pelo link de <strong>'+esc(PROMOTER_INFO.promoterNome)+'</strong></div>':''}
     <div class="hero">
       <div class="hero-img">${EVENTO.imagemCapa?'<img src="'+esc(EVENTO.imagemCapa)+'">':'🎪'}</div>
@@ -187,8 +215,8 @@ function renderEvento(){
           <span>📅 ${new Date(EVENTO.dataEvento).toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'})}${EVENTO.horaEvento?' às '+EVENTO.horaEvento:''}</span>
           ${EVENTO.local?'<span>📍 '+esc(EVENTO.local)+(EVENTO.cidade?', '+esc(EVENTO.cidade):'')+'</span>':''}
         </div>
-        <div style="font-size:10px;color:#605848;margin-top:4px">Pague em até 12x</div>
-        ${EVENTO.organizador?.nome?'<div class="hero-organizador"><span>Por <a href="/o/'+esc(EVENTO.organizador.slug)+'" style="color:#E8961A;font-weight:700">'+esc(EVENTO.organizador.nome)+'</a>'+(EVENTO.organizador.verificado?' <span title="Produtor verificado" style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:#3B9EFF;border-radius:50%;font-size:9px;vertical-align:middle;color:#fff">✓</span>':'')+'</span></div>':''}
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Pague em até 12x</div>
+        ${EVENTO.organizador?.nome?'<div class="hero-organizador"><span>Por <a href="/o/'+esc(EVENTO.organizador.slug)+'" style="color:var(--p2);font-weight:700">'+esc(EVENTO.organizador.nome)+'</a>'+(EVENTO.organizador.verificado?' <span title="Produtor verificado" style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:var(--blue);border-radius:50%;font-size:9px;vertical-align:middle;color:#fff">✓</span>':'')+'</span></div>':''}
         ${EVENTO.descricao?'<div class="hero-desc">'+esc(EVENTO.descricao)+'</div>':''}
         ${EVENTO.videoYoutubeId?'<div style="margin-top:16px;border-radius:10px;overflow:hidden;aspect-ratio:16/9"><iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+EVENTO.videoYoutubeId+'" title="Vídeo do evento" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;height:100%;display:block"></iframe></div>':''}
       </div>
@@ -198,7 +226,7 @@ function renderEvento(){
       <div class="card-title">${temMapaAssentos&&lotesSemAssento.length?'Outros ingressos':'Escolha seus ingressos'}</div>
       ${lotesHtml}
       <div style="margin-top:14px">
-        <label style="font-size:11px;font-weight:600;color:#A09880;display:block;margin-bottom:5px">Cupom de desconto</label>
+        <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Cupom de desconto</label>
         <div id="cupomArea">
           <div class="cupom-row">
             <input class="fi" id="cupomInput" placeholder="Tenho um cupom">
@@ -207,7 +235,7 @@ function renderEvento(){
         </div>
       </div>
       <div class="total-row"><span>Subtotal</span><span id="subtotalVal">R$ 0,00</span></div>
-      <div class="total-row" id="descontoRow" style="display:none"><span>Desconto</span><span id="descontoVal" style="color:#4ADE80">- R$ 0,00</span></div>
+      <div class="total-row" id="descontoRow" style="display:none"><span>Desconto</span><span id="descontoVal" style="color:var(--green)">- R$ 0,00</span></div>
       <div class="total-row" id="taxaRow" style="display:none"><span>Taxa administrativa</span><span id="taxaVal">R$ 0,00</span></div>
       <div class="total-row final"><span>Total</span><span class="total-val" id="totalVal">R$ 0,00</span></div>
     </div>
@@ -239,7 +267,7 @@ function renderEvento(){
           <select id="form-checkout__identificationType" style="display:none"></select>
         </div>
         <div id="areaPix" style="display:none">
-          <p style="font-size:13px;color:#A09880;margin-bottom:6px">Ao confirmar, vamos gerar um código PIX pra você pagar na hora, sem precisar sair daqui.</p>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:6px">Ao confirmar, vamos gerar um código PIX pra você pagar na hora, sem precisar sair daqui.</p>
         </div>
         <button class="btn" id="btnComprar" type="submit">Pagar →</button>
       </form>
@@ -250,7 +278,7 @@ function renderEvento(){
       <img id="pixQrImg" alt="QR Code PIX">
       <div class="fg" style="text-align:left"><label>PIX Copia e Cola</label><textarea class="fi" id="pixCopiaCola" readonly rows="3" style="resize:none;font-size:11px"></textarea></div>
       <button class="btn bo" style="width:100%;margin:0" onclick="copiarPix()">📋 Copiar código</button>
-      <p style="font-size:12px;color:#605848;margin-top:14px">Assim que o pagamento for confirmado (geralmente poucos segundos), seus ingressos aparecem aqui automaticamente.</p>
+      <p style="font-size:12px;color:var(--text3);margin-top:14px">Assim que o pagamento for confirmado (geralmente poucos segundos), seus ingressos aparecem aqui automaticamente.</p>
     </div>
   `;
   // O formulário só existe no DOM a partir daqui (foi criado agora, via innerHTML acima) —
@@ -280,28 +308,28 @@ function renderMapaAssentosHtml(){
   const ma=EVENTO.mapaAssentos;
   const ocupados=new Set(EVENTO.assentosOcupados||[]);
   let html='<div class="card"><div class="card-title">Escolha seu assento</div>'
-    +'<div style="text-align:center;background:#0F0E0C;border:1px solid #2A2822;border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:#605848;font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
+    +'<div style="text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:var(--text3);font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
   ma.setores.forEach(s=>{
     const lote=EVENTO.lotes.find(l=>l.id===s.loteId);
     const preco=lote?lote.preco:0;
-    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:#F0EDE8;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'#C47B14')+'"></span>'+esc(s.nome)+' — R$ '+preco.toFixed(2).replace('.',',')+'</div>';
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+' — R$ '+preco.toFixed(2).replace('.',',')+'</div>';
     html+='<div style="overflow-x:auto"><div style="display:inline-block">';
     for(let r=0;r<s.linhas;r++){
       const letra=String.fromCharCode(65+r);
       html+='<div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">';
-      html+='<span style="font-size:9px;color:#605848;width:16px;text-align:center">'+letra+'</span>';
+      html+='<span style="font-size:9px;color:var(--text3);width:16px;text-align:center">'+letra+'</span>';
       for(let c=1;c<=s.assentosPorLinha;c++){
         const seatCode=s.id+'-'+letra+c;
         const ocupado=ocupados.has(seatCode);
         const selecionado=!!assentosSelecionados[seatCode];
-        const cor=ocupado?'#3A3630':(selecionado?(s.cor||'#C47B14'):'#1E1C18');
-        html+='<div onclick="'+(ocupado?'':'toggleAssento(\''+seatCode+'\',\''+s.loteId+'\','+preco+',\''+esc(s.nome)+'\')')+'" title="'+seatCode+'" style="width:22px;height:22px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'#C47B14'):'#2A2822')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
+        const cor=ocupado?'var(--gray-occ)':(selecionado?(s.cor||'var(--p)'):'var(--bg3)');
+        html+='<div onclick="'+(ocupado?'':'toggleAssento(\''+seatCode+'\',\''+s.loteId+'\','+preco+',\''+esc(s.nome)+'\')')+'" title="'+seatCode+'" style="width:22px;height:22px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'var(--p)'):'var(--border)')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
       }
       html+='</div>';
     }
     html+='</div></div></div>';
   });
-  html+='<div style="display:flex;gap:16px;font-size:11px;color:#A09880;margin-top:8px"><span><span style="display:inline-block;width:10px;height:10px;background:#1E1C18;border:1px solid #2A2822;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-block;width:10px;height:10px;background:#C47B14;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-block;width:10px;height:10px;background:#3A3630;border-radius:2px;margin-right:4px;vertical-align:middle"></span>Ocupado</span></div>';
+  html+='<div style="display:flex;gap:16px;font-size:11px;color:var(--text2);margin-top:8px"><span><span style="display:inline-block;width:10px;height:10px;background:var(--bg3);border:1px solid var(--border);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--p);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--gray-occ);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Ocupado</span></div>';
   html+='</div>';
   return html;
 }
@@ -354,7 +382,7 @@ async function aplicarCupom(){
     const d=await api('GET','/api/public/eventos/'+slug+'/cupom/'+encodeURIComponent(codigo));
     cupomAplicado={codigo:d.codigo, tipo:d.tipo, valor:d.valor};
     const descValor=d.tipo==='fixo'?('R$ '+d.valor.toFixed(2).replace('.',',')):(d.valor+'%');
-    area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(d.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:#4ADE80;cursor:pointer;font-weight:700">✕</button></div>';
+    area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(d.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:var(--green);cursor:pointer;font-weight:700">✕</button></div>';
     atualizarTotal();
   }catch(e){
     cupomAplicado=null;
@@ -504,19 +532,19 @@ async function renderStatusPedido(){
       const d=await api('GET','/api/public/pedido/'+pedidoParam);
       if(d.status==='pago' && d.tickets.length){
         document.getElementById('pedidoContent').innerHTML=`
-          <p style="font-size:13px;color:#A09880;margin-bottom:16px">Seus ingressos, ${esc(d.comprador.nome)}:</p>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Seus ingressos, ${esc(d.comprador.nome)}:</p>
           ${d.tickets.map(t=>`<div class="ticket"><div class="ticket-qr" id="qr-${t.codigo}"></div><div><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}</div></div></div>`).join('')}
           <a href="/api/public/pedido/${pedidoParam}/pdf" target="_blank" class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:14px">📄 Abrir ingresso em PDF</a>
-          <p style="font-size:11px;color:#605848;margin-top:10px">Guarde estes códigos. Apresente-os na entrada.</p>`;
+          <p style="font-size:11px;color:var(--text3);margin-top:10px">Guarde estes códigos. Apresente-os na entrada.</p>`;
         d.tickets.forEach(t=>gerarQR(t.codigo));
         try{ const ev=await api('GET','/api/public/eventos/'+slug); dispararConversao(ev.pixels,d.total); }catch(e){}
         return;
       }
-      if(d.status==='recusado'){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:#A09880">Pagamento não aprovado. Tente novamente.</p>'; return; }
+      if(d.status==='recusado'){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Pagamento não aprovado. Tente novamente.</p>'; return; }
       tentativas++;
       if(tentativas<10) setTimeout(poll,3000);
-      else document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:#A09880">Ainda processando. Atualize a página em instantes.</p>';
-    }catch(e){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:#A09880">'+esc(e.message)+'</p>'; }
+      else document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Ainda processando. Atualize a página em instantes.</p>';
+    }catch(e){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">'+esc(e.message)+'</p>'; }
   };
   poll();
 }
