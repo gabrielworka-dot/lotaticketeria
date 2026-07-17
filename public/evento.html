@@ -347,11 +347,20 @@ function atualizarTotal(){
 async function aplicarCupom(){
   const codigo=document.getElementById('cupomInput')?.value?.trim();
   if(!codigo) return;
-  // Validação real acontece no checkout; aqui só guardamos localmente pra exibir prévia
-  cupomAplicado={codigo, tipo:'percentual', valor:0, _pendente:true};
   const area=document.getElementById('cupomArea');
-  area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(codigo)+'" será aplicado no pagamento <button onclick="removerCupom()" style="background:none;border:none;color:#4ADE80;cursor:pointer;font-weight:700">✕</button></div>';
-  atualizarTotal();
+  const btnAplicar=area.querySelector('button');
+  if(btnAplicar){ btnAplicar.disabled=true; btnAplicar.textContent='Verificando...'; }
+  try{
+    const d=await api('GET','/api/public/eventos/'+slug+'/cupom/'+encodeURIComponent(codigo));
+    cupomAplicado={codigo:d.codigo, tipo:d.tipo, valor:d.valor};
+    const descValor=d.tipo==='fixo'?('R$ '+d.valor.toFixed(2).replace('.',',')):(d.valor+'%');
+    area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(d.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:#4ADE80;cursor:pointer;font-weight:700">✕</button></div>';
+    atualizarTotal();
+  }catch(e){
+    cupomAplicado=null;
+    area.innerHTML='<div class="err" style="display:block;margin-bottom:0">'+esc(e.message)+'</div><div class="cupom-row" style="margin-top:8px"><input class="fi" id="cupomInput" placeholder="Tenho um cupom"><button class="btn" style="width:auto;margin:0;padding:11px 18px;font-size:13px" onclick="aplicarCupom()">Aplicar</button></div>';
+    atualizarTotal();
+  }
 }
 function removerCupom(){
   cupomAplicado=null;
