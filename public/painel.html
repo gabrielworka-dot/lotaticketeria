@@ -362,6 +362,7 @@ function handleImageUpload(fileInput, targetInputId, previewId){
   reader.readAsDataURL(file);
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
 function bloqueiaSomenteLeitura(){ if(SOMENTE_LEITURA){ toast('Sua conta tem acesso somente de visualização.','err'); return true; } return false; }
 
@@ -463,7 +464,7 @@ async function carregarEventos(){
   try{
     const d=await api('GET','/api/meus-eventos');
     if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento ainda.'+(SOMENTE_LEITURA?'':' Crie o primeiro!')+'</p></div>'; return; }
-    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+new Date(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'+(SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" style="margin-top:10px" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>')+'</div>').join('');
+    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'+(SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" style="margin-top:10px" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>')+'</div>').join('');
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function duplicarEvento(id){
@@ -505,7 +506,7 @@ function renderEventoDetalhe(){
   el.innerHTML=`
     ${SOMENTE_LEITURA?'<div style="background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:10px 16px;border-radius:10px;font-size:12px;margin-bottom:14px">👁️ Você está vendo este evento em modo somente visualização.</div>':''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-      <div><div style="font-size:20px;font-weight:800">${esc(ev.nome)}</div><div style="font-size:12px;color:var(--text2)">${new Date(ev.dataEvento).toLocaleDateString('pt-BR')} · ${esc(ev.cidade||'')}</div></div>
+      <div><div style="font-size:20px;font-weight:800">${esc(ev.nome)}</div><div style="font-size:12px;color:var(--text2)">${parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR')} · ${esc(ev.cidade||'')}</div></div>
       <div style="display:flex;gap:8px">
         <a href="/e/${ev.slug}" target="_blank" class="btn bo btn-sm">Ver página →</a>
         ${SOMENTE_LEITURA?'':'<button class="btn '+(ev.status==='publicado'?'bgreen':'bp')+' btn-sm" onclick="togglePublicar()">'+(ev.status==='publicado'?'✅ Publicado':'▶️ Publicar')+'</button>'}
@@ -1017,6 +1018,15 @@ async function deletarPost(id){
 function carregarPerfil(){
   document.getElementById('perfilForm').innerHTML=`
     <div class="fg"><label>Nome</label><input class="fi" id="pfNome" value="${esc(CU.nome)}"></div>
+
+    <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px">
+      <div class="ct">Acesso e Segurança</div>
+      <div class="fg"><label>E-mail atual</label><input class="fi" id="pfEmailAtual" value="${esc(CU.email)}" disabled style="opacity:.6"></div>
+      <div class="fg"><label>Novo e-mail (deixe vazio pra não trocar)</label><input class="fi" id="pfNovoEmail" type="email" placeholder="novo@email.com"></div>
+      <div class="fg"><label>Nova senha (deixe vazio pra não trocar)</label><input class="fi" id="pfNovaSenha" type="password" placeholder="Mínimo 6 caracteres"></div>
+      <div class="fg"><label>Senha atual <span style="color:var(--text3);font-weight:400">(só se for trocar e-mail ou senha)</span></label><input class="fi" id="pfSenhaAtual" type="password" placeholder="••••••••"></div>
+    </div>
+
     <div class="fg"><label>Bio</label><textarea class="fta" id="pfBio">${esc(CU.bio||'')}</textarea></div>
     <div class="fg"><label>Avatar</label>
       <div style="display:flex;gap:10px;align-items:center">
@@ -1100,13 +1110,20 @@ async function removerColaborador(id){
 }
 function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
 async function salvarPerfil(){
+  const novoEmail=gv('pfNovoEmail'), novaSenha=gv('pfNovaSenha'), senhaAtual=gv('pfSenhaAtual');
+  if((novoEmail||novaSenha) && !senhaAtual){ toast('Digite sua senha atual pra confirmar a troca de e-mail/senha.','err'); return; }
   try{
-    const d=await api('PATCH','/api/auth/perfil',{
+    const body={
       nome:gv('pfNome'),bio:gv('pfBio'),avatarUrl:gv('pfAvatar'),bannerUrl:gv('pfBanner'),redesSociais:{instagram:gv('pfInsta')},
       tipoDocumento:gv('pfTipoDoc'),cpfCnpj:gv('pfCpfCnpj'),
       pagamentoInfo:{tipoChavePix:gv('pfTipoPix'),chavePix:gv('pfChavePix'),nomeTitular:gv('pfTitular'),nomeBanco:gv('pfBanco'),numeroAgencia:gv('pfAgencia'),tipoConta:gv('pfTipoConta')}
-    });
+    };
+    if(senhaAtual) body.senhaAtual=senhaAtual;
+    if(novoEmail) body.novoEmail=novoEmail;
+    if(novaSenha) body.novaSenha=novaSenha;
+    const d=await api('PATCH','/api/auth/perfil',body);
     CU=d.user; toast('Perfil salvo!','ok');
+    carregarPerfil();
   }catch(e){ toast(e.message,'err'); }
 }
 </script>
