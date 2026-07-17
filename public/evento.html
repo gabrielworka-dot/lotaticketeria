@@ -142,6 +142,7 @@ async function api(m,p,b){
   return d;
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 
 function injetarPixels(pixels){
   if(!pixels) return;
@@ -212,7 +213,7 @@ function renderEvento(){
         <div class="hero-cat">${esc(EVENTO.categoria||'')}</div>
         <div class="hero-nome">${esc(EVENTO.nome)}</div>
         <div class="hero-meta">
-          <span>📅 ${new Date(EVENTO.dataEvento).toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'})}${EVENTO.horaEvento?' às '+EVENTO.horaEvento:''}</span>
+          <span>📅 ${parseDataLocal(EVENTO.dataEvento).toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'})}${EVENTO.horaEvento?' às '+EVENTO.horaEvento:''}</span>
           ${EVENTO.local?'<span>📍 '+esc(EVENTO.local)+(EVENTO.cidade?', '+esc(EVENTO.cidade):'')+'</span>':''}
         </div>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">Pague em até 12x</div>
