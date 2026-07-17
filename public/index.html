@@ -15,6 +15,15 @@
   --red:#EF4444;--rbg:rgba(239,68,68,.1);
   --sh:0 4px 16px rgba(0,0,0,.3);--shl:0 12px 32px rgba(0,0,0,.5);
 }
+html[data-theme="light"]{
+  --bg:#FAF8F5;--bg2:#FFFFFF;--bg3:#F1ECE4;--card:#FFFFFF;
+  --border:#E4DDD1;--border2:#D3C9B8;
+  --text:#211D15;--text2:#6B6151;--text3:#948A78;
+  --p:#B36A0E;--p2:#C47B14;--pbg:rgba(180,110,15,.1);--pb:rgba(180,110,15,.3);
+  --green:#16A34A;--gbg:rgba(22,163,74,.08);
+  --red:#DC2626;--rbg:rgba(220,38,38,.08);
+  --sh:0 4px 16px rgba(0,0,0,.06);--shl:0 12px 32px rgba(0,0,0,.12);
+}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;width:100%;}
 body{min-height:100vh;}
@@ -130,6 +139,7 @@ a{color:inherit;text-decoration:none;}
     <span>🔍</span>
     <input id="searchInput" placeholder="Buscar eventos, shows, festas..." onkeydown="if(event.key==='Enter')buscar()">
   </div>
+  <button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:38px;height:38px;font-size:16px;cursor:pointer;flex-shrink:0">🌙</button>
   <div class="hdr-actions" id="hdrActions">
     <button class="btn bo" onclick="openModal('loginModal')">Entrar</button>
     <button class="btn bp" onclick="openModal('registroModal')">Criar conta</button>
@@ -194,6 +204,17 @@ a{color:inherit;text-decoration:none;}
   </div>
 </div>
 
+<!-- 2FA MODAL -->
+<div class="mo" id="twoFaModal">
+  <div class="modal">
+    <h2>Verificação em duas etapas</h2>
+    <p class="sub">Digite o código de 6 dígitos do seu app autenticador</p>
+    <div class="err" id="twoFaErr"></div>
+    <div class="fg"><label>Código</label><input class="fi" id="twoFaCodigo" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:4px;text-align:center;font-size:20px" onkeydown="if(event.key==='Enter')confirmar2FA()"></div>
+    <button class="btn bp" style="width:100%;padding:12px" id="btn2FaConfirmar" onclick="confirmar2FA()">Confirmar →</button>
+  </div>
+</div>
+
 <!-- ESQUECI SENHA MODAL -->
 <div class="mo" id="esqueciModal" onclick="if(event.target===this)closeModal('esqueciModal')">
   <div class="modal">
@@ -237,6 +258,23 @@ a{color:inherit;text-decoration:none;}
 let AT = localStorage.getItem('role_token') || null;
 let CU = null;
 
+// ─── TEMA CLARO/ESCURO ───────────────────────────────────────
+function aplicarTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
+}
+(function(){
+  const salvo = localStorage.getItem('lota_tema') || 'dark';
+  aplicarTema(salvo);
+})();
+function alternarTema(){
+  const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const novo = atual === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lota_tema', novo);
+  aplicarTema(novo);
+}
+
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
   if(AT) o.headers['Authorization']='Bearer '+AT;
@@ -251,6 +289,7 @@ function toast(msg,type){const e=document.getElementById('toast');e.textContent=
 function openModal(id){document.getElementById(id).classList.add('show');}
 function closeModal(id){document.getElementById(id).classList.remove('show');}
 
+let PRE_AUTH_TOKEN=null;
 async function doLogin(){
   const email=document.getElementById('loginEmail').value.trim();
   const senha=document.getElementById('loginSenha').value.trim();
@@ -259,11 +298,35 @@ async function doLogin(){
   if(!email||!senha){err.textContent='Preencha e-mail e senha.';err.style.display='block';return;}
   try{
     const d=await api('POST','/api/auth/login',{email,senha});
+    if(d.precisa2FA){
+      PRE_AUTH_TOKEN=d.preAuthToken;
+      closeModal('loginModal');
+      document.getElementById('twoFaCodigo').value='';
+      document.getElementById('twoFaErr').style.display='none';
+      openModal('twoFaModal');
+      return;
+    }
     AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
     closeModal('loginModal');
     initLoggedIn();
     toast('Bem-vindo, '+CU.nome+'!','ok');
   }catch(e){err.textContent=e.message;err.style.display='block';}
+}
+async function confirmar2FA(){
+  const codigo=document.getElementById('twoFaCodigo').value.trim();
+  const err=document.getElementById('twoFaErr');
+  err.style.display='none';
+  if(!codigo){ err.textContent='Digite o código.'; err.style.display='block'; return; }
+  const btn=document.getElementById('btn2FaConfirmar');
+  btn.disabled=true; btn.textContent='Verificando...';
+  try{
+    const d=await api('POST','/api/auth/2fa/verificar-login',{preAuthToken:PRE_AUTH_TOKEN,codigo});
+    AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
+    closeModal('twoFaModal');
+    initLoggedIn();
+    toast('Bem-vindo, '+CU.nome+'!','ok');
+  }catch(e){ err.textContent=e.message; err.style.display='block'; }
+  finally{ btn.disabled=false; btn.textContent='Confirmar →'; }
 }
 let TIPO_CADASTRO='cliente';
 function selecionarTipoCadastro(tipo){
