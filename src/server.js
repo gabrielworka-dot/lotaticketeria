@@ -965,6 +965,18 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   });
 });
 
+// Validação de cupom em tempo real — permite mostrar o desconto real antes do pagamento
+app.get('/api/public/eventos/:slug/cupom/:codigo', rateLimit(60000, 60), (req, res) => {
+  const ref = db.ticketSlugs[req.params.slug];
+  if (!ref) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const ev = EVENTOS.find(e => e.id === ref.eventoId);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const cupomObj = ev.cupons.find(c => c.codigo === String(req.params.codigo).toUpperCase().trim() && c.ativo);
+  if (!cupomObj) return res.status(404).json({ error: 'Cupom inválido ou expirado.' });
+  if (cupomObj.usosMax > 0 && cupomObj.usosAtuais >= cupomObj.usosMax) return res.status(400).json({ error: 'Cupom esgotado.' });
+  res.json({ codigo: cupomObj.codigo, tipo: cupomObj.tipo, valor: cupomObj.valor });
+});
+
 app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (req, res) => {
   const ref = db.ticketSlugs[req.params.slug];
   if (!ref) return res.status(404).json({ error: 'Evento não encontrado.' });
@@ -974,7 +986,6 @@ app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (
   const lotesExclusivos = ev.lotes.filter(l => l.ativo && l.vendidos < l.qtdTotal).map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos }));
   res.json({ promoterNome: promoter.nome, lotes: lotesExclusivos });
 });
-
 // ── CHECKOUT (com cupom, promoter e cortesia) ──
 app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
   try {
@@ -1094,9 +1105,14 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     // Cartão
     if (!token || !paymentMethodId) return res.status(400).json({ error: 'Dados do cartão incompletos.' });
+    // O Mercado Pago exige um mínimo de R$5,00 por parcela — limitamos aqui pra nunca enviar um
+    // número de parcelas que resulte num valor de parcela abaixo disso (causa "Invalid transaction_amount").
+    const maxParcelasPermitidas = Math.max(1, Math.floor(valorCobranca / 5));
+    const parcelasSolicitadas = Math.max(1, parseInt(installments) || 1);
+    const parcelasFinal = Math.min(parcelasSolicitadas, maxParcelasPermitidas);
     const cardBody = {
       transaction_amount: valorCobranca, token, description: descricao,
-      installments: Math.max(1, parseInt(installments) || 1),
+      installments: parcelasFinal,
       payment_method_id: paymentMethodId, issuer_id: issuerId || undefined,
       payer: { email: comprador.email, identification: { type: 'CPF', number: cpfLimpo } },
       external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
