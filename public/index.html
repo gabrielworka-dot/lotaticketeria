@@ -247,6 +247,15 @@ a{color:inherit;text-decoration:none;}
   </div>
 </div>
 
+<!-- INDIQUE E GANHE MODAL -->
+<div class="mo" id="indicacaoModal" onclick="if(event.target===this)closeModal('indicacaoModal')">
+  <div class="modal">
+    <h2>🎁 Indique e Ganhe</h2>
+    <p class="sub">Compartilhe seu link — quando seu amigo fizer a primeira compra, vocês dois ganham crédito</p>
+    <div id="indicacaoContent" style="text-align:center;padding:20px 0"><div class="spinner"></div></div>
+  </div>
+</div>
+
 <!-- REGISTRO MODAL -->
 <div class="mo" id="registroModal" onclick="if(event.target===this)closeModal('registroModal')">
   <div class="modal">
@@ -385,7 +394,8 @@ async function doRegistro(){
   if(TIPO_CADASTRO==='produtor' && !nomePublico){err.textContent='Digite o nome público da sua produtora.';err.style.display='block';return;}
   if(TIPO_CADASTRO==='produtor' && !cpfCnpj){err.textContent='Digite seu CPF ou CNPJ.';err.style.display='block';return;}
   try{
-    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:TIPO_CADASTRO,nomePublico,cpfCnpj,tipoDocumento});
+    const codigoIndicacao=new URLSearchParams(location.search).get('ref')||'';
+    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:TIPO_CADASTRO,nomePublico,cpfCnpj,tipoDocumento,codigoIndicacao});
     AT=d.token;CU=d.user;localStorage.setItem('role_token',AT);
     if(TIPO_CADASTRO==='produtor'){
       location.href='/painel.html';
@@ -411,6 +421,7 @@ function initLoggedIn(){
     +(CU.isOrganizador?'<div class="user-menu-item" onclick="location.href=\'/painel.html\'">🎛️ Meu Painel</div>':'<div class="user-menu-item" onclick="location.href=\'/painel.html\'">✨ Quero vender ingressos</div>')
     +(CU.isAdmin?'<div class="user-menu-item" onclick="location.href=\'/admin.html\'">⚙️ Administração</div>':'')
     +'<div class="user-menu-item" onclick="abrirMinhaConta(event)">👤 Minha Conta</div>'
+    +'<div class="user-menu-item" onclick="abrirIndicacao(event)">🎁 Indique e Ganhe</div>'
     +'<div class="user-menu-item danger" onclick="doLogout()">🚪 Sair da conta</div>'
     +'</div></div>';
   document.getElementById('feedSection').style.display='block';
@@ -439,6 +450,34 @@ function abrirMinhaConta(ev){
   document.getElementById('contaErr').style.display='none';
   document.getElementById('contaOk').style.display='none';
   openModal('contaModal');
+}
+async function abrirIndicacao(ev){
+  ev.stopPropagation();
+  document.getElementById('userMenu').classList.remove('show');
+  openModal('indicacaoModal');
+  const el=document.getElementById('indicacaoContent');
+  el.innerHTML='<div class="spinner"></div>';
+  try{
+    const d=await api('GET','/api/auth/indicacao');
+    const link=location.origin+'/?ref='+d.codigoIndicacao;
+    el.innerHTML=`
+      <div style="font-size:32px;font-weight:900;color:var(--p2);margin-bottom:4px">R$ ${d.saldoCredito.toFixed(2)}</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:20px">de crédito disponível</div>
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;text-align:left">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">SEU LINK DE INDICAÇÃO</div>
+        <div style="font-family:monospace;font-size:12px;color:var(--text);word-break:break-all;margin-bottom:10px" id="linkIndicacaoTexto">${link}</div>
+        <button class="btn bp btn-sm" style="width:100%;margin:0" onclick="copiarLinkIndicacao()">📋 Copiar link</button>
+      </div>
+      <div style="display:flex;justify-content:space-around;font-size:12px;color:var(--text2)">
+        <div><strong style="display:block;font-size:18px;color:var(--text)">${d.totalIndicados}</strong>indicados</div>
+        <div><strong style="display:block;font-size:18px;color:var(--text)">${d.totalIndicadosComprando}</strong>já compraram</div>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:16px">Quando alguém se cadastra pelo seu link e faz a primeira compra, vocês dois ganham R$10 de crédito pra usar em ingressos.</p>`;
+  }catch(e){ el.innerHTML='<p style="color:var(--red)">'+esc(e.message)+'</p>'; }
+}
+function copiarLinkIndicacao(){
+  const texto=document.getElementById('linkIndicacaoTexto').textContent;
+  navigator.clipboard?.writeText(texto).then(()=>toast('Link copiado!','ok')).catch(()=>{});
 }
 async function salvarMinhaConta(){
   const nome=document.getElementById('contaNome').value.trim();
