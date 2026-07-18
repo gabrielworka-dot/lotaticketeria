@@ -238,6 +238,10 @@ function renderEvento(){
       <div class="total-row"><span>Subtotal</span><span id="subtotalVal">R$ 0,00</span></div>
       <div class="total-row" id="descontoRow" style="display:none"><span>Desconto</span><span id="descontoVal" style="color:var(--green)">- R$ 0,00</span></div>
       <div class="total-row" id="taxaRow" style="display:none"><span>Taxa administrativa</span><span id="taxaVal">R$ 0,00</span></div>
+      <div class="total-row" id="creditoRow" style="display:none;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" id="usarCreditoCheck" onchange="atualizarTotal()"> Usar meu crédito (R$ <span id="creditoDisponivelTxt">0,00</span>)</label>
+        <span id="creditoDescontoVal" style="color:var(--green)">- R$ 0,00</span>
+      </div>
       <div class="total-row final"><span>Total</span><span class="total-val" id="totalVal">R$ 0,00</span></div>
     </div>
     <div class="card" id="dadosCard" style="display:none">
@@ -341,7 +345,17 @@ function toggleAssento(seatCode,loteId,preco,setorNome){
   atualizarTotal();
 }
 
-let TOTAL_ATUAL=0;
+let TOTAL_ATUAL=0, SALDO_CREDITO=0;
+async function carregarSaldoCredito(){
+  if(!AT_COMPRADOR) return;
+  try{
+    const d=await api('GET','/api/auth/indicacao');
+    SALDO_CREDITO=d.saldoCredito||0;
+    if(SALDO_CREDITO>0) document.getElementById('creditoDisponivelTxt').textContent=SALDO_CREDITO.toFixed(2).replace('.',',');
+  }catch(e){}
+}
+carregarSaldoCredito();
+
 function atualizarTotal(){
   let subtotal=0, temItem=false;
   const lotes=getLotesFonte();
@@ -358,7 +372,9 @@ function atualizarTotal(){
   const valorIngressos=Math.max(0,subtotal-desconto);
   const feePercent=EVENTO?.feePercent||10;
   const taxa=valorIngressos>0?Math.round(valorIngressos*(feePercent/100)*100)/100:0;
-  const total=Math.round((valorIngressos+taxa)*100)/100;
+  const usarCredito=document.getElementById('usarCreditoCheck')?.checked;
+  const creditoAplicado=(usarCredito && SALDO_CREDITO>0)?Math.min(SALDO_CREDITO,taxa):0;
+  const total=Math.round((valorIngressos+taxa-creditoAplicado)*100)/100;
   TOTAL_ATUAL=total;
   document.getElementById('subtotalVal').textContent='R$ '+subtotal.toFixed(2).replace('.',',');
   document.getElementById('totalVal').textContent='R$ '+total.toFixed(2).replace('.',',');
@@ -368,6 +384,12 @@ function atualizarTotal(){
   const tRow=document.getElementById('taxaRow');
   if(taxa>0){ tRow.style.display='flex'; document.getElementById('taxaVal').textContent='R$ '+taxa.toFixed(2).replace('.',','); }
   else tRow.style.display='none';
+  const cRow=document.getElementById('creditoRow');
+  if(SALDO_CREDITO>0 && taxa>0){
+    cRow.style.display='flex';
+    document.getElementById('creditoDescontoVal').style.display=creditoAplicado>0?'inline':'none';
+    document.getElementById('creditoDescontoVal').textContent='- R$ '+creditoAplicado.toFixed(2).replace('.',',');
+  } else cRow.style.display='none';
   document.getElementById('dadosCard').style.display=temItem?'block':'none';
   document.getElementById('pagamentoCard').style.display=temItem?'block':'none';
   if(temItem) montarCardFormSeNecessario();
@@ -462,6 +484,7 @@ async function processarSubmit(){
   const bodyBase={slug,itens,comprador:{nome,email,telefone:tel},cpf};
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
+  if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
 
   try{
     // Cortesia (total zero) — não precisa escolher método de pagamento
