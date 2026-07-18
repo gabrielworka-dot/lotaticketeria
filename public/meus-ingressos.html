@@ -57,13 +57,29 @@ h1{font-size:22px;font-weight:900;margin-bottom:20px;}
     <div>© 2025 Lota Ticketeria — Todos os direitos reservados</div>
   </footer>
 </div>
+
+<div id="transferModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:380px">
+    <h2 style="font-size:18px;font-weight:800;margin-bottom:6px">Transferir ingresso</h2>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px">O ingresso <strong id="transferCodigo" style="color:var(--p2)"></strong> será enviado pro e-mail da pessoa abaixo, e você perde o acesso a ele.</p>
+    <div id="transferErr" style="display:none;font-size:12px;color:#F87171;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:9px 12px;margin-bottom:12px"></div>
+    <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Nome de quem vai receber</label><input id="transferNome" style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px"></div>
+    <div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">E-mail de quem vai receber</label><input id="transferEmail" type="email" style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px"></div>
+    <div style="display:flex;gap:8px">
+      <button onclick="document.getElementById('transferModal').style.display='none'" style="flex:1;padding:11px;background:transparent;border:1.5px solid var(--border);border-radius:9px;color:var(--text2);font-weight:700;cursor:pointer">Cancelar</button>
+      <button id="btnConfirmarTransfer" onclick="confirmarTransferencia()" style="flex:1;padding:11px;background:var(--p2);border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer">Transferir →</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const AT=localStorage.getItem('role_token')||null;
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
-async function api(m,p){
+async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
   if(AT) o.headers['Authorization']='Bearer '+AT;
+  if(b) o.body=JSON.stringify(b);
   const r=await fetch(p,o);
   const d=await r.json();
   if(!r.ok) throw new Error(d.error||'Erro');
@@ -91,7 +107,7 @@ async function init(){
         ${p.tickets.map((t,i)=>`
           <div class="ticket">
             <div class="ticket-qr" id="qr-${p.pedidoId}-${i}"></div>
-            <div><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':''}</div>
+            <div style="flex:1"><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}${t.titularNome?' · '+esc(t.titularNome):''}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':(t.cancelado?'<div style="font-size:11px;color:#F87171;margin-top:2px">Reembolsado</div>':'<button onclick="abrirTransferencia(\''+p.pedidoId+'\',\''+t.codigo+'\')" style="margin-top:6px;background:none;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">🔄 Transferir</button>')}</div>
           </div>`).join('')}
         <a href="/api/public/pedido/${p.pedidoId}/pdf" target="_blank" style="display:block;text-align:center;margin-top:10px;padding:10px;background:var(--p2);color:#18160F;font-weight:700;border-radius:8px;text-decoration:none;font-size:13px">📄 Abrir ingresso em PDF</a>
       </div>`).join('');
@@ -100,6 +116,31 @@ async function init(){
     el.innerHTML='<div class="empty"><span class="empty-ic">⚠️</span><p>'+esc(e.message)+'</p></div>';
   }
 }
+let TRANSFER_PEDIDO_ID=null, TRANSFER_CODIGO=null;
+function abrirTransferencia(pedidoId,codigo){
+  TRANSFER_PEDIDO_ID=pedidoId; TRANSFER_CODIGO=codigo;
+  document.getElementById('transferCodigo').textContent=codigo;
+  document.getElementById('transferNome').value='';
+  document.getElementById('transferEmail').value='';
+  document.getElementById('transferErr').style.display='none';
+  document.getElementById('transferModal').style.display='flex';
+}
+async function confirmarTransferencia(){
+  const novoNome=document.getElementById('transferNome').value.trim();
+  const novoEmail=document.getElementById('transferEmail').value.trim();
+  const errEl=document.getElementById('transferErr');
+  errEl.style.display='none';
+  if(!novoNome||!novoEmail){ errEl.textContent='Preencha nome e e-mail.'; errEl.style.display='block'; return; }
+  const btn=document.getElementById('btnConfirmarTransfer');
+  btn.disabled=true; btn.textContent='Transferindo...';
+  try{
+    await api('POST','/api/public/pedido/'+TRANSFER_PEDIDO_ID+'/ticket/'+TRANSFER_CODIGO+'/transferir',{novoNome,novoEmail});
+    document.getElementById('transferModal').style.display='none';
+    init();
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+  finally{ btn.disabled=false; btn.textContent='Transferir →'; }
+}
+
 init();
 </script>
 </body>
