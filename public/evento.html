@@ -148,7 +148,7 @@ function injetarPixels(pixels){
   if(!pixels) return;
   if(pixels.metaPixelId){
     const s=document.createElement('script');
-    s.textContent=`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${pixels.metaPixelId}');fbq('track','ViewContent');`;
+    s.textContent=`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${pixels.metaPixelId}');fbq('track','PageView');fbq('track','ViewContent',{content_name:${JSON.stringify(EVENTO?.nome||'Evento')},content_type:'product',currency:'BRL'});`;
     document.head.appendChild(s);
   }
   if(pixels.gaMeasurementId){
@@ -164,12 +164,24 @@ function injetarPixels(pixels){
     document.head.appendChild(s);
   }
 }
-function dispararConversao(pixels,valor){
+let CHECKOUT_INICIADO_DISPARADO=false;
+function dispararInicioCheckout(pixels,valor){
+  if(!pixels || CHECKOUT_INICIADO_DISPARADO) return;
+  CHECKOUT_INICIADO_DISPARADO=true;
+  if(pixels.metaPixelId && window.fbq) fbq('track','InitiateCheckout',{value:valor,currency:'BRL'});
+  if(pixels.tiktokPixelId && window.ttq) ttq.track('InitiateCheckout',{value:valor,currency:'BRL'});
+}
+function dispararConversao(pixels,valor,pedidoId){
   if(!pixels) return;
+  // Proteção contra disparo duplicado: se a pessoa atualizar ou revisitar a página de
+  // confirmação, o evento de Purchase não deve ser contado de novo.
+  const chaveDedup='pixel_purchase_'+pedidoId;
+  if(pedidoId && localStorage.getItem(chaveDedup)) return;
   if(pixels.metaPixelId && window.fbq) fbq('track','Purchase',{value:valor,currency:'BRL'});
   if(pixels.gaMeasurementId && window.gtag) gtag('event','purchase',{value:valor,currency:'BRL'});
   if(pixels.tiktokPixelId && window.ttq) ttq.track('CompletePayment',{value:valor,currency:'BRL'});
   if(pixels.googleAdsConversionId && window.gtag) gtag('event','conversion',{send_to:pixels.googleAdsConversionId+'/'+(pixels.googleAdsConversionLabel||''),value:valor,currency:'BRL'});
+  if(pedidoId) localStorage.setItem(chaveDedup,'1');
 }
 
 async function init(){
@@ -392,7 +404,7 @@ function atualizarTotal(){
   } else cRow.style.display='none';
   document.getElementById('dadosCard').style.display=temItem?'block':'none';
   document.getElementById('pagamentoCard').style.display=temItem?'block':'none';
-  if(temItem) montarCardFormSeNecessario();
+  if(temItem){ montarCardFormSeNecessario(); dispararInicioCheckout(EVENTO?.pixels,total); }
 }
 
 async function aplicarCupom(){
@@ -561,7 +573,7 @@ async function renderStatusPedido(){
           <a href="/api/public/pedido/${pedidoParam}/pdf" target="_blank" class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:14px">📄 Abrir ingresso em PDF</a>
           <p style="font-size:11px;color:var(--text3);margin-top:10px">Guarde estes códigos. Apresente-os na entrada.</p>`;
         d.tickets.forEach(t=>gerarQR(t.codigo));
-        try{ const ev=await api('GET','/api/public/eventos/'+slug); dispararConversao(ev.pixels,d.total); }catch(e){}
+        try{ const ev=await api('GET','/api/public/eventos/'+slug); dispararConversao(ev.pixels,d.total,pedidoParam); }catch(e){}
         return;
       }
       if(d.status==='recusado'){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Pagamento não aprovado. Tente novamente.</p>'; return; }
