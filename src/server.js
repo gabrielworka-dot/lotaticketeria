@@ -186,6 +186,7 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   const nomePublicoInformado = sanitize(req.body.nomePublico || '', 100);
   const cpfCnpj = sanitize(req.body.cpfCnpj || '', 20).replace(/[^\d]/g, '');
   const tipoDocumento = req.body.tipoDocumento === 'cnpj' ? 'cnpj' : 'cpf';
+  const codigoIndicacaoUsado = sanitize(req.body.codigoIndicacao || '', 12).toUpperCase();
   if (!nome || !email || !senha) return res.status(400).json({ error: 'Preencha todos os campos.' });
   if (senha.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-mail inválido.' });
@@ -193,6 +194,11 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   if (ehProdutor && !cpfCnpj) return res.status(400).json({ error: 'CPF ou CNPJ obrigatório para produtores.' });
   if (db.users.find(u => u.email === email)) return res.status(400).json({ error: 'E-mail já cadastrado.' });
   const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
+  let indicadoPor = null;
+  if (codigoIndicacaoUsado) {
+    const quemIndicou = db.users.find(u => u.codigoIndicacao === codigoIndicacaoUsado);
+    if (quemIndicou) indicadoPor = quemIndicou.id;
+  }
   const user = {
     id: uuidv4(), nome, email, senha: bcrypt.hashSync(senha, 12),
     isAdmin: false, ativo: true, emailVerificado: false, verificado: false, colaboradorDe: null,
@@ -202,6 +208,7 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
     cpfCnpj: ehProdutor ? cpfCnpj : '', tipoDocumento: ehProdutor ? tipoDocumento : '',
     pagamentoInfo: { chavePix: '', tipoChavePix: '', nomeTitular: '', nomeBanco: '', numeroAgencia: '', tipoConta: '' },
     bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {},
+    codigoIndicacao: gerarCodigoIndicacaoUnico(), indicadoPor, saldoCredito: 0, boasVindasCreditoConcedido: false,
     createdAt: new Date().toISOString()
   };
   db.users.push(user); saveDB(db);
@@ -210,6 +217,11 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   enviarEmailVerificacao(user, proto, host).catch(() => {});
   res.status(201).json({ token, user: safe(user) });
 });
+function gerarCodigoIndicacaoUnico() {
+  let codigo;
+  do { codigo = Math.random().toString(36).slice(2, 8).toUpperCase(); } while (db.users.find(u => u.codigoIndicacao === codigo));
+  return codigo;
+}
 
 async function enviarEmailVerificacao(user, proto, host) {
   const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
@@ -299,6 +311,12 @@ app.post('/api/auth/2fa/desativar', auth, (req, res) => {
 });
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: safe(req.user) }));
+
+app.get('/api/auth/indicacao', auth, (req, res) => {
+  const totalIndicados = db.users.filter(u => u.indicadoPor === req.user.id).length;
+  const totalIndicadosComprando = db.users.filter(u => u.indicadoPor === req.user.id && u.boasVindasCreditoConcedido).length;
+  res.json({ codigoIndicacao: req.user.codigoIndicacao, saldoCredito: req.user.saldoCredito || 0, totalIndicados, totalIndicadosComprando });
+});
 
 app.post('/api/auth/verificar-email', rateLimit(60000, 10), (req, res) => {
   const { token } = req.body;
@@ -417,6 +435,28 @@ async function enviarEmailGenerico(destinatario, assunto, html) {
     if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o e-mail:', assunto, r.status, errBody); }
     return r.ok;
   } catch(e) { console.error('Erro e-mail:', e.message); return false; }
+}
+
+async function notificarSeguidoresNovoEvento(ev, organizador, baseUrl) {
+  const seguidores = FOLLOWS.filter(f => f.organizadorId === organizador.id);
+  if (!seguidores.length) return;
+  const nomeExibicao = organizador.nomePublico || organizador.nome;
+  const linkEvento = `${baseUrl}/e/${ev.slug}`;
+  const dataStr = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+  console.log(`Notificando ${seguidores.length} seguidor(es) de ${nomeExibicao} sobre o novo evento "${ev.nome}"`);
+  for (const f of seguidores) {
+    const seguidor = db.users.find(u => u.id === f.userId);
+    if (!seguidor?.email) continue;
+    const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+      <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+      <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeExibicao)} acabou de publicar um novo evento</p>
+      <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:10px;">${esc(ev.nome)}</h2>
+      ${dataStr ? `<p style="font-size:13px;color:#A09880;margin-bottom:20px;">📅 ${dataStr}${ev.cidade ? ' · ' + esc(ev.cidade) : ''}</p>` : ''}
+      <a href="${linkEvento}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Ver evento e comprar →</a>
+      <p style="font-size:11px;color:#605848;margin-top:24px;">Você está recebendo esse e-mail porque segue ${esc(nomeExibicao)} na Lota Ticketeria.</p>
+      </div></div>`;
+    await enviarEmailGenerico(seguidor.email, `${nomeExibicao} publicou: ${ev.nome}`, html);
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -550,11 +590,23 @@ app.patch('/api/eventos/:id/mapa-assentos', auth, (req, res) => {
   res.json({ evento: ev });
 });
 
-app.patch('/api/eventos/:id/publicar', auth, (req, res) => {
+app.patch('/api/eventos/:id/publicar', auth, async (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const estavaPublicado = ev.status === 'publicado';
   ev.status = req.body.publicar ? 'publicado' : 'rascunho';
   ev.updatedAt = new Date().toISOString();
+  // Avisa os seguidores só na primeira vez que o evento é publicado — evita notificar de novo
+  // toda vez que o produtor despublica/republica o mesmo evento.
+  if (ev.status === 'publicado' && !estavaPublicado && !ev.notificacaoSeguidoresEnviada) {
+    ev.notificacaoSeguidoresEnviada = true;
+    persistEventos();
+    res.json({ evento: ev });
+    const proto = req.get('x-forwarded-proto') || 'https';
+    const baseUrl = `${proto}://${req.get('host')}`;
+    notificarSeguidoresNovoEvento(ev, req.user, baseUrl).catch(e => console.error('Erro ao notificar seguidores:', e.message));
+    return;
+  }
   persistEventos();
   res.json({ evento: ev });
 });
@@ -880,11 +932,12 @@ app.post('/api/checkin/validar', auth, rateLimit(60000, 60), (req, res) => {
   let ticket = null, pedido = null;
   for (const p of pedidos) { const t = (p.tickets||[]).find(tk => tk.codigo === sanitize(codigo, 40)); if (t) { ticket = t; pedido = p; break; } }
   if (!ticket) return res.status(404).json({ error: 'Ingresso não encontrado.', valido: false });
-  if (ticket.cancelado) return res.json({ valido: false, cancelado: true, ticket, comprador: pedido.comprador });
-  if (ticket.usado) return res.json({ valido: false, jaUsado: true, usadoEm: ticket.usadoEm, ticket, comprador: pedido.comprador });
+  const titular = { nome: ticket.titularNome || pedido.comprador?.nome, email: ticket.titularEmail || pedido.comprador?.email };
+  if (ticket.cancelado) return res.json({ valido: false, cancelado: true, ticket, comprador: titular });
+  if (ticket.usado) return res.json({ valido: false, jaUsado: true, usadoEm: ticket.usadoEm, ticket, comprador: titular });
   ticket.usado = true; ticket.usadoEm = new Date().toISOString();
   persistPedidos();
-  res.json({ valido: true, ticket, comprador: pedido.comprador });
+  res.json({ valido: true, ticket, comprador: titular });
 });
 
 // ════════════════════════════════════════════════════════
@@ -959,6 +1012,21 @@ app.get('/api/public/eventos', rateLimit(60000, 60), (req, res) => {
     const precos = e.lotes.filter(l=>l.ativo && !l.cortesia).map(l=>l.preco);
     return { slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, horaEvento: e.horaEvento, cidade: e.cidade, local: e.local, categoria: e.categoria, imagemCapa: e.imagemCapa, precoMin: precos.length?Math.min(...precos):0 };
   })});
+});
+
+// Serve a imagem de capa como arquivo de verdade (ela é guardada em base64 no banco) —
+// necessário pra redes sociais (WhatsApp, Instagram, etc.) conseguirem gerar preview do link.
+app.get('/api/public/eventos/:slug/imagem', (req, res) => {
+  const ref = db.ticketSlugs[req.params.slug];
+  if (!ref) return res.status(404).send('Não encontrado.');
+  const ev = EVENTOS.find(e => e.id === ref.eventoId);
+  if (!ev || !ev.imagemCapa || !ev.imagemCapa.startsWith('data:image/')) return res.status(404).send('Sem imagem.');
+  const match = ev.imagemCapa.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) return res.status(404).send('Formato inválido.');
+  const [, mime, base64Data] = match;
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(Buffer.from(base64Data, 'base64'));
 });
 
 app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
@@ -1058,7 +1126,15 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const valorIngressos = Math.round((subtotal - desconto) * 100) / 100;
     const feePercent = db.marketplaceFeePercent || 10;
     const taxaAdministrativa = Math.round(valorIngressos * (feePercent/100) * 100) / 100;
-    const total = Math.round((valorIngressos + taxaAdministrativa) * 100) / 100;
+    // Crédito de indicação: só pode abater da taxa administrativa (nunca do valor do produtor),
+    // então o repasse ao produtor nunca é afetado por esse benefício.
+    let creditoAplicado = 0;
+    const compradorLogado = compradorUserId ? db.users.find(u => u.id === compradorUserId) : null;
+    if (req.body.usarCredito && compradorLogado?.saldoCredito > 0) {
+      creditoAplicado = Math.min(compradorLogado.saldoCredito, taxaAdministrativa);
+      creditoAplicado = Math.round(creditoAplicado * 100) / 100;
+    }
+    const total = Math.round((valorIngressos + taxaAdministrativa - creditoAplicado) * 100) / 100;
 
     // Promoter (referência de venda)
     let promoterObj = ref ? ev.promoters.find(p => p.codigoRef === ref && p.ativo) : null;
@@ -1096,7 +1172,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       id: pedidoId, eventoId: ev.id, status: 'pendente',
       comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30), cpf: cpfLimpo },
       compradorUserId,
-      itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
+      itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, creditoAplicado, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
       mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
     };
 
@@ -1185,9 +1261,9 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
     if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd;
     if (it.assento) {
       ev.assentosOcupados.push(it.assento);
-      pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null });
+      pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
     } else {
-      for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null });
+      for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
     }
   }
   if (cupomObj) cupomObj.usosAtuais = (cupomObj.usosAtuais || 0) + 1;
@@ -1259,8 +1335,8 @@ async function gerarPdfIngressos(pedido, ev) {
     let iy = cardY + 22;
     doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('INGRESSO', padX, iy, { characterSpacing: 1.5 });
     iy += 22;
-    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('COMPRADOR', padX, iy, { characterSpacing: 1 });
-    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(pedido.comprador?.nome || '', padX, iy + 13);
+    doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('TITULAR', padX, iy, { characterSpacing: 1 });
+    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(t.titularNome || pedido.comprador?.nome || '', padX, iy + 13);
     iy += 42;
     doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('LOTE', padX, iy, { characterSpacing: 1 });
     doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(`${t.loteNome || ''}${t.assento ? '  •  Assento ' + t.assento : ''}`, padX, iy + 13, { width: infoColW - 40 });
@@ -1325,6 +1401,12 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   if (pedido.status === 'pago') return;
   pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
   pedido.mpPaymentId = String(paymentId);
+  // Debita o crédito de indicação usado nesse pedido — só agora que o pagamento foi confirmado de verdade,
+  // pra não descontar crédito de um pagamento que acabe sendo recusado.
+  if (pedido.creditoAplicado > 0 && pedido.compradorUserId) {
+    const comprador = db.users.find(u => u.id === pedido.compradorUserId);
+    if (comprador) { comprador.saldoCredito = Math.max(0, (comprador.saldoCredito || 0) - pedido.creditoAplicado); saveDB(db); }
+  }
   const ev = EVENTOS.find(e => e.id === pedido.eventoId);
   if (ev) {
     const cupomObj = pedido.cupomUsado ? ev.cupons.find(c => c.codigo === pedido.cupomUsado) : null;
@@ -1335,6 +1417,35 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
     pedido.emailEnviado = true;
   }
   persistPedidos();
+  // Programa de indicação: concede crédito na PRIMEIRA compra de verdade (paga) do indicado
+  if (pedido.compradorUserId && pedido.valorIngressos > 0) {
+    await concederCreditoIndicacao(pedido.compradorUserId, baseUrl).catch(e => console.error('Erro ao conceder crédito de indicação:', e.message));
+  }
+}
+
+const CREDITO_INDICACAO_VALOR = 10; // R$10 pra cada lado — ajustável aqui
+async function concederCreditoIndicacao(compradorUserId, baseUrl) {
+  const comprador = db.users.find(u => u.id === compradorUserId);
+  if (!comprador || !comprador.indicadoPor || comprador.boasVindasCreditoConcedido) return;
+  const indicador = db.users.find(u => u.id === comprador.indicadoPor);
+  if (!indicador) return;
+  comprador.boasVindasCreditoConcedido = true;
+  comprador.saldoCredito = (comprador.saldoCredito || 0) + CREDITO_INDICACAO_VALOR;
+  indicador.saldoCredito = (indicador.saldoCredito || 0) + CREDITO_INDICACAO_VALOR;
+  saveDB(db);
+  console.log(`Crédito de indicação concedido: ${comprador.email} e ${indicador.email} ganharam R$${CREDITO_INDICACAO_VALOR} cada.`);
+  const htmlComprador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+    <p style="font-size:14px;">Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito por ter usado um código de indicação na sua primeira compra!</p>
+    <p style="font-size:12px;color:#A09880;margin-top:10px;">Use esse crédito na sua próxima compra na Lota Ticketeria.</p>
+    </div></div>`;
+  const htmlIndicador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+    <p style="font-size:14px;">${esc(comprador.nome)}, que você indicou, fez a primeira compra! Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito.</p>
+    <p style="font-size:12px;color:#A09880;margin-top:10px;">Continue indicando amigos pra ganhar mais créditos.</p>
+    </div></div>`;
+  await enviarEmailGenerico(comprador.email, 'Você ganhou crédito na Lota Ticketeria! 🎉', htmlComprador);
+  await enviarEmailGenerico(indicador.email, 'Sua indicação rendeu crédito! 🎉', htmlIndicador);
 }
 
 app.post('/api/mp/webhook', async (req, res) => {
@@ -1407,9 +1518,139 @@ app.get('/api/public/pedido/:pedidoId/pdf', async (req, res) => {
   }
 });
 
+// ── TRANSFERIR INGRESSO ──
+app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(60000, 10), async (req, res) => {
+  try {
+    const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
+    if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+    if (pedido.status !== 'pago') return res.status(400).json({ error: 'Este pedido ainda não foi confirmado.' });
+    const ticket = (pedido.tickets || []).find(t => t.codigo === req.params.codigo);
+    if (!ticket) return res.status(404).json({ error: 'Ingresso não encontrado.' });
+    if (ticket.cancelado) return res.status(400).json({ error: 'Este ingresso foi cancelado e não pode ser transferido.' });
+    if (ticket.usado) return res.status(400).json({ error: 'Este ingresso já foi utilizado na entrada e não pode mais ser transferido.' });
+    const { novoNome, novoEmail } = req.body;
+    const nomeLimpo = sanitize(novoNome || '', 100);
+    const emailLimpo = sanitize(novoEmail || '', 150).toLowerCase();
+    if (!nomeLimpo || !emailLimpo) return res.status(400).json({ error: 'Preencha nome e e-mail de quem vai receber o ingresso.' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) return res.status(400).json({ error: 'E-mail inválido.' });
+
+    const nomeAntigo = ticket.titularNome || pedido.comprador?.nome || '';
+    const emailAntigo = ticket.titularEmail || pedido.comprador?.email || '';
+    ticket.titularNome = nomeLimpo;
+    ticket.titularEmail = emailLimpo;
+    persistPedidos();
+
+    const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+    if (ev) {
+      const proto = req.get('x-forwarded-proto') || 'https';
+      const baseUrl = `${proto}://${req.get('host')}`;
+      const linkPdf = `${baseUrl}/api/public/pedido/${pedido.id}/pdf`;
+      // Avisa quem recebeu o ingresso
+      const htmlNovo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+        <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+        <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeAntigo)} transferiu um ingresso pra você</p>
+        <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:16px;">${esc(ev.nome)}</h2>
+        <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:16px;background:#161410;">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(ticket.codigo)}" width="90" height="90" style="border-radius:8px;background:#fff;padding:4px" />
+          <div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:13px;margin-top:8px;">${ticket.codigo}</div>
+        </div>
+        <a href="${linkPdf}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Abrir ingresso em PDF →</a>
+        <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada do evento.</p>
+        </div></div>`;
+      await enviarEmailGenerico(emailLimpo, `Você recebeu um ingresso — ${ev.nome}`, htmlNovo);
+      // Avisa quem transferiu, confirmando
+      if (emailAntigo) {
+        const htmlAntigo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
+          <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+          <p style="font-size:14px;color:#F0EDE8;">O ingresso <strong style="color:#E8961A">${ticket.codigo}</strong> pra <strong>${esc(ev.nome)}</strong> foi transferido pra ${esc(nomeLimpo)} (${esc(emailLimpo)}) com sucesso.</p>
+          <p style="font-size:11px;color:#605848;margin-top:16px;">Se você não fez essa transferência, entre em contato com o suporte imediatamente.</p>
+          </div></div>`;
+        await enviarEmailGenerico(emailAntigo, `Ingresso transferido — ${ev.nome}`, htmlAntigo);
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Rota pública amigável /e/:slug e /o/:slug
-app.get('/e/:slug', (req, res) => { const p = path.join(PUBLIC_DIR, 'evento.html'); if (fs.existsSync(p)) return res.sendFile(p); res.status(404).send('Não encontrado.'); });
-app.get('/o/:slug', (req, res) => { const p = path.join(PUBLIC_DIR, 'organizador.html'); if (fs.existsSync(p)) return res.sendFile(p); res.status(404).send('Não encontrado.'); });
+app.get('/e/:slug', (req, res) => {
+  const p = path.join(PUBLIC_DIR, 'evento.html');
+  if (!fs.existsSync(p)) return res.status(404).send('Não encontrado.');
+  try {
+    const ref = db.ticketSlugs[req.params.slug];
+    const ev = ref ? EVENTOS.find(e => e.id === ref.eventoId) : null;
+    let html = fs.readFileSync(p, 'utf8');
+    if (ev && ev.status === 'publicado') {
+      const proto = req.get('x-forwarded-proto') || 'https';
+      const baseUrl = `${proto}://${req.get('host')}`;
+      const pageUrl = `${baseUrl}/e/${ev.slug}`;
+      const imageUrl = ev.imagemCapa ? `${baseUrl}/api/public/eventos/${ev.slug}/imagem` : `${baseUrl}/favicon.png`;
+      const descricaoLimpa = sanitize(ev.descricao || `Ingressos para ${ev.nome}`, 200).replace(/\n/g, ' ');
+      const dataFormatada = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR') : '';
+      const tituloOg = `${ev.nome}${dataFormatada ? ' — ' + dataFormatada : ''}`;
+      const metaTags = `
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="${esc(tituloOg)}">
+    <meta property="og:description" content="${esc(descricaoLimpa)}">
+    <meta property="og:image" content="${imageUrl}">
+    <meta property="og:url" content="${pageUrl}">
+    <meta property="og:site_name" content="Lota Ticketeria">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="${esc(tituloOg)}">
+    <meta name="twitter:description" content="${esc(descricaoLimpa)}">
+    <meta name="twitter:image" content="${imageUrl}">
+    <title>${esc(ev.nome)} — Lota Ticketeria</title>`;
+      // Substitui o <title> estático da página pelas tags dinâmicas (incluindo um novo <title>)
+      html = html.replace(/<title>.*?<\/title>/i, metaTags);
+    }
+    res.send(html);
+  } catch (e) {
+    res.sendFile(p);
+  }
+});
+app.get('/api/public/organizadores/:slug/imagem', (req, res) => {
+  const user = db.users.find(u => u.organizadorSlug === req.params.slug);
+  const img = user?.bannerUrl || user?.avatarUrl;
+  if (!user || !img || !img.startsWith('data:image/')) return res.status(404).send('Sem imagem.');
+  const match = img.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) return res.status(404).send('Formato inválido.');
+  const [, mime, base64Data] = match;
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(Buffer.from(base64Data, 'base64'));
+});
+
+app.get('/o/:slug', (req, res) => {
+  const p = path.join(PUBLIC_DIR, 'organizador.html');
+  if (!fs.existsSync(p)) return res.status(404).send('Não encontrado.');
+  try {
+    const user = db.users.find(u => u.organizadorSlug === req.params.slug);
+    let html = fs.readFileSync(p, 'utf8');
+    if (user) {
+      const proto = req.get('x-forwarded-proto') || 'https';
+      const baseUrl = `${proto}://${req.get('host')}`;
+      const nomeExibicao = user.nomePublico || user.nome;
+      const imageUrl = (user.bannerUrl || user.avatarUrl) ? `${baseUrl}/api/public/organizadores/${user.organizadorSlug}/imagem` : `${baseUrl}/favicon.png`;
+      const bioLimpa = sanitize(user.bio || `Confira os eventos de ${nomeExibicao} na Lota Ticketeria`, 200).replace(/\n/g, ' ');
+      const metaTags = `
+    <meta property="og:type" content="profile">
+    <meta property="og:title" content="${esc(nomeExibicao)}">
+    <meta property="og:description" content="${esc(bioLimpa)}">
+    <meta property="og:image" content="${imageUrl}">
+    <meta property="og:url" content="${baseUrl}/o/${user.organizadorSlug}">
+    <meta property="og:site_name" content="Lota Ticketeria">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="${esc(nomeExibicao)}">
+    <meta name="twitter:description" content="${esc(bioLimpa)}">
+    <meta name="twitter:image" content="${imageUrl}">
+    <title>${esc(nomeExibicao)} — Lota Ticketeria</title>`;
+      html = html.replace(/<title>.*?<\/title>/i, metaTags);
+    }
+    res.send(html);
+  } catch (e) {
+    res.sendFile(p);
+  }
+});
 
 // ════════════════════════════════════════════════════════
 // ADMIN (plataforma)
