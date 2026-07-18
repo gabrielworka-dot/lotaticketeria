@@ -44,7 +44,13 @@ function rateLimit(windowMs = 60000, max = 30) {
 setInterval(() => { const now = Date.now(); rateLimits.forEach((v,k) => { if (now - v.start > 120000) rateLimits.delete(k); }); }, 60000);
 
 // ── Paths ─────────────────────────────────────────────────
-const DATA_DIR = fs.existsSync('/app') ? '/app' : path.join(__dirname, '..');
+// IMPORTANTE: os dados (eventos, usuários, pedidos) NÃO podem morar em /app — essa pasta é o
+// próprio código da aplicação e é substituída inteira a cada novo deploy no Railway.
+// Por isso usamos uma pasta separada (/data), que deve ser configurada como Volume persistente
+// no Railway — veja instruções no README/conversa com o suporte.
+const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(__dirname, '..'));
+if (!fs.existsSync(DATA_DIR)) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch(e) {} }
+console.log(`[Lota] Usando DATA_DIR = ${DATA_DIR}${DATA_DIR === '/data' ? ' (Volume persistente detectado ✅)' : ' (⚠️ ATENÇÃO: sem Volume persistente configurado — dados podem ser perdidos em redeploys!)'}`);
 const POSSIBLE_PUBLIC = [ path.join(__dirname, '../public'), path.join(process.cwd(), 'public'), '/app/public' ];
 const PUBLIC_DIR = POSSIBLE_PUBLIC.find(p => { try { return fs.existsSync(path.join(p,'index.html')); } catch(e) { return false; }}) || path.join(__dirname,'../public');
 
@@ -1826,6 +1832,8 @@ app.get('/health', (req, res) => {
     status: 'ok', app: 'Lota Ticketeria', users: db.users.length, eventos: EVENTOS.length,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
+    armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
+    data_dir: DATA_DIR,
     uptime: Math.round(process.uptime()) + 's'
   });
 });
