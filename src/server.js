@@ -318,6 +318,34 @@ app.post('/api/auth/2fa/desativar', auth, (req, res) => {
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: safe(req.user) }));
 
+// ════════════════════════════════════════════════════════
+// RECUPERAÇÃO DE EMERGÊNCIA DO ADMIN — não depende de e-mail.
+// Só funciona se ADMIN_RECOVERY_SECRET estiver configurado no Railway,
+// e só altera a conta de administrador — nunca toca em eventos, pedidos ou outros usuários.
+// ════════════════════════════════════════════════════════
+app.post('/api/admin/recuperar-acesso', rateLimit(300000, 5), (req, res) => {
+  const secretConfigurado = process.env.ADMIN_RECOVERY_SECRET;
+  if (!secretConfigurado) return res.status(503).json({ error: 'Recuperação de emergência não configurada. Defina ADMIN_RECOVERY_SECRET nas variáveis de ambiente.' });
+  const secretEnviado = req.headers['x-recovery-secret'] || '';
+  if (secretEnviado !== secretConfigurado) return res.status(403).json({ error: 'Chave de recuperação incorreta.' });
+  const admin = db.users.find(u => u.isAdmin);
+  if (!admin) return res.status(404).json({ error: 'Nenhuma conta de administrador encontrada.' });
+  const { novoEmail, novaSenha } = req.body;
+  if (novoEmail) {
+    const emailLimpo = sanitize(novoEmail, 150).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) return res.status(400).json({ error: 'E-mail inválido.' });
+    if (db.users.find(u => u.email === emailLimpo && u.id !== admin.id)) return res.status(400).json({ error: 'Esse e-mail já está em uso por outra conta.' });
+    admin.email = emailLimpo;
+    admin.emailVerificado = true;
+  }
+  if (novaSenha) {
+    if (novaSenha.length < 6) return res.status(400).json({ error: 'Nova senha muito curta (mínimo 6 caracteres).' });
+    admin.senha = bcrypt.hashSync(novaSenha, 12);
+  }
+  saveDB(db);
+  res.json({ ok: true, email: admin.email });
+});
+
 app.get('/api/auth/indicacao', auth, (req, res) => {
   const totalIndicados = db.users.filter(u => u.indicadoPor === req.user.id).length;
   const totalIndicadosComprando = db.users.filter(u => u.indicadoPor === req.user.id && u.boasVindasCreditoConcedido).length;
@@ -438,7 +466,9 @@ async function enviarEmailGenerico(destinatario, assunto, html) {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
       body: JSON.stringify({ from: RESEND_FROM, to: destinatario, subject: assunto, html })
     });
-    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o e-mail:', assunto, r.status, errBody); }
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) { console.error('Resend recusou o e-mail:', assunto, '| destinatário:', destinatario, '| status:', r.status, '| resposta:', JSON.stringify(data)); }
+    else { console.log('Resend aceitou o e-mail com sucesso:', assunto, '| destinatário:', destinatario, '| id:', data.id); }
     return r.ok;
   } catch(e) { console.error('Erro e-mail:', e.message); return false; }
 }
@@ -472,6 +502,7 @@ app.post('/api/auth/esqueci-senha', rateLimit(60000, 5), async (req, res) => {
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   // Sempre responde sucesso, mesmo se o e-mail não existir — evita expor quais e-mails estão cadastrados
   const user = db.users.find(u => u.email === email);
+  console.log(`Recuperação de senha solicitada para "${email}" — conta encontrada: ${user ? 'sim' : 'NÃO'}`);
   if (user) {
     const token = jwt.sign({ uid: user.id, tipo: 'reset' }, JWT_SECRET, { expiresIn: '30m' });
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
