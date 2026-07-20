@@ -1240,11 +1240,20 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const maxParcelasPermitidas = Math.max(1, Math.floor(valorCobranca / 5));
     const parcelasSolicitadas = Math.max(1, parseInt(installments) || 1);
     const parcelasFinal = Math.min(parcelasSolicitadas, maxParcelasPermitidas);
+    const [primeiroNome, ...restoNome] = (comprador.nome || '').trim().split(' ');
     const cardBody = {
       transaction_amount: valorCobranca, token, description: descricao,
       installments: parcelasFinal,
       payment_method_id: paymentMethodId, issuer_id: issuerId || undefined,
-      payer: { email: comprador.email, identification: { type: 'CPF', number: cpfLimpo } },
+      payer: {
+        email: comprador.email, identification: { type: 'CPF', number: cpfLimpo },
+        first_name: primeiroNome || undefined, last_name: restoNome.join(' ') || undefined,
+        phone: comprador.telefone ? { number: comprador.telefone.replace(/[^\d]/g,'') } : undefined
+      },
+      additional_info: {
+        items: itensDetalhados.map(it => ({ id: it.loteId, title: it.loteNome, quantity: it.qtd, unit_price: it.precoUnit, category_id: 'tickets' })),
+        payer: { first_name: primeiroNome || undefined, last_name: restoNome.join(' ') || undefined, phone: comprador.telefone ? { number: comprador.telefone.replace(/[^\d]/g,'') } : undefined }
+      },
       external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
     };
     console.log('Enviando pagamento com cartão ao Mercado Pago:', JSON.stringify({ ...cardBody, token: '(oculto)' }));
