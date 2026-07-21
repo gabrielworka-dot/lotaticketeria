@@ -880,7 +880,15 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
     }
   }
 
-  // Marca pedido como reembolsado, invalida ingressos e libera as vagas do lote (e assentos, se houver)
+  marcarPedidoComoReembolsado(pedido, ev);
+  persistPedidos(); persistEventos();
+  res.json({ ok: true, reembolsoReal: !semPagamentoReal });
+});
+
+// Atualiza o estado local (relatórios, vagas, cupons, promoters) quando um pedido é reembolsado —
+// usada tanto quando reembolsamos pela nossa plataforma quanto quando detectamos, via webhook,
+// que o estorno foi feito direto no site do Mercado Pago.
+function marcarPedidoComoReembolsado(pedido, ev) {
   pedido.status = 'reembolsado';
   pedido.reembolsadoEm = new Date().toISOString();
   (pedido.tickets || []).forEach(t => { t.cancelado = true; });
@@ -898,8 +906,36 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
     const p = ev.promoters.find(p => p.id === pedido.promoterRef);
     if (p) { p.vendas = Math.max(0, (p.vendas || 0) - qtdTotal); p.receita = Math.max(0, (p.receita || 0) - pedido.total); }
   }
-  persistPedidos(); persistEventos();
-  res.json({ ok: true, reembolsoReal: !semPagamentoReal });
+}
+
+// Sincroniza manualmente o status de um pedido específico com o Mercado Pago — útil quando um
+// estorno (ou outra mudança) foi feito direto no site/app deles, e nosso relatório ficou desatualizado.
+app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  if (!pedido.mpPaymentId || pedido.mpPaymentId === 'CORTESIA' || String(pedido.mpPaymentId).startsWith('SIMULADO')) {
+    return res.status(400).json({ error: 'Esse pedido não tem um pagamento real do Mercado Pago pra sincronizar.' });
+  }
+  if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
+  try {
+    const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+    const payment = await payResp.json();
+    if (!payResp.ok) return res.status(400).json({ error: 'Erro ao consultar o pagamento no Mercado Pago.' });
+
+    if (['refunded','charged_back'].includes(payment.status) && pedido.status === 'pago') {
+      marcarPedidoComoReembolsado(pedido, ev);
+      persistPedidos(); persistEventos();
+      return res.json({ ok: true, atualizado: true, novoStatus: 'reembolsado' });
+    }
+    if (payment.status === 'approved' && pedido.status !== 'pago') {
+      const proto = req.get('x-forwarded-proto') || 'https';
+      await processarPagamentoAprovado(pedido, payment.id, `${proto}://${req.get('host')}`);
+      return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
+    }
+    res.json({ ok: true, atualizado: false, statusMercadoPago: payment.status, statusAtual: pedido.status });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
@@ -1513,15 +1549,19 @@ app.post('/api/mp/webhook', async (req, res) => {
     // Se o pedidoId não veio na URL (por algum motivo), localizamos pelo external_reference do próprio pagamento
     const pedido = PEDIDOS.find(p => p.id === (pedidoId || payment.external_reference));
     if (!pedido) return res.sendStatus(200);
-    if (pedido.mpPaymentId === String(paymentId) && pedido.status === 'pago') return res.sendStatus(200);
 
-    if (payment.status === 'approved') {
+    if (payment.status === 'approved' && pedido.status !== 'pago') {
       const hostW = req.get('host'); const protoW = req.get('x-forwarded-proto') || 'https';
       await processarPagamentoAprovado(pedido, paymentId, `${protoW}://${hostW}`);
-    } else if (['rejected','cancelled'].includes(payment.status)) {
+    } else if (['rejected','cancelled'].includes(payment.status) && pedido.status === 'pendente') {
       pedido.mpPaymentId = String(paymentId);
       pedido.status = 'recusado';
       persistPedidos();
+    } else if (['refunded','charged_back'].includes(payment.status) && pedido.status === 'pago') {
+      // Estorno feito direto no site/app do Mercado Pago (não pelo botão da nossa plataforma) —
+      // sem isso, o relatório de vendas ficava desatualizado, mostrando a venda como se ainda valesse.
+      const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+      if (ev) { marcarPedidoComoReembolsado(pedido, ev); persistPedidos(); persistEventos(); console.log(`Estorno externo detectado e sincronizado — pedido ${pedido.id}, pagamento ${paymentId}`); }
     }
     res.sendStatus(200);
   } catch(e) { console.error('Erro no webhook do Mercado Pago:', e.message); res.sendStatus(200); }
