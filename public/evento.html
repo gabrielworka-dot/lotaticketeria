@@ -446,6 +446,11 @@ function selecionarMetodo(metodo){
 
 function montarCardFormSeNecessario(){
   if(CARD_FORM_MONTADO) return;
+  // Limpa os campos antigos (iframes já montados) antes de recriar — evita conflito ao remontar
+  // depois de um pagamento recusado, quando precisamos gerar um token novo.
+  ['form-checkout__cardNumber','form-checkout__expirationDate','form-checkout__securityCode'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.innerHTML='';
+  });
   if(!EVENTO?.mpPublicKey){
     const errEl=document.getElementById('errMsg');
     if(errEl){ errEl.textContent='Pagamento com cartão indisponível no momento (chave pública do Mercado Pago não configurada). Use o PIX ou avise o produtor.'; errEl.style.display='block'; }
@@ -478,7 +483,9 @@ function montarCardFormSeNecessario(){
 // (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
 // formulário ser criado no DOM — ver final dessa função.)
 
+let PROCESSANDO_PAGAMENTO=false;
 async function processarSubmit(){
+  if(PROCESSANDO_PAGAMENTO) return; // evita clique duplo/duplo envio, que reusa um token já gasto
   const nome=document.getElementById('cNome').value.trim();
   const email=document.getElementById('cEmail').value.trim();
   const cpf=document.getElementById('cCpf').value.trim().replace(/[^\d]/g,'');
@@ -491,6 +498,7 @@ async function processarSubmit(){
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
 
+  PROCESSANDO_PAGAMENTO=true;
   const btn=document.getElementById('btnComprar');
   btn.disabled=true; btn.textContent='Processando...';
 
@@ -523,11 +531,16 @@ async function processarSubmit(){
         location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=pending';
       }else{
         errEl.textContent=d.motivo||'Pagamento não aprovado.'; errEl.style.display='block';
+        // O token do cartão já foi usado (e recusado) — precisa gerar um novo token pra tentar de novo,
+        // senão o Mercado Pago recusa com "Invalid card_token_id" na próxima tentativa.
+        CARD_FORM_MONTADO=false;
+        montarCardFormSeNecessario();
       }
     }
   }catch(e){
     errEl.textContent=e.message; errEl.style.display='block';
   }finally{
+    PROCESSANDO_PAGAMENTO=false;
     btn.disabled=false; btn.textContent=METODO_ATUAL==='pix'?'Gerar PIX →':'Pagar →';
   }
 }
