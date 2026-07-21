@@ -1195,7 +1195,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
-    const { metodo, cpf, token, installments, paymentMethodId, issuerId } = req.body;
+    const { metodo, cpf, token, installments, paymentMethodId, issuerId, deviceId } = req.body;
     const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
     if (!cpfLimpo || cpfLimpo.length !== 11) return res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
 
@@ -1220,7 +1220,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
       };
       console.log('Enviando pagamento PIX ao Mercado Pago:', JSON.stringify(pixBody));
-      const pixResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(pixBody) });
+      const pixResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4(), ...(deviceId ? { 'X-meli-session-id': deviceId } : {}) }, body: JSON.stringify(pixBody) });
       const pixData = await pixResp.json();
       if (!pixResp.ok) {
         console.error('Mercado Pago recusou o PIX:', pixResp.status, JSON.stringify(pixData));
@@ -1256,8 +1256,8 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       },
       external_reference: pedidoId, notification_url: `${baseUrl}/api/mp/webhook?ped=${pedidoId}`
     };
-    console.log('Enviando pagamento com cartão ao Mercado Pago:', JSON.stringify({ ...cardBody, token: '(oculto)' }));
-    const cardResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(cardBody) });
+    console.log('Enviando pagamento com cartão ao Mercado Pago:', JSON.stringify({ ...cardBody, token: '(oculto)' }), '| Device ID presente:', !!deviceId);
+    const cardResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4(), ...(deviceId ? { 'X-meli-session-id': deviceId } : {}) }, body: JSON.stringify(cardBody) });
     const cardData = await cardResp.json();
     if (!cardResp.ok) {
       console.error('Mercado Pago recusou o pagamento:', cardResp.status, JSON.stringify(cardData));
