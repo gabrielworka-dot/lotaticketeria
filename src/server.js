@@ -1275,6 +1275,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     } else if (cardData.status === 'in_process' || cardData.status === 'pending') {
       return res.json({ ok: true, pedidoId, status: 'pending' });
     } else {
+      console.error('Mercado Pago processou mas RECUSOU o pagamento:', '| status:', cardData.status, '| status_detail:', cardData.status_detail, '| payment_id:', cardData.id, '| pedido:', pedidoId);
       pedidoSalvo.status = 'recusado';
       persistPedidos();
       return res.json({ ok: false, pedidoId, status: 'rejected', motivo: traduzirMotivoRecusa(cardData.status_detail) });
