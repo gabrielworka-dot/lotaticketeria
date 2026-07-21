@@ -810,12 +810,12 @@ async function renderTabPedidos(){
     const pedidos=d.pedidos.slice().reverse();
     if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado']};
-    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Total</th><th>Status</th><th>Data</th><th></th></tr></thead><tbody>'
+    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Total</th><th>Status</th><th>ID Pagamento (MP)</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
         const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
         const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedido(\''+p.id+'\')">↩️ Reembolsar</button>':'';
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+p.total.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td>'+btnReembolso+'</td></tr>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+p.total.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td>'+btnReembolso+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
