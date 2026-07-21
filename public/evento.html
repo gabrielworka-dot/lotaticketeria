@@ -6,6 +6,7 @@
 <title>Lota Ticketeria — Ingresso</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://sdk.mercadopago.com/js/v2"></script>
+<script src="https://www.mercadopago.com/v2/security.js" view="checkout"></script>
 <style>
 :root{
   --bg:#0F0E0C;--card:#161410;--bg3:#1E1C18;--border:#2A2822;
@@ -497,6 +498,9 @@ async function processarSubmit(){
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
   if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
+  // Device ID: o SDK do Mercado Pago já captura isso sozinho quando carrega — enviar isso
+  // junto do pagamento ajuda MUITO a reduzir recusas por segurança (cc_rejected_high_risk).
+  if(window.MP_DEVICE_SESSION_ID) bodyBase.deviceId=window.MP_DEVICE_SESSION_ID;
 
   try{
     // Cortesia (total zero) — não precisa escolher método de pagamento
