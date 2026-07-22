@@ -117,11 +117,12 @@ function loadDB() {
     ticketSlugs: {}, marketplaceFeePercent: 10, loginAttempts: {}
   };
 }
-function saveDB(d) { try { fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2)); } catch(e) {} }
+function saveDB(d) { fs.writeFile(DB_FILE, JSON.stringify(d, null, 2), (err) => { if (err) console.error('Erro ao salvar db.json:', err.message); }); }
 let db = loadDB();
 if (!db.loginAttempts) db.loginAttempts = {};
 if (!db.ticketSlugs) db.ticketSlugs = {};
 if (db.marketplaceFeePercent === undefined) db.marketplaceFeePercent = 10;
+if (db.provedorPagamento === undefined) db.provedorPagamento = 'mercadopago'; // 'mercadopago' | 'asaas'
 console.log(`✅ Banco carregado: ${db.users.length} usuário(s)`);
 
 // ── Coleções em arquivo (eventos, pedidos, posts, follows) ──
@@ -129,7 +130,7 @@ function loadColecao(nome) {
   try { const f = path.join(DATA_DIR, nome + '.json'); if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, 'utf8')); } catch(e) {}
   return [];
 }
-function saveColecao(nome, arr) { try { fs.writeFileSync(path.join(DATA_DIR, nome + '.json'), JSON.stringify(arr)); } catch(e) {} }
+function saveColecao(nome, arr) { fs.writeFile(path.join(DATA_DIR, nome + '.json'), JSON.stringify(arr), (err) => { if (err) console.error(`Erro ao salvar ${nome}.json:`, err.message); }); }
 let EVENTOS  = loadColecao('eventos');
 let PEDIDOS  = loadColecao('pedidos');
 let POSTS    = loadColecao('posts');
@@ -456,6 +457,9 @@ app.delete('/api/produtor/colaboradores/:userId', auth, organizadorOnly, (req, r
 
 // (MP_CLIENT_ID/MP_CLIENT_SECRET não são mais necessários — pagamento único via MP_ACCESS_TOKEN)
 const MP_API = 'https://api.mercadopago.com';
+const ASAAS_API_KEY = process.env.ASAAS_API_KEY || '';
+const ASAAS_SANDBOX = process.env.ASAAS_SANDBOX === 'true';
+const ASAAS_API = ASAAS_SANDBOX ? 'https://api-sandbox.asaas.com/v3' : 'https://api.asaas.com/v3';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota Ticketeria <onboarding@resend.dev>';
 
@@ -865,18 +869,24 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
   const semPagamentoReal = pedido.mpPaymentId === 'CORTESIA' || String(pedido.mpPaymentId || '').startsWith('SIMULADO');
 
   if (!semPagamentoReal) {
-    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
-    try {
-      const refResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}/refunds`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': uuidv4() },
-        body: JSON.stringify({})
-      });
-      if (!refResp.ok) {
-        const errData = await refResp.json().catch(() => ({}));
-        return res.status(400).json({ error: errData.message || 'Erro ao processar reembolso no Mercado Pago.' });
+    if (pedido.provedorPagamento === 'asaas') {
+      if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
+      const estorno = await asaasFetch(`/payments/${pedido.mpPaymentId}/refund`, { method: 'POST' });
+      if (!estorno.ok) return res.status(400).json({ error: estorno.data.errors?.[0]?.description || 'Erro ao processar reembolso no Asaas.' });
+    } else {
+      if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
+      try {
+        const refResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}/refunds`, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': uuidv4() },
+          body: JSON.stringify({})
+        });
+        if (!refResp.ok) {
+          const errData = await refResp.json().catch(() => ({}));
+          return res.status(400).json({ error: errData.message || 'Erro ao processar reembolso no Mercado Pago.' });
+        }
+      } catch (e) {
+        return res.status(500).json({ error: 'Erro ao conectar com o Mercado Pago: ' + e.message });
       }
-    } catch (e) {
-      return res.status(500).json({ error: 'Erro ao conectar com o Mercado Pago: ' + e.message });
     }
   }
 
@@ -888,6 +898,23 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
 // Atualiza o estado local (relatórios, vagas, cupons, promoters) quando um pedido é reembolsado —
 // usada tanto quando reembolsamos pela nossa plataforma quanto quando detectamos, via webhook,
 // que o estorno foi feito direto no site do Mercado Pago.
+// Libera a reserva de estoque (vagas do lote / assento) de um pedido que NUNCA chegou a ser pago —
+// recusado, cancelado ou expirado sem confirmação. Sem isso, ingressos "reservados" por tentativas
+// de pagamento que não vingaram ficariam bloqueados pra sempre, mesmo sem ninguém ter pago por eles.
+function liberarReservaPedido(pedido, ev) {
+  if (!ev || pedido.reservaLiberada) return;
+  for (const it of (pedido.itens || [])) {
+    if (it.assento) {
+      if (ev.assentosOcupados) ev.assentosOcupados = ev.assentosOcupados.filter(a => a !== it.assento);
+    } else {
+      const lote = ev.lotes.find(l => l.id === it.loteId);
+      if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd);
+    }
+  }
+  pedido.reservaLiberada = true;
+  persistEventos();
+}
+
 function marcarPedidoComoReembolsado(pedido, ev) {
   pedido.status = 'reembolsado';
   pedido.reembolsadoEm = new Date().toISOString();
@@ -916,10 +943,28 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
   if (!pedido.mpPaymentId || pedido.mpPaymentId === 'CORTESIA' || String(pedido.mpPaymentId).startsWith('SIMULADO')) {
-    return res.status(400).json({ error: 'Esse pedido não tem um pagamento real do Mercado Pago pra sincronizar.' });
+    return res.status(400).json({ error: 'Esse pedido não tem um pagamento real pra sincronizar.' });
   }
-  if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
   try {
+    if (pedido.provedorPagamento === 'asaas') {
+      if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
+      const consulta = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+      if (!consulta.ok) return res.status(400).json({ error: 'Erro ao consultar a cobrança no Asaas.' });
+      const status = consulta.data.status;
+      if (['REFUNDED','CHARGEBACK_REQUESTED'].includes(status) && pedido.status === 'pago') {
+        marcarPedidoComoReembolsado(pedido, ev);
+        persistPedidos(); persistEventos();
+        return res.json({ ok: true, atualizado: true, novoStatus: 'reembolsado' });
+      }
+      if (['CONFIRMED','RECEIVED'].includes(status) && pedido.status !== 'pago') {
+        const proto = req.get('x-forwarded-proto') || 'https';
+        await processarPagamentoAprovado(pedido, consulta.data.id, `${proto}://${req.get('host')}`);
+        return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
+      }
+      return res.json({ ok: true, atualizado: false, statusMercadoPago: status, statusAtual: pedido.status });
+    }
+
+    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
     const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
     const payment = await payResp.json();
     if (!payResp.ok) return res.status(400).json({ error: 'Erro ao consultar o pagamento no Mercado Pago.' });
@@ -1117,6 +1162,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     lotes: lotesPublicos, pixels: ev.pixels, testMode: isTestToken(MP_PLATFORM_TOKEN),
     feePercent: db.marketplaceFeePercent || 10,
     mpPublicKey: MP_PUBLIC_KEY,
+    provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
@@ -1165,6 +1211,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const assentosOcupadosAtuais = ev.assentosOcupados || [];
     const assentosSelecionadosNestePedido = [];
 
+    // ── Validação (sem alterar nada ainda) ──
     let subtotal = 0, itensDetalhados = [];
     for (const it of itens) {
       const lote = ev.lotes.find(l => l.id === it.loteId);
@@ -1172,7 +1219,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       if (it.assento) {
         // Compra com assento marcado — cada assento é único, sem quantidade agregada
         if (assentosOcupadosAtuais.includes(it.assento) || assentosSelecionadosNestePedido.includes(it.assento)) {
-          return res.status(400).json({ error: `O assento ${it.assento} já foi vendido. Escolha outro.` });
+          return res.status(400).json({ error: `O assento ${it.assento} já foi vendido ou está reservado por outra pessoa. Escolha outro.` });
         }
         assentosSelecionadosNestePedido.push(it.assento);
         subtotal += lote.preco;
@@ -1184,6 +1231,21 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       subtotal += lote.preco * qtd;
       itensDetalhados.push({ loteId: lote.id, qtd, precoUnit: lote.preco, loteNome: lote.nome });
     }
+
+    // ── Reserva IMEDIATA (crítico pra alta concorrência) ──
+    // Tudo isso roda de forma síncrona, sem nenhum "await" desde a leitura de `lote.vendidos` até aqui —
+    // o Node.js garante que nenhuma outra requisição "fura a fila" no meio disso. Reservar aqui (e não
+    // só na confirmação do pagamento, minutos depois) é o que impede duas pessoas ganharem o mesmo
+    // último ingresso/assento num pico de acesso simultâneo. A reserva é revertida automaticamente se
+    // o pagamento for recusado, cancelado ou expirar sem confirmação (ver liberarReservaPedido).
+    for (const it of itensDetalhados) {
+      const lote = ev.lotes.find(l => l.id === it.loteId);
+      if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd;
+    }
+    if (assentosSelecionadosNestePedido.length) {
+      ev.assentosOcupados = [...assentosOcupadosAtuais, ...assentosSelecionadosNestePedido];
+    }
+    persistEventos();
 
     // Aplica cupom
     let desconto = 0, cupomObj = null;
@@ -1229,7 +1291,8 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
-    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
+    if (db.provedorPagamento === 'asaas' && !ASAAS_API_KEY) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Asaas.' });
+    if (db.provedorPagamento === 'mercadopago' && !MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
     const { metodo, cpf, token, installments, paymentMethodId, issuerId, deviceId } = req.body;
     const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
@@ -1244,10 +1307,38 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const pedidoBase = {
       id: pedidoId, eventoId: ev.id, status: 'pendente',
       comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30), cpf: cpfLimpo },
-      compradorUserId,
+      compradorUserId, provedorPagamento: db.provedorPagamento,
       itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, creditoAplicado, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
-      mpPaymentId: null, tickets: [], createdAt: new Date().toISOString()
+      mpPaymentId: null, tickets: [], createdAt: new Date().toISOString(),
+      // Se o pagamento não for confirmado até esse horário, a reserva do ingresso/assento é liberada
+      // automaticamente (ver job de limpeza mais abaixo) — evita que tentativas abandonadas travem
+      // vagas pra sempre num evento concorrido.
+      expiraEm: new Date(Date.now() + 20 * 60000).toISOString()
     };
+
+    // ── ASAAS — checkout hospedado (redireciona o comprador pra fatura do Asaas) ──
+    if (db.provedorPagamento === 'asaas') {
+      try {
+        const clienteId = await buscarOuCriarClienteAsaas(comprador, cpfLimpo);
+        const billingTypeMap = { pix: 'PIX', cartao: 'CREDIT_CARD', boleto: 'BOLETO' };
+        const criacao = await asaasFetch('/payments', {
+          method: 'POST',
+          body: JSON.stringify({
+            customer: clienteId,
+            billingType: billingTypeMap[metodo] || 'UNDEFINED',
+            value: valorCobranca,
+            dueDate: new Date().toISOString().slice(0, 10),
+            description: descricao,
+            externalReference: pedidoId,
+            callback: { successUrl: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=success`, autoRedirect: true }
+          })
+        });
+        if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar cobrança no Asaas.' });
+        pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID da cobrança do Asaas nesse mesmo campo
+        PEDIDOS.push(pedidoBase); persistPedidos();
+        return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.invoiceUrl });
+      } catch (e) { return res.status(500).json({ error: e.message }); }
+    }
 
     if (metodo === 'pix') {
       const pixBody = {
@@ -1313,6 +1404,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     } else {
       console.error('Mercado Pago processou mas RECUSOU o pagamento:', '| status:', cardData.status, '| status_detail:', cardData.status_detail, '| payment_id:', cardData.id, '| pedido:', pedidoId);
       pedidoSalvo.status = 'recusado';
+      liberarReservaPedido(pedidoSalvo, ev);
       persistPedidos();
       return res.json({ ok: false, pedidoId, status: 'rejected', motivo: traduzirMotivoRecusa(cardData.status_detail) });
     }
@@ -1336,14 +1428,37 @@ function traduzirMotivoRecusa(detalhe) {
   return mapa[detalhe] || 'Pagamento não aprovado. Tente outro cartão ou use o PIX.';
 }
 
+// ════════════════════════════════════════════════════════
+// ASAAS — checkout hospedado (comprador é redirecionado pra fatura do Asaas)
+// ════════════════════════════════════════════════════════
+async function asaasFetch(caminho, opcoes = {}) {
+  const resp = await fetch(`${ASAAS_API}${caminho}`, {
+    ...opcoes,
+    headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_API_KEY, ...(opcoes.headers || {}) }
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, status: resp.status, data };
+}
+
+async function buscarOuCriarClienteAsaas(comprador, cpf) {
+  const busca = await asaasFetch(`/customers?cpfCnpj=${cpf}`);
+  if (busca.ok && busca.data.data && busca.data.data.length > 0) return busca.data.data[0].id;
+  const criacao = await asaasFetch('/customers', {
+    method: 'POST',
+    body: JSON.stringify({ name: comprador.nome, email: comprador.email, cpfCnpj: cpf, phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined })
+  });
+  if (!criacao.ok) throw new Error(criacao.data.errors?.[0]?.description || 'Erro ao cadastrar comprador no Asaas.');
+  return criacao.data.id;
+}
+
+
 function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
   pedido.tickets = [];
   if (!ev.assentosOcupados) ev.assentosOcupados = [];
+  // NOTA: `lote.vendidos` e `ev.assentosOcupados` já foram reservados no momento do checkout
+  // (ver rota de checkout), não incrementamos de novo aqui — só geramos os códigos dos ingressos.
   for (const it of pedido.itens) {
-    const lote = ev.lotes.find(l => l.id === it.loteId);
-    if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd;
     if (it.assento) {
-      ev.assentosOcupados.push(it.assento);
       pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
     } else {
       for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
@@ -1556,6 +1671,8 @@ app.post('/api/mp/webhook', async (req, res) => {
     } else if (['rejected','cancelled'].includes(payment.status) && pedido.status === 'pendente') {
       pedido.mpPaymentId = String(paymentId);
       pedido.status = 'recusado';
+      const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+      if (evR) liberarReservaPedido(pedido, evR);
       persistPedidos();
     } else if (['refunded','charged_back'].includes(payment.status) && pedido.status === 'pago') {
       // Estorno feito direto no site/app do Mercado Pago (não pelo botão da nossa plataforma) —
@@ -1567,12 +1684,54 @@ app.post('/api/mp/webhook', async (req, res) => {
   } catch(e) { console.error('Erro no webhook do Mercado Pago:', e.message); res.sendStatus(200); }
 });
 
+// Webhook do Asaas — configurado uma vez direto no painel deles (Integrações > Webhooks),
+// apontando pra: SEU-DOMINIO/api/asaas/webhook
+app.post('/api/asaas/webhook', async (req, res) => {
+  try {
+    const evento = req.body?.event;
+    const payment = req.body?.payment;
+    if (!payment || !payment.externalReference) return res.sendStatus(200);
+    const pedido = PEDIDOS.find(p => p.id === payment.externalReference);
+    if (!pedido) return res.sendStatus(200);
+
+    if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento) && pedido.status !== 'pago') {
+      const proto = req.get('x-forwarded-proto') || 'https';
+      await processarPagamentoAprovado(pedido, payment.id, `${proto}://${req.get('host')}`);
+    } else if (['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'PAYMENT_DELETED'].includes(evento) && pedido.status === 'pendente') {
+      pedido.mpPaymentId = String(payment.id);
+      pedido.status = 'recusado';
+      const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+      if (evR) liberarReservaPedido(pedido, evR);
+      persistPedidos();
+    } else if (['PAYMENT_REFUNDED', 'PAYMENT_CHARGEBACK_REQUESTED', 'PAYMENT_CHARGEBACK_DISPUTE'].includes(evento) && pedido.status === 'pago') {
+      const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+      if (ev) { marcarPedidoComoReembolsado(pedido, ev); persistPedidos(); persistEventos(); console.log(`Estorno externo (Asaas) detectado e sincronizado — pedido ${pedido.id}, cobrança ${payment.id}`); }
+    }
+    res.sendStatus(200);
+  } catch (e) { console.error('Erro no webhook do Asaas:', e.message); res.sendStatus(200); }
+});
+
 app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) => {
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
-  // Rede de segurança: se o webhook do Mercado Pago não chegou por algum motivo (comum em PIX,
-  // que pode demorar pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
-  if (pedido.status === 'pendente' && pedido.mpPaymentId && MP_PLATFORM_TOKEN) {
+  // Rede de segurança: se o webhook não chegou por algum motivo (comum em PIX, que pode demorar
+  // pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
+  if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
+    try {
+      const consulta = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+      if (consulta.ok) {
+        if (['CONFIRMED','RECEIVED'].includes(consulta.data.status)) {
+          const protoF = req.get('x-forwarded-proto') || 'https';
+          await processarPagamentoAprovado(pedido, consulta.data.id, `${protoF}://${req.get('host')}`);
+        } else if (consulta.data.status === 'REFUNDED') {
+          pedido.status = 'recusado';
+          const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+          if (evR) liberarReservaPedido(pedido, evR);
+          persistPedidos();
+        }
+      }
+    } catch(e) { console.error('Erro ao verificar pagamento (Asaas):', e.message); }
+  } else if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN) {
     try {
       const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
       const payData = await payResp.json();
@@ -1581,7 +1740,12 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
           const hostF = req.get('host'); const protoF = req.get('x-forwarded-proto') || 'https';
           await processarPagamentoAprovado(pedido, payData.id, `${protoF}://${hostF}`);
         }
-        else if (['rejected','cancelled'].includes(payData.status)) { pedido.status = 'recusado'; persistPedidos(); }
+        else if (['rejected','cancelled'].includes(payData.status)) {
+          pedido.status = 'recusado';
+          const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+          if (evR) liberarReservaPedido(pedido, evR);
+          persistPedidos();
+        }
       }
     } catch(e) { console.error('Erro ao verificar pagamento:', e.message); }
   }
@@ -1749,6 +1913,19 @@ app.patch('/api/admin/marketplace-fee', auth, adminOnly, (req, res) => {
   db.marketplaceFeePercent = v; saveDB(db);
   res.json({ ok: true, feePercent: v });
 });
+app.get('/api/admin/provedor-pagamento', auth, adminOnly, (req, res) => res.json({
+  provedor: db.provedorPagamento,
+  mercadopagoConfigurado: !!MP_PLATFORM_TOKEN, asaasConfigurado: !!ASAAS_API_KEY
+}));
+app.patch('/api/admin/provedor-pagamento', auth, adminOnly, (req, res) => {
+  const { provedor } = req.body;
+  if (!['mercadopago', 'asaas'].includes(provedor)) return res.status(400).json({ error: 'Provedor inválido.' });
+  if (provedor === 'mercadopago' && !MP_PLATFORM_TOKEN) return res.status(400).json({ error: 'MP_ACCESS_TOKEN não está configurado no servidor.' });
+  if (provedor === 'asaas' && !ASAAS_API_KEY) return res.status(400).json({ error: 'ASAAS_API_KEY não está configurado no servidor.' });
+  db.provedorPagamento = provedor; saveDB(db);
+  res.json({ ok: true, provedor });
+});
+
 app.get('/api/admin/usuarios', auth, adminOnly, (req, res) => res.json({ usuarios: db.users.map(safe) }));
 
 app.patch('/api/admin/usuarios/:id/ativo', auth, adminOnly, (req, res) => {
@@ -1911,7 +2088,9 @@ app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok', app: 'Lota Ticketeria', users: db.users.length, eventos: EVENTOS.length,
+    provedor_pagamento_ativo: db.provedorPagamento,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
+    asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
     armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
     data_dir: DATA_DIR,
@@ -1924,6 +2103,25 @@ app.get('*', (req, res) => {
   if (fs.existsSync(idx)) return res.sendFile(idx);
   res.status(500).send('index.html não encontrado.');
 });
+
+// ── LIMPEZA DE RESERVAS EXPIRADAS ──
+// Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo de pagamento já passou (sem confirmação
+// nem recusa via webhook) tem sua reserva de ingresso/assento liberada automaticamente. Isso é essencial
+// em eventos concorridos — sem isso, tentativas de pagamento abandonadas (ex: gerou PIX e desistiu)
+// prenderiam vagas pra sempre.
+setInterval(() => {
+  const agora = Date.now();
+  let liberados = 0;
+  for (const pedido of PEDIDOS) {
+    if (pedido.status === 'pendente' && pedido.expiraEm && new Date(pedido.expiraEm).getTime() < agora) {
+      const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+      pedido.status = 'expirado';
+      if (ev) liberarReservaPedido(pedido, ev);
+      liberados++;
+    }
+  }
+  if (liberados > 0) { persistPedidos(); console.log(`[Limpeza] ${liberados} reserva(s) expirada(s) liberada(s).`); }
+}, 5 * 60000);
 
 app.listen(PORT, () => {
   console.log(`\n🎟️  LOTA TICKETERIA rodando na porta ${PORT}`);
