@@ -810,13 +810,14 @@ async function renderTabPedidos(){
     const pedidos=d.pedidos.slice().reverse();
     if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado (não pago a tempo)']};
-    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Total</th><th>Status</th><th>ID Pagamento (MP)</th><th>Data</th><th></th></tr></thead><tbody>'
+    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><p style="font-size:11px;color:var(--text3);margin:-8px 0 12px">O valor mostrado é o que você recebe — a taxa administrativa (cobrada à parte do comprador) não está incluída aqui.</p><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Seu Valor</th><th>Status</th><th>ID Pagamento (MP)</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
         const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
+        const valorLiquido=p.valorIngressos!==undefined?p.valorIngressos:p.total;
         const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedido(\''+p.id+'\')">↩️ Reembolsar</button>':'';
         const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedido(\''+p.id+'\')" title="Confere se o status real no Mercado Pago bate com o daqui">🔄 Sincronizar</button>':'';
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+p.total.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
@@ -845,7 +846,7 @@ async function renderTabRelatorios(){
     const r=await api('GET','/api/eventos/'+EV_ATUAL.id+'/relatorio');
     el.innerHTML=`
       <div class="met-g">
-        <div class="met-c"><div class="met-l">Receita Total</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Receita Total (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Ingressos Vendidos</div><div class="met-v">${r.totalIngressos}</div></div>
         <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
         <div class="met-c"><div class="met-l">Ticket Médio</div><div class="met-v">${r.totalIngressos>0?'R$'+(r.totalReceita/r.totalIngressos).toFixed(2):'—'}</div></div>
@@ -855,7 +856,8 @@ async function renderTabRelatorios(){
       <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
       <div class="card"><div class="ct">Exportar</div><div class="br">
         <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'participantes.csv')">📥 Lista de Participantes</a>
-        <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'bordero.csv')">📥 Exportar Borderô</a>
+        <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'bordero.csv')">📥 Borderô (CSV)</a>
+        <a href="#" class="btn bp btn-sm" onclick="return baixarComAuth(event,'bordero.pdf')">📄 Borderô (PDF)</a>
       </div></div>
     `;
     renderGraficoVendas(r.porDia);
@@ -881,13 +883,20 @@ function renderGraficoVendas(porDia){
 }
 async function baixarComAuth(ev,tipo){
   ev.preventDefault();
-  const url = tipo==='participantes.csv' ? '/api/eventos/'+EV_ATUAL.id+'/participantes.csv' : '/api/eventos/'+EV_ATUAL.id+'/bordero.csv';
+  const urls={
+    'participantes.csv':'/api/eventos/'+EV_ATUAL.id+'/participantes.csv',
+    'bordero.csv':'/api/eventos/'+EV_ATUAL.id+'/bordero.csv',
+    'bordero.pdf':'/api/eventos/'+EV_ATUAL.id+'/bordero.pdf'
+  };
+  const url=urls[tipo];
   try{
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+AT}});
     if(!r.ok){ const d=await r.json(); toast(d.error||'Erro','err'); return false; }
     const blob=await r.blob();
+    const blobUrl=URL.createObjectURL(blob);
+    if(tipo==='bordero.pdf'){ window.open(blobUrl,'_blank'); return false; }
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
+    a.href=blobUrl;
     a.download=(tipo==='participantes.csv'?'participantes-':'bordero-')+EV_ATUAL.slug+'.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }catch(e){ toast('Erro ao baixar.','err'); }
