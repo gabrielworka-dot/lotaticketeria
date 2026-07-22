@@ -809,7 +809,7 @@ async function renderTabPedidos(){
     const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/pedidos');
     const pedidos=d.pedidos.slice().reverse();
     if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
-    const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado']};
+    const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado (não pago a tempo)']};
     el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Total</th><th>Status</th><th>ID Pagamento (MP)</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
