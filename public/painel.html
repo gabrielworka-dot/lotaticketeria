@@ -519,7 +519,6 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('cupons',this)">🏷️ Cupons</div>
       <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
-      <div class="tab" onclick="evTab('pedidos',this)">📦 Pedidos</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
     </div>
@@ -529,7 +528,6 @@ function renderEventoDetalhe(){
     <div id="evTabCupons" style="display:none"></div>
     <div id="evTabPromoters" style="display:none"></div>
     <div id="evTabPixels" style="display:none"></div>
-    <div id="evTabPedidos" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
   `;
@@ -537,7 +535,7 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Pedidos','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -546,7 +544,6 @@ function evTab(tab,el){
   if(tab==='cupons') renderTabCupons();
   if(tab==='promoters') renderTabPromoters();
   if(tab==='pixels') renderTabPixels();
-  if(tab==='pedidos') renderTabPedidos();
   if(tab==='relatorios') renderTabRelatorios();
   if(tab==='checkin') renderTabCheckin();
 }
@@ -798,43 +795,6 @@ async function salvarPixels(){
   try{
     const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/pixels',{metaPixelId:gv('pxMeta'),tiktokPixelId:gv('pxTiktok'),gaMeasurementId:gv('pxGa'),googleAdsConversionId:gv('pxGadsId'),googleAdsConversionLabel:gv('pxGadsLabel')});
     EV_ATUAL=d.evento; toast('Pixels salvos!','ok');
-  }catch(e){ toast(e.message,'err'); }
-}
-
-// ── PEDIDOS (cancelamento e reembolso) ──
-async function renderTabPedidos(){
-  const el=document.getElementById('evTabPedidos');
-  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
-  try{
-    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/pedidos');
-    const pedidos=d.pedidos.slice().reverse();
-    if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
-    const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado (não pago a tempo)']};
-    el.innerHTML='<div class="card"><div class="ct">Todos os Pedidos</div><p style="font-size:11px;color:var(--text3);margin:-8px 0 12px">O valor mostrado é o que você recebe — a taxa administrativa (cobrada à parte do comprador) não está incluída aqui.</p><div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Seu Valor</th><th>Status</th><th>ID Pagamento (MP)</th><th>Data</th><th></th></tr></thead><tbody>'
-      +pedidos.map(p=>{
-        const [cls,lbl]=stMap[p.status]||['',p.status];
-        const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
-        const valorLiquido=p.valorIngressos!==undefined?p.valorIngressos:p.total;
-        const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedido(\''+p.id+'\')">↩️ Reembolsar</button>':'';
-        const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedido(\''+p.id+'\')" title="Confere se o status real no Mercado Pago bate com o daqui">🔄 Sincronizar</button>':'';
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
-      }).join('')+'</tbody></table></div></div>';
-  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
-}
-async function reembolsarPedido(pedidoId){
-  if(bloqueiaSomenteLeitura())return;
-  if(!confirm('Reembolsar este pedido? Se for um pagamento real, o valor será devolvido ao comprador via Mercado Pago e os ingressos serão invalidados. Esta ação não pode ser desfeita.')) return;
-  try{
-    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/pedidos/'+pedidoId+'/reembolsar',{});
-    toast(d.reembolsoReal?'Reembolso processado no Mercado Pago!':'Pedido cancelado.','ok');
-    renderTabPedidos();
-  }catch(e){ toast(e.message,'err'); }
-}
-async function sincronizarPedido(pedidoId){
-  try{
-    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/pedidos/'+pedidoId+'/sincronizar',{});
-    if(d.atualizado){ toast('Status atualizado! Agora está: '+d.novoStatus,'ok'); renderTabPedidos(); }
-    else{ toast('Já está sincronizado (Mercado Pago: '+d.statusMercadoPago+').','ok'); }
   }catch(e){ toast(e.message,'err'); }
 }
 
