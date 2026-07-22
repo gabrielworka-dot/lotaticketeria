@@ -590,7 +590,14 @@ async function renderStatusPedido(){
           <a href="/api/public/pedido/${pedidoParam}/pdf" target="_blank" class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:14px">📄 Abrir ingresso em PDF</a>
           <p style="font-size:11px;color:var(--text3);margin-top:10px">Guarde estes códigos. Apresente-os na entrada.</p>`;
         d.tickets.forEach(t=>gerarQR(t.codigo));
-        try{ const ev=await api('GET','/api/public/eventos/'+slug); dispararConversao(ev.pixels,d.total,pedidoParam); }catch(e){}
+        // BUG corrigido: essa página (confirmação) nunca passava por injetarPixels() antes de tentar
+        // disparar a conversão — o script do Meta/GA/TikTok nunca era carregado aqui, então o evento
+        // de Compra nunca disparava de verdade, mesmo o ViewContent funcionando na página do evento.
+        try{
+          const ev=await api('GET','/api/public/eventos/'+slug);
+          injetarPixels(ev.pixels);
+          setTimeout(()=>dispararConversao(ev.pixels,d.total,pedidoParam), 400);
+        }catch(e){}
         return;
       }
       if(d.status==='recusado'){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Pagamento não aprovado. Tente novamente.</p>'; return; }
