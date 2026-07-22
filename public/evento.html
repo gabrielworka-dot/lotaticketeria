@@ -53,7 +53,7 @@ a{color:inherit;}
 .fg{margin-bottom:13px;}
 .fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
 .fi{width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;color:var(--text);font-family:inherit;font-size:16px;outline:none;}
-.fi-mp{width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;height:44px;box-sizing:border-box;}
+.fi-mp{width:100%;background:#FFFFFF;border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;height:44px;box-sizing:border-box;}
 .fi-mp.focused{border-color:var(--p2);}
 .fi-mp.invalid{border-color:var(--red2);}
 .metodo-tabs{display:flex;gap:8px;margin-bottom:16px;}
@@ -291,6 +291,19 @@ function renderEvento(){
       </form>
     </div>
 
+    <!-- Checkout Asaas — o comprador é redirecionado pra fatura hospedada pelo Asaas -->
+    <div class="card" id="pagamentoCardAsaas" style="display:none">
+      <div class="card-title">Forma de pagamento</div>
+      <div class="metodo-tabs">
+        <div class="metodo-tab active" id="tabCartaoAsaas" onclick="selecionarMetodoAsaas('cartao')">💳 Cartão de crédito</div>
+        <div class="metodo-tab" id="tabPixAsaas" onclick="selecionarMetodoAsaas('pix')">📱 PIX</div>
+        <div class="metodo-tab" id="tabBoletoAsaas" onclick="selecionarMetodoAsaas('boleto')">🧾 Boleto</div>
+      </div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Ao continuar, você será levado(a) pra uma página segura pra concluir o pagamento, e volta pra cá automaticamente assim que terminar.</p>
+      <div class="err" id="errMsgAsaas" style="display:none"></div>
+      <button class="btn" id="btnComprarAsaas" onclick="processarSubmitAsaas()">Continuar para pagamento →</button>
+    </div>
+
     <div class="card pix-box" id="pixResultCard" style="display:none">
       <div class="card-title">Pague com PIX pra confirmar</div>
       <img id="pixQrImg" alt="QR Code PIX">
@@ -303,7 +316,22 @@ function renderEvento(){
   // por isso o listener é anexado aqui, e não em DOMContentLoaded (que já teria passado).
   const form=document.getElementById('form-checkout');
   if(form && !form.dataset.listenerAnexado){
-    form.addEventListener('submit', event => { event.preventDefault(); processarSubmit(); });
+    form.addEventListener('submit', event => {
+      // No modo PIX, tratamos o envio diretamente aqui (não precisa de tokenização de cartão).
+      // No modo Cartão, NÃO interceptamos — deixamos o próprio SDK do Mercado Pago capturar esse
+      // envio (ele já está "escutando" o mesmo formulário) pra gerar o token corretamente e então
+      // chamar processarSubmitCartao() através do callback onSubmit configurado no cardForm.
+      if(METODO_ATUAL==='pix'){
+        event.preventDefault();
+        processarSubmitPix();
+      }else if(!CARD_FORM_MONTADO){
+        // Segurança: se o SDK do cartão ainda não carregou, evita que o navegador tente
+        // navegar pra outra página (comportamento padrão de envio de formulário).
+        event.preventDefault();
+        const errEl=document.getElementById('errMsg');
+        if(errEl){ errEl.textContent='Formulário de cartão ainda carregando, tente novamente em instantes.'; errEl.style.display='block'; }
+      }
+    });
     form.dataset.listenerAnexado='1';
   }
 }
@@ -404,8 +432,13 @@ function atualizarTotal(){
     document.getElementById('creditoDescontoVal').textContent='- R$ '+creditoAplicado.toFixed(2).replace('.',',');
   } else cRow.style.display='none';
   document.getElementById('dadosCard').style.display=temItem?'block':'none';
-  document.getElementById('pagamentoCard').style.display=temItem?'block':'none';
-  if(temItem){ montarCardFormSeNecessario(); dispararInicioCheckout(EVENTO?.pixels,total); }
+  const usaAsaas=EVENTO?.provedorPagamento==='asaas';
+  document.getElementById('pagamentoCard').style.display=(temItem&&!usaAsaas)?'block':'none';
+  document.getElementById('pagamentoCardAsaas').style.display=(temItem&&usaAsaas)?'block':'none';
+  if(temItem){
+    if(usaAsaas) dispararInicioCheckout(EVENTO?.pixels,total);
+    else { montarCardFormSeNecessario(); dispararInicioCheckout(EVENTO?.pixels,total); }
+  }
 }
 
 async function aplicarCupom(){
@@ -444,6 +477,54 @@ function selecionarMetodo(metodo){
   document.getElementById('btnComprar').textContent = metodo==='pix' ? 'Gerar PIX →' : 'Pagar →';
 }
 
+let METODO_ATUAL_ASAAS='cartao';
+function selecionarMetodoAsaas(metodo){
+  METODO_ATUAL_ASAAS=metodo;
+  document.getElementById('tabCartaoAsaas').classList.toggle('active', metodo==='cartao');
+  document.getElementById('tabPixAsaas').classList.toggle('active', metodo==='pix');
+  document.getElementById('tabBoletoAsaas').classList.toggle('active', metodo==='boleto');
+}
+
+let PROCESSANDO_PAGAMENTO_ASAAS=false;
+async function processarSubmitAsaas(){
+  if(PROCESSANDO_PAGAMENTO_ASAAS) return;
+  const nome=document.getElementById('cNome').value.trim();
+  const email=document.getElementById('cEmail').value.trim();
+  const cpf=document.getElementById('cCpf').value.trim().replace(/[^\d]/g,'');
+  const tel=document.getElementById('cTel').value.trim();
+  const errEl=document.getElementById('errMsgAsaas');
+  errEl.style.display='none';
+  if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
+  if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
+  const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
+  Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
+  if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
+
+  PROCESSANDO_PAGAMENTO_ASAAS=true;
+  const btn=document.getElementById('btnComprarAsaas');
+  btn.disabled=true; btn.textContent='Processando...';
+
+  const bodyBase={slug,itens,comprador:{nome,email,telefone:tel},cpf,metodo:METODO_ATUAL_ASAAS};
+  if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
+  if(refParam) bodyBase.ref=refParam;
+  if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
+
+  try{
+    if(TOTAL_ATUAL<=0){
+      const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'cartao'});
+      if(d.cortesia){ location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success'; return; }
+    }
+    const d=await api('POST','/api/public/checkout',bodyBase);
+    if(d.invoiceUrl){ location.href=d.invoiceUrl; }
+    else{ errEl.textContent='Não foi possível gerar o link de pagamento.'; errEl.style.display='block'; }
+  }catch(e){
+    errEl.textContent=e.message; errEl.style.display='block';
+  }finally{
+    PROCESSANDO_PAGAMENTO_ASAAS=false;
+    btn.disabled=false; btn.textContent='Continuar para pagamento →';
+  }
+}
+
 function montarCardFormSeNecessario(){
   if(CARD_FORM_MONTADO) return;
   // Limpa os campos antigos (iframes já montados) antes de recriar — evita conflito ao remontar
@@ -464,9 +545,9 @@ function montarCardFormSeNecessario(){
       iframe: true,
       form: {
         id: 'form-checkout',
-        cardNumber: { id:'form-checkout__cardNumber', placeholder:'Número do cartão' },
-        expirationDate: { id:'form-checkout__expirationDate', placeholder:'MM/AA' },
-        securityCode: { id:'form-checkout__securityCode', placeholder:'CVV' },
+        cardNumber: { id:'form-checkout__cardNumber', placeholder:'Número do cartão', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
+        expirationDate: { id:'form-checkout__expirationDate', placeholder:'MM/AA', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
+        securityCode: { id:'form-checkout__securityCode', placeholder:'CVV', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
         cardholderName: { id:'form-checkout__cardholderName', placeholder:'Nome impresso no cartão' },
         issuer: { id:'form-checkout__issuer', placeholder:'Banco emissor' },
         installments: { id:'form-checkout__installments', placeholder:'Parcelas' },
@@ -474,6 +555,13 @@ function montarCardFormSeNecessario(){
       },
       callbacks: {
         onFormMounted: error => { if(error) console.warn('Erro ao montar formulário de cartão:', error); },
+        // IMPORTANTE: a tokenização do cartão (o "token" que mandamos pro servidor) só é gerada de
+        // verdade DENTRO desse callback — é assim que o SDK do Mercado Pago funciona. Chamar
+        // getCardFormData() fora daqui retorna dados incompletos, mesmo com o cartão certinho.
+        onSubmit: event => {
+          event.preventDefault();
+          if(METODO_ATUAL==='cartao') processarSubmitCartao();
+        },
       }
     });
     CARD_FORM_MONTADO=true;
@@ -483,65 +571,98 @@ function montarCardFormSeNecessario(){
 // (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
 // formulário ser criado no DOM — ver final dessa função.)
 
-let PROCESSANDO_PAGAMENTO=false;
-async function processarSubmit(){
-  if(PROCESSANDO_PAGAMENTO) return; // evita clique duplo/duplo envio, que reusa um token já gasto
+function coletarDadosComprador(){
   const nome=document.getElementById('cNome').value.trim();
   const email=document.getElementById('cEmail').value.trim();
   const cpf=document.getElementById('cCpf').value.trim().replace(/[^\d]/g,'');
   const tel=document.getElementById('cTel').value.trim();
-  const errEl=document.getElementById('errMsg');
-  errEl.style.display='none';
-  if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
-  if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
   const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
-  if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
-
-  PROCESSANDO_PAGAMENTO=true;
-  const btn=document.getElementById('btnComprar');
-  btn.disabled=true; btn.textContent='Processando...';
-
-  const bodyBase={slug,itens,comprador:{nome,email,telefone:tel},cpf};
+  return {nome,email,cpf,tel,itens};
+}
+function validarDadosComprador(dados){
+  const errEl=document.getElementById('errMsg');
+  errEl.style.display='none';
+  if(!dados.nome||!dados.email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return false;}
+  if(!dados.cpf||dados.cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return false;}
+  if(!dados.itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return false;}
+  return true;
+}
+function montarBodyBase(dados){
+  const bodyBase={slug,itens:dados.itens,comprador:{nome:dados.nome,email:dados.email,telefone:dados.tel},cpf:dados.cpf};
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
   if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
   // Device ID: o SDK do Mercado Pago já captura isso sozinho quando carrega — enviar isso
   // junto do pagamento ajuda MUITO a reduzir recusas por segurança (cc_rejected_high_risk).
   if(window.MP_DEVICE_SESSION_ID) bodyBase.deviceId=window.MP_DEVICE_SESSION_ID;
+  return bodyBase;
+}
 
+let PROCESSANDO_PAGAMENTO=false;
+
+async function processarSubmitPix(){
+  if(PROCESSANDO_PAGAMENTO) return;
+  const dados=coletarDadosComprador();
+  if(!validarDadosComprador(dados)) return;
+  const errEl=document.getElementById('errMsg');
+  PROCESSANDO_PAGAMENTO=true;
+  const btn=document.getElementById('btnComprar');
+  btn.disabled=true; btn.textContent='Processando...';
+  const bodyBase=montarBodyBase(dados);
   try{
-    // Cortesia (total zero) — não precisa escolher método de pagamento
     if(TOTAL_ATUAL<=0){
       const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'cartao'});
       if(d.cortesia){ location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success'; return; }
     }
+    const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'pix'});
+    exibirPix(d);
+  }catch(e){
+    errEl.textContent=e.message; errEl.style.display='block';
+  }finally{
+    PROCESSANDO_PAGAMENTO=false;
+    btn.disabled=false; btn.textContent='Gerar PIX →';
+  }
+}
 
-    if(METODO_ATUAL==='pix'){
-      const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'pix'});
-      exibirPix(d);
+// Chamada de dentro do callback onSubmit do cardForm (ver montarCardFormSeNecessario) — só aí o
+// token do cartão já foi gerado de verdade pelo SDK do Mercado Pago.
+async function processarSubmitCartao(){
+  if(PROCESSANDO_PAGAMENTO) return;
+  const dados=coletarDadosComprador();
+  if(!validarDadosComprador(dados)) return;
+  const errEl=document.getElementById('errMsg');
+  if(!CARD_FORM){ errEl.textContent='Formulário de cartão ainda carregando, tente novamente em instantes.'; errEl.style.display='block'; return; }
+
+  PROCESSANDO_PAGAMENTO=true;
+  const btn=document.getElementById('btnComprar');
+  btn.disabled=true; btn.textContent='Processando...';
+  const bodyBase=montarBodyBase(dados);
+
+  try{
+    if(TOTAL_ATUAL<=0){
+      const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'cartao'});
+      if(d.cortesia){ location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success'; return; }
+    }
+    const dadosCartao=CARD_FORM.getCardFormData();
+    const body={...bodyBase, metodo:'cartao', token:dadosCartao.token, installments:dadosCartao.installments, paymentMethodId:dadosCartao.paymentMethodId, issuerId:dadosCartao.issuerId};
+    const d=await api('POST','/api/public/checkout',body);
+    if(d.status==='approved'){
+      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success';
+    }else if(d.status==='pending'){
+      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=pending';
     }else{
-      if(!CARD_FORM){ errEl.textContent='Formulário de cartão ainda carregando, tente novamente em instantes.'; errEl.style.display='block'; btn.disabled=false; btn.textContent='Pagar →'; return; }
-      const dadosCartao=CARD_FORM.getCardFormData();
-      const body={...bodyBase, metodo:'cartao', token:dadosCartao.token, installments:dadosCartao.installments, paymentMethodId:dadosCartao.paymentMethodId, issuerId:dadosCartao.issuerId};
-      const d=await api('POST','/api/public/checkout',body);
-      if(d.status==='approved'){
-        location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success';
-      }else if(d.status==='pending'){
-        location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=pending';
-      }else{
-        errEl.textContent=d.motivo||'Pagamento não aprovado.'; errEl.style.display='block';
-        // O token do cartão já foi usado (e recusado) — precisa gerar um novo token pra tentar de novo,
-        // senão o Mercado Pago recusa com "Invalid card_token_id" na próxima tentativa.
-        CARD_FORM_MONTADO=false;
-        montarCardFormSeNecessario();
-      }
+      errEl.textContent=d.motivo||'Pagamento não aprovado.'; errEl.style.display='block';
+      // O token do cartão já foi usado (e recusado) — precisa gerar um novo token pra tentar de novo,
+      // senão o Mercado Pago recusa com "Invalid card_token_id" na próxima tentativa.
+      CARD_FORM_MONTADO=false;
+      montarCardFormSeNecessario();
     }
   }catch(e){
     errEl.textContent=e.message; errEl.style.display='block';
   }finally{
     PROCESSANDO_PAGAMENTO=false;
-    btn.disabled=false; btn.textContent=METODO_ATUAL==='pix'?'Gerar PIX →':'Pagar →';
+    btn.disabled=false; btn.textContent='Pagar →';
   }
 }
 
