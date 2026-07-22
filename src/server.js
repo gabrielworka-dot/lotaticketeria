@@ -859,7 +859,7 @@ app.get('/api/eventos/:id/pedidos', auth, (req, res) => {
 
 // ── CANCELAMENTO / REEMBOLSO DE PEDIDO ──
 app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = req.user.isAdmin ? EVENTOS.find(e => e.id === req.params.id) : eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
@@ -938,7 +938,7 @@ function marcarPedidoComoReembolsado(pedido, ev) {
 // Sincroniza manualmente o status de um pedido específico com o Mercado Pago — útil quando um
 // estorno (ou outra mudança) foi feito direto no site/app deles, e nosso relatório ficou desatualizado.
 app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res) => {
-  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  const ev = req.user.isAdmin ? EVENTOS.find(e => e.id === req.params.id) : eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
@@ -1025,19 +1025,17 @@ app.get('/api/eventos/:id/bordero.csv', auth, (req, res) => {
   const linhas = [
     ['BORDERÔ DE VENDAS — ' + ev.nome],
     ['Data de emissão', new Date().toLocaleString('pt-BR')],
-    ['Observação', 'O produtor recebe 100% do valor do ingresso — a taxa administrativa é cobrada à parte do comprador.'],
     [''],
-    ['Pedido','Comprador','E-mail','Itens','Valor Pago pelo Comprador (R$)','Taxa Administrativa — fica com a plataforma (R$)','Seu Valor Líquido (R$)','Status','Data']
+    ['Pedido','Comprador','E-mail','Itens','Valor Recebido (R$)','Status','Data']
   ];
-  let totalPagoComprador = 0, totalTaxa = 0, totalLiquido = 0;
+  let totalRecebido = 0;
   pedidos.forEach(p => {
     const liquido = p.valorIngressos !== undefined ? p.valorIngressos : (p.total - (p.taxaAdministrativa || 0));
-    const taxa = p.taxaAdministrativa || 0;
-    totalPagoComprador += p.total; totalTaxa += taxa; totalLiquido += liquido;
-    linhas.push([p.id.slice(0,8), p.comprador?.nome||'', p.comprador?.email||'', (p.tickets||[]).length, p.total.toFixed(2).replace('.',','), taxa.toFixed(2).replace('.',','), liquido.toFixed(2).replace('.',','), p.status, new Date(p.createdAt).toLocaleDateString('pt-BR')]);
+    totalRecebido += liquido;
+    linhas.push([p.id.slice(0,8), p.comprador?.nome||'', p.comprador?.email||'', (p.tickets||[]).length, liquido.toFixed(2).replace('.',','), p.status, new Date(p.createdAt).toLocaleDateString('pt-BR')]);
   });
   linhas.push(['']);
-  linhas.push(['TOTAL', '', '', '', totalPagoComprador.toFixed(2).replace('.',','), totalTaxa.toFixed(2).replace('.',','), totalLiquido.toFixed(2).replace('.',','), '', '']);
+  linhas.push(['TOTAL', '', '', '', totalRecebido.toFixed(2).replace('.',','), '', '']);
   const csv = linhas.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="bordero-${ev.slug}.csv"`);
@@ -1137,8 +1135,6 @@ async function gerarPdfBordero(ev, pedidos) {
 
   const totalDesconto = pedidos.reduce((s, p) => s + (p.desconto || 0), 0);
   const totalLiquido = pedidos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
-  const totalTaxa = pedidos.reduce((s, p) => s + (p.taxaAdministrativa || 0), 0);
-  const totalPagoComprador = pedidos.reduce((s, p) => s + p.total, 0);
 
   const linhaFinanceira = (label, valor, opts = {}) => {
     doc.fontSize(10.5).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(opts.cor || ESCURO);
@@ -1149,21 +1145,10 @@ async function gerarPdfBordero(ev, pedidos) {
 
   linhaFinanceira('Valor total vendido em ingressos', totalBrutoIngressos);
   if (totalDesconto > 0) linhaFinanceira('Descontos aplicados (cupons)', totalDesconto, { negativo: true, cor: CINZA });
-  y += 4;
-  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(0.75).strokeColor(BORDA).stroke();
-  y += 12;
-  linhaFinanceira('Taxa administrativa (cobrada à parte do comprador — fica com a plataforma)', totalTaxa, { cor: CINZA_CLARO });
-  linhaFinanceira('Valor total pago pelos compradores', totalPagoComprador);
   y += 8;
   doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(LARANJA).stroke();
   y += 14;
-  linhaFinanceira('Seu valor líquido (o que você recebe)', totalLiquido, { bold: true, cor: VERDE });
-
-  y += 20;
-  doc.fillColor(CINZA_CLARO).fontSize(8.5).font('Helvetica').text(
-    'O produtor recebe 100% do valor do ingresso — a taxa administrativa é um valor à parte, cobrado do comprador no momento da compra, e não é descontada do seu repasse.',
-    MARGIN, y, { width: CONTENT_W }
-  );
+  linhaFinanceira('Valor recebido', totalLiquido, { bold: true, cor: VERDE });
 
   doc.end();
   return done;
