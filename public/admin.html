@@ -178,6 +178,18 @@ a{color:inherit;}
         <button class="btn bp btn-sm" onclick="salvarFee()">Salvar</button>
       </div>
     </div>
+    <div class="card" style="max-width:420px">
+      <div class="ct">Provedor de Pagamento</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Define qual gateway processa os pagamentos de novos pedidos. Pedidos antigos continuam vinculados ao provedor que os processou originalmente.</p>
+      <div id="provedorStatus" style="font-size:11px;color:var(--text3);margin-bottom:12px"></div>
+      <div style="display:flex;gap:9px;align-items:center">
+        <select id="provedorSelect" class="fi" style="max-width:220px">
+          <option value="mercadopago">Mercado Pago</option>
+          <option value="asaas">Asaas</option>
+        </select>
+        <button class="btn bp btn-sm" onclick="salvarProvedor()">Salvar</button>
+      </div>
+    </div>
   </div>
 
   <!-- SEGURANÇA -->
@@ -207,6 +219,18 @@ a{color:inherit;}
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- MODAL DE PEDIDOS POR EVENTO -->
+<div id="pedidosModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:920px;max-height:88vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <h2 id="pedidosModalTitulo" style="font-size:18px;font-weight:800">Pedidos</h2>
+      <button onclick="document.getElementById('pedidosModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px">O valor mostrado é o que o produtor recebe — a taxa administrativa não está incluída.</p>
+    <div id="pedidosModalConteudo"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+</div>
 
 <script>
 let AT=localStorage.getItem('role_token')||null;
@@ -254,7 +278,7 @@ function gp(id,el){
   if(id==='eventos') carregarEventos();
   if(id==='adiantamentos') carregarAdiantamentos();
   if(id==='financeiro') carregarFinanceiro();
-  if(id==='config') carregarFee();
+  if(id==='config'){ carregarFee(); carregarProvedor(); }
   if(id==='seguranca'){ carregarConta(); carregarSeguranca(); }
   closeSb();
 }
@@ -370,7 +394,7 @@ async function carregarEventos(){
     const d=await api('GET','/api/admin/eventos');
     if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento criado ainda.</p></div>'; return; }
     el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th>Comissão</th><th></th></tr></thead><tbody>'
-      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
+      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn bp btn-sm" onclick="abrirPedidosEvento(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📋 Pedidos</button><button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function baixarCsv(url, nomeArquivo){
@@ -385,6 +409,48 @@ async function baixarCsv(url, nomeArquivo){
   }catch(e){ toast('Erro ao baixar arquivo.','err'); }
 }
 function baixarEmailsEvento(id,slug){ baixarCsv('/api/admin/eventos/'+id+'/participantes.csv', 'emails-'+slug+'.csv'); }
+
+let PEDIDOS_EVENTO_ID=null;
+async function abrirPedidosEvento(eventoId,nomeEvento){
+  PEDIDOS_EVENTO_ID=eventoId;
+  document.getElementById('pedidosModalTitulo').textContent='Pedidos — '+nomeEvento;
+  document.getElementById('pedidosModal').style.display='flex';
+  await renderPedidosEvento();
+}
+async function renderPedidosEvento(){
+  const el=document.getElementById('pedidosModalConteudo');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/admin/eventos/'+PEDIDOS_EVENTO_ID);
+    const pedidos=(d.pedidos||[]).slice().reverse();
+    if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
+    const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado']};
+    el.innerHTML='<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
+      +pedidos.map(p=>{
+        const [cls,lbl]=stMap[p.status]||['',p.status];
+        const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
+        const valorLiquido=p.valorIngressos!==undefined?p.valorIngressos:p.total;
+        const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedidoAdmin(\''+p.id+'\')">↩️ Reembolsar</button>':'';
+        const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedidoAdmin(\''+p.id+'\')">🔄 Sincronizar</button>':'';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function reembolsarPedidoAdmin(pedidoId){
+  if(!confirm('Reembolsar este pedido? Se for um pagamento real, o valor será devolvido ao comprador e os ingressos serão invalidados. Esta ação não pode ser desfeita.')) return;
+  try{
+    const d=await api('POST','/api/eventos/'+PEDIDOS_EVENTO_ID+'/pedidos/'+pedidoId+'/reembolsar',{});
+    toast(d.reembolsoReal?'Reembolso processado!':'Pedido cancelado.','ok');
+    renderPedidosEvento();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function sincronizarPedidoAdmin(pedidoId){
+  try{
+    const d=await api('POST','/api/eventos/'+PEDIDOS_EVENTO_ID+'/pedidos/'+pedidoId+'/sincronizar',{});
+    if(d.atualizado){ toast('Status atualizado! Agora está: '+d.novoStatus,'ok'); renderPedidosEvento(); }
+    else{ toast('Já está sincronizado.','ok'); }
+  }catch(e){ toast(e.message,'err'); }
+}
 function baixarTodosEmails(){ baixarCsv('/api/admin/emails-todos.csv', 'emails-todos-eventos.csv'); }
 
 async function carregarFinanceiro(){
@@ -422,6 +488,20 @@ async function salvarFee(){
   const v=parseFloat(document.getElementById('feePercentInput').value);
   if(isNaN(v)||v<0||v>50){ toast('Valor inválido (0-50%).','err'); return; }
   try{ await api('PATCH','/api/admin/marketplace-fee',{feePercent:v}); toast('Comissão atualizada!','ok'); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function carregarProvedor(){
+  try{
+    const d=await api('GET','/api/admin/provedor-pagamento');
+    document.getElementById('provedorSelect').value=d.provedor;
+    document.getElementById('provedorStatus').innerHTML=
+      'Mercado Pago: '+(d.mercadopagoConfigurado?'✅ configurado':'❌ não configurado')+' &nbsp;·&nbsp; Asaas: '+(d.asaasConfigurado?'✅ configurado':'❌ não configurado');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function salvarProvedor(){
+  const provedor=document.getElementById('provedorSelect').value;
+  if(!confirm('Trocar o provedor de pagamento pra '+(provedor==='asaas'?'Asaas':'Mercado Pago')+'? Isso afeta todos os novos pedidos a partir de agora.')) return;
+  try{ await api('PATCH','/api/admin/provedor-pagamento',{provedor}); toast('Provedor de pagamento atualizado!','ok'); }
   catch(e){ toast(e.message,'err'); }
 }
 
