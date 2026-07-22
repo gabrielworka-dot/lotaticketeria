@@ -987,7 +987,9 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
-  const totalReceita = pedidos.reduce((s,p) => s + p.total, 0);
+  // Usamos valorIngressos (não total) — é o valor líquido que o produtor recebe, sem a taxa
+  // administrativa que é cobrada à parte do comprador e fica com a plataforma.
+  const totalReceita = pedidos.reduce((s,p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
   const totalIngressos = pedidos.reduce((s,p) => s + (p.tickets||[]).length, 0);
   const porLote = {};
   ev.lotes.forEach(l => { porLote[l.nome] = { vendidos: l.vendidos, receita: 0 }; });
@@ -996,7 +998,7 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
     if (lote && porLote[lote.nome]) porLote[lote.nome].receita += (it.precoUnit || 0) * (it.qtd || 0);
   }));
   const porDia = {};
-  pedidos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDia[d]) porDia[d] = { qtd: 0, receita: 0 }; porDia[d].qtd += (p.tickets||[]).length; porDia[d].receita += p.total; });
+  pedidos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDia[d]) porDia[d] = { qtd: 0, receita: 0 }; porDia[d].qtd += (p.tickets||[]).length; porDia[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
   const porPromoter = ev.promoters.map(pr => ({ nome: pr.nome, vendas: pr.vendas, receita: pr.receita }));
   const porCupom = ev.cupons.map(c => ({ codigo: c.codigo, usos: c.usosAtuais }));
   res.json({ totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom });
@@ -1020,26 +1022,152 @@ app.get('/api/eventos/:id/bordero.csv', auth, (req, res) => {
   const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
-  const feePercent = db.marketplaceFeePercent || 10;
   const linhas = [
     ['BORDERÔ DE VENDAS — ' + ev.nome],
     ['Data de emissão', new Date().toLocaleString('pt-BR')],
+    ['Observação', 'O produtor recebe 100% do valor do ingresso — a taxa administrativa é cobrada à parte do comprador.'],
     [''],
-    ['Pedido','Comprador','E-mail','Itens','Valor Bruto (R$)','Comissão Plataforma (R$)','Valor Líquido (R$)','Status','Data']
+    ['Pedido','Comprador','E-mail','Itens','Valor Pago pelo Comprador (R$)','Taxa Administrativa — fica com a plataforma (R$)','Seu Valor Líquido (R$)','Status','Data']
   ];
-  let totalBruto = 0, totalComissao = 0;
+  let totalPagoComprador = 0, totalTaxa = 0, totalLiquido = 0;
   pedidos.forEach(p => {
-    const comissao = Math.round(p.total * (feePercent/100) * 100) / 100;
-    totalBruto += p.total; totalComissao += comissao;
-    linhas.push([p.id.slice(0,8), p.comprador?.nome||'', p.comprador?.email||'', (p.tickets||[]).length, p.total.toFixed(2).replace('.',','), comissao.toFixed(2).replace('.',','), (p.total-comissao).toFixed(2).replace('.',','), p.status, new Date(p.createdAt).toLocaleDateString('pt-BR')]);
+    const liquido = p.valorIngressos !== undefined ? p.valorIngressos : (p.total - (p.taxaAdministrativa || 0));
+    const taxa = p.taxaAdministrativa || 0;
+    totalPagoComprador += p.total; totalTaxa += taxa; totalLiquido += liquido;
+    linhas.push([p.id.slice(0,8), p.comprador?.nome||'', p.comprador?.email||'', (p.tickets||[]).length, p.total.toFixed(2).replace('.',','), taxa.toFixed(2).replace('.',','), liquido.toFixed(2).replace('.',','), p.status, new Date(p.createdAt).toLocaleDateString('pt-BR')]);
   });
   linhas.push(['']);
-  linhas.push(['TOTAL', '', '', '', totalBruto.toFixed(2).replace('.',','), totalComissao.toFixed(2).replace('.',','), (totalBruto-totalComissao).toFixed(2).replace('.',','), '', '']);
+  linhas.push(['TOTAL', '', '', '', totalPagoComprador.toFixed(2).replace('.',','), totalTaxa.toFixed(2).replace('.',','), totalLiquido.toFixed(2).replace('.',','), '', '']);
   const csv = linhas.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="bordero-${ev.slug}.csv"`);
   res.send('\uFEFF' + csv);
 });
+
+app.get('/api/eventos/:id/bordero.pdf', auth, async (req, res) => {
+  const ev = eventoVisivelPara(req.params.id, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+  try {
+    const pdfBuffer = await gerarPdfBordero(ev, pedidos);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="bordero-${ev.slug}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (e) { res.status(500).json({ error: 'Erro ao gerar o borderô em PDF.' }); }
+});
+
+async function gerarPdfBordero(ev, pedidos) {
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  const chunks = [];
+  doc.on('data', c => chunks.push(c));
+  const done = new Promise((resolve, reject) => { doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject); });
+
+  const PAGE_W = doc.page.width;
+  const MARGIN = 40;
+  const CONTENT_W = PAGE_W - MARGIN * 2;
+  const LARANJA = '#C47B14';
+  const ESCURO = '#18160F';
+  const CINZA = '#555555';
+  const CINZA_CLARO = '#8A8378';
+  const BORDA = '#E4DDD1';
+  const VERDE = '#16A34A';
+
+  doc.rect(0, 0, PAGE_W, 80).fill(LARANJA);
+  doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN, 24);
+  doc.fontSize(11).font('Helvetica').text('Borderô de Vendas', MARGIN, 50);
+
+  let y = 100;
+  doc.fillColor(ESCURO).fontSize(17).font('Helvetica-Bold').text(ev.nome, MARGIN, y, { width: CONTENT_W });
+  y = doc.y + 8;
+  const dataStr = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+  doc.fillColor(CINZA).fontSize(10).font('Helvetica').text(`Local: ${ev.local || '—'}${ev.cidade ? ' — ' + ev.cidade : ''}`, MARGIN, y);
+  y = doc.y + 3;
+  doc.text(`Data do evento: ${dataStr}${ev.horaEvento ? ' às ' + ev.horaEvento : ''}`, MARGIN, y);
+  y = doc.y + 3;
+  doc.fillColor(CINZA_CLARO).fontSize(9).text(`Emitido em: ${new Date().toLocaleString('pt-BR')}`, MARGIN, y);
+  y = doc.y + 18;
+
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(BORDA).stroke();
+  y += 20;
+
+  doc.fillColor(ESCURO).fontSize(12).font('Helvetica-Bold').text('Resumo por Lote', MARGIN, y);
+  y = doc.y + 12;
+
+  const porLote = {};
+  pedidos.forEach(p => (p.itens || []).forEach(it => {
+    if (!porLote[it.loteNome]) porLote[it.loteNome] = { qtd: 0, precoUnit: it.precoUnit, valorTotal: 0 };
+    porLote[it.loteNome].qtd += it.qtd;
+    porLote[it.loteNome].valorTotal += it.precoUnit * it.qtd;
+  }));
+
+  const colX = [MARGIN, MARGIN + 220, MARGIN + 320, MARGIN + 420];
+  doc.fontSize(9).font('Helvetica-Bold').fillColor(CINZA_CLARO);
+  doc.text('LOTE', colX[0], y);
+  doc.text('QTD. VENDIDA', colX[1], y);
+  doc.text('PREÇO UNIT.', colX[2], y);
+  doc.text('VALOR TOTAL', colX[3], y);
+  y += 16;
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(0.75).strokeColor(BORDA).stroke();
+  y += 8;
+
+  let totalBrutoIngressos = 0, totalQtd = 0;
+  Object.entries(porLote).forEach(([nome, d]) => {
+    doc.fontSize(10).font('Helvetica').fillColor(ESCURO);
+    doc.text(nome, colX[0], y, { width: 210 });
+    doc.text(String(d.qtd), colX[1], y);
+    doc.text('R$ ' + d.precoUnit.toFixed(2).replace('.', ','), colX[2], y);
+    doc.text('R$ ' + d.valorTotal.toFixed(2).replace('.', ','), colX[3], y);
+    totalBrutoIngressos += d.valorTotal; totalQtd += d.qtd;
+    y += 20;
+  });
+  y += 4;
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(BORDA).stroke();
+  y += 10;
+  doc.fontSize(10).font('Helvetica-Bold').fillColor(ESCURO);
+  doc.text('Total Bruto', colX[0], y);
+  doc.text(String(totalQtd), colX[1], y);
+  doc.text('', colX[2], y);
+  doc.text('R$ ' + totalBrutoIngressos.toFixed(2).replace('.', ','), colX[3], y);
+  y += 34;
+
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(BORDA).stroke();
+  y += 20;
+  doc.fillColor(ESCURO).fontSize(12).font('Helvetica-Bold').text('Resumo Financeiro', MARGIN, y);
+  y = doc.y + 14;
+
+  const totalDesconto = pedidos.reduce((s, p) => s + (p.desconto || 0), 0);
+  const totalLiquido = pedidos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
+  const totalTaxa = pedidos.reduce((s, p) => s + (p.taxaAdministrativa || 0), 0);
+  const totalPagoComprador = pedidos.reduce((s, p) => s + p.total, 0);
+
+  const linhaFinanceira = (label, valor, opts = {}) => {
+    doc.fontSize(10.5).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(opts.cor || ESCURO);
+    doc.text(label, MARGIN, y, { continued: false, width: 320 });
+    doc.text((opts.negativo ? '- ' : '') + 'R$ ' + Math.abs(valor).toFixed(2).replace('.', ','), MARGIN + 320, y, { width: CONTENT_W - 320, align: 'right' });
+    y += 20;
+  };
+
+  linhaFinanceira('Valor total vendido em ingressos', totalBrutoIngressos);
+  if (totalDesconto > 0) linhaFinanceira('Descontos aplicados (cupons)', totalDesconto, { negativo: true, cor: CINZA });
+  y += 4;
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(0.75).strokeColor(BORDA).stroke();
+  y += 12;
+  linhaFinanceira('Taxa administrativa (cobrada à parte do comprador — fica com a plataforma)', totalTaxa, { cor: CINZA_CLARO });
+  linhaFinanceira('Valor total pago pelos compradores', totalPagoComprador);
+  y += 8;
+  doc.moveTo(MARGIN, y).lineTo(PAGE_W - MARGIN, y).lineWidth(1).strokeColor(LARANJA).stroke();
+  y += 14;
+  linhaFinanceira('Seu valor líquido (o que você recebe)', totalLiquido, { bold: true, cor: VERDE });
+
+  y += 20;
+  doc.fillColor(CINZA_CLARO).fontSize(8.5).font('Helvetica').text(
+    'O produtor recebe 100% do valor do ingresso — a taxa administrativa é um valor à parte, cobrado do comprador no momento da compra, e não é descontada do seu repasse.',
+    MARGIN, y, { width: CONTENT_W }
+  );
+
+  doc.end();
+  return done;
+}
 
 // ── CHECK-IN ──
 app.post('/api/checkin/validar', auth, rateLimit(60000, 60), (req, res) => {
@@ -1465,7 +1593,7 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
     }
   }
   if (cupomObj) cupomObj.usosAtuais = (cupomObj.usosAtuais || 0) + 1;
-  if (promoterObj) { promoterObj.vendas = (promoterObj.vendas || 0) + pedido.tickets.length; promoterObj.receita = (promoterObj.receita || 0) + pedido.total; }
+  if (promoterObj) { promoterObj.vendas = (promoterObj.vendas || 0) + pedido.tickets.length; promoterObj.receita = (promoterObj.receita || 0) + (pedido.valorIngressos !== undefined ? pedido.valorIngressos : pedido.total); }
   ev.updatedAt = new Date().toISOString();
 }
 
