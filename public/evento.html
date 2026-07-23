@@ -192,6 +192,7 @@ async function init(){
     injetarPixels(EVENTO.pixels);
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
+    restaurarCarrinhoSalvo();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
   }
@@ -270,7 +271,7 @@ function renderEvento(){
       <div class="card-title">Forma de pagamento</div>
       <div id="avisoValorDesatualizado" style="display:none;background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:10px 12px;border-radius:9px;font-size:12px;margin-bottom:12px">
         O valor da compra mudou. As parcelas mostradas abaixo podem estar desatualizadas.
-        <button type="button" onclick="atualizarParcelamentoManualmente()" style="background:none;border:1px solid var(--p2);color:var(--p2);border-radius:6px;padding:4px 10px;font-size:11px;margin-top:6px;display:block;cursor:pointer">🔄 Atualizar valor das parcelas</button>
+        <button type="button" onclick="atualizarParcelamentoManualmente()" style="background:none;border:1px solid var(--p2);color:var(--p2);border-radius:6px;padding:4px 10px;font-size:11px;margin-top:6px;display:block;cursor:pointer">🔄 Atualizar valores (recarrega a página, seus ingressos selecionados são mantidos)</button>
       </div>
       <div class="metodo-tabs">
         <div class="metodo-tab active" id="tabCartao" onclick="selecionarMetodo('cartao')">💳 Cartão de crédito</div>
@@ -606,10 +607,39 @@ function avaliarAvisoValorDesatualizado(){
   aviso.style.display=desatualizado?'block':'none';
 }
 function atualizarParcelamentoManualmente(){
-  CARD_FORM_MONTADO=false;
-  CARD_FORM_PRONTO=false;
-  montarCardFormSeNecessario();
-  document.getElementById('avisoValorDesatualizado').style.display='none';
+  // Remontar o formulário de cartão "no lugar" não é seguro com o SDK do Mercado Pago — ele não foi
+  // feito pra ser desmontado e recriado no mesmo formulário, e isso pode travar os campos. A forma
+  // 100% confiável de garantir que tudo comece limpo é recarregar a página — e pra isso não atrapalhar
+  // a pessoa, guardamos o carrinho dela agora e devolvemos ele automaticamente assim que a página
+  // recarregar (ver restaurarCarrinhoSalvo, chamada dentro de init()).
+  try{
+    sessionStorage.setItem('lota_carrinho_'+slug, JSON.stringify({selecoes,assentosSelecionados,cupomAplicado}));
+  }catch(e){}
+  location.reload();
+}
+function restaurarCarrinhoSalvo(){
+  try{
+    const salvo=sessionStorage.getItem('lota_carrinho_'+slug);
+    if(!salvo) return;
+    sessionStorage.removeItem('lota_carrinho_'+slug);
+    const dados=JSON.parse(salvo);
+    selecoes=dados.selecoes||{};
+    assentosSelecionados=dados.assentosSelecionados||{};
+    cupomAplicado=dados.cupomAplicado||null;
+    renderEvento();
+    Object.keys(selecoes).forEach(loteId=>{
+      const el=document.getElementById('qtd-'+loteId);
+      if(el) el.textContent=selecoes[loteId];
+    });
+    if(cupomAplicado){
+      const area=document.getElementById('cupomArea');
+      if(area){
+        const descValor=cupomAplicado.tipo==='fixo'?('R$ '+cupomAplicado.valor.toFixed(2).replace('.',',')):(cupomAplicado.valor+'%');
+        area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(cupomAplicado.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:#4ADE80;cursor:pointer;font-weight:700">✕</button></div>';
+      }
+    }
+    atualizarTotal();
+  }catch(e){ console.warn('Erro ao restaurar carrinho:', e); }
 }
 
 // (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
