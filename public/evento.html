@@ -268,6 +268,10 @@ function renderEvento(){
 
     <div class="card" id="pagamentoCard" style="display:none">
       <div class="card-title">Forma de pagamento</div>
+      <div id="avisoValorDesatualizado" style="display:none;background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:10px 12px;border-radius:9px;font-size:12px;margin-bottom:12px">
+        O valor da compra mudou. As parcelas mostradas abaixo podem estar desatualizadas.
+        <button type="button" onclick="atualizarParcelamentoManualmente()" style="background:none;border:1px solid var(--p2);color:var(--p2);border-radius:6px;padding:4px 10px;font-size:11px;margin-top:6px;display:block;cursor:pointer">🔄 Atualizar valor das parcelas</button>
+      </div>
       <div class="metodo-tabs">
         <div class="metodo-tab active" id="tabCartao" onclick="selecionarMetodo('cartao')">💳 Cartão de crédito</div>
         <div class="metodo-tab" id="tabPix" onclick="selecionarMetodo('pix')">📱 PIX</div>
@@ -437,8 +441,15 @@ function atualizarTotal(){
   document.getElementById('pagamentoCard').style.display=(temItem&&!usaAsaas)?'block':'none';
   document.getElementById('pagamentoCardAsaas').style.display=(temItem&&usaAsaas)?'block':'none';
   if(temItem){
-    if(usaAsaas) dispararInicioCheckout(EVENTO?.pixels,total);
-    else { montarCardFormSeNecessario(); remontarCardFormSeValorMudou(); dispararInicioCheckout(EVENTO?.pixels,total); }
+    if(usaAsaas){ dispararInicioCheckout(EVENTO?.pixels,total); }
+    else{
+      // A montagem inicial é segura de chamar sempre — ela mesma verifica se já está montada e não
+      // faz nada nesse caso (não há risco de travar campos que a pessoa já esteja preenchendo).
+      // O que NUNCA fazemos é REMONTAR automaticamente depois disso — isso é que travava os campos.
+      montarCardFormSeNecessario();
+      avaliarAvisoValorDesatualizado();
+      dispararInicioCheckout(EVENTO?.pixels,total);
+    }
   }
 }
 
@@ -467,7 +478,7 @@ function removerCupom(){
 }
 
 // ── CHECKOUT TRANSPARENTE (Mercado Pago) ──
-let MP_INSTANCE=null, CARD_FORM=null, CARD_FORM_MONTADO=false, CARD_FORM_PRONTO=false, METODO_ATUAL='cartao', CARD_FORM_VALOR_MONTADO=0, remontagemCardFormTimer=null;
+let MP_INSTANCE=null, CARD_FORM=null, CARD_FORM_MONTADO=false, CARD_FORM_PRONTO=false, METODO_ATUAL='cartao', CARD_FORM_VALOR_MONTADO=0;
 
 function selecionarMetodo(metodo){
   METODO_ATUAL=metodo;
@@ -476,6 +487,9 @@ function selecionarMetodo(metodo){
   document.getElementById('areaCartao').style.display = metodo==='cartao' ? 'block' : 'none';
   document.getElementById('areaPix').style.display = metodo==='pix' ? 'block' : 'none';
   document.getElementById('btnComprar').textContent = metodo==='pix' ? 'Gerar PIX →' : 'Pagar →';
+  // Só monta o formulário de cartão na primeira vez que a pessoa realmente abre essa aba —
+  // nesse momento o valor do carrinho já está definido, então o parcelamento calculado bate certo.
+  if(metodo==='cartao') montarCardFormSeNecessario();
 }
 
 let METODO_ATUAL_ASAAS='cartao';
@@ -582,15 +596,20 @@ function montarCardFormSeNecessario(){
 // no "amount" passado na hora de montar o formulário — ele NÃO atualiza sozinho se o carrinho mudar
 // depois (por exemplo, comprador aumenta de 1 pra 3 ingressos). Sem isso, o parcelamento mostrado
 // ficava sempre baseado no valor de quando o formulário foi montado pela primeira vez.
-function remontarCardFormSeValorMudou(){
-  if(!CARD_FORM_MONTADO) return;
-  if(Math.abs(TOTAL_ATUAL-CARD_FORM_VALOR_MONTADO)<0.01) return;
-  clearTimeout(remontagemCardFormTimer);
-  remontagemCardFormTimer=setTimeout(()=>{
-    CARD_FORM_MONTADO=false;
-    CARD_FORM_PRONTO=false;
-    montarCardFormSeNecessario();
-  },500);
+// Em vez de remontar sozinho quando o valor muda (o que travava os campos caso a pessoa já
+// estivesse digitando o cartão), só mostramos um aviso — a atualização de verdade só acontece
+// se a própria pessoa clicar no botão, evitando qualquer surpresa no meio do preenchimento.
+function avaliarAvisoValorDesatualizado(){
+  const aviso=document.getElementById('avisoValorDesatualizado');
+  if(!aviso) return;
+  const desatualizado=CARD_FORM_MONTADO && Math.abs(TOTAL_ATUAL-CARD_FORM_VALOR_MONTADO)>=0.01;
+  aviso.style.display=desatualizado?'block':'none';
+}
+function atualizarParcelamentoManualmente(){
+  CARD_FORM_MONTADO=false;
+  CARD_FORM_PRONTO=false;
+  montarCardFormSeNecessario();
+  document.getElementById('avisoValorDesatualizado').style.display='none';
 }
 
 // (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
