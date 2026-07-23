@@ -2118,6 +2118,61 @@ app.get('/api/admin/eventos/:id', auth, adminOnly, (req, res) => {
   res.json({ evento: ev, organizador: organizador ? { nome: organizador.nomePublico || organizador.nome, email: organizador.email } : null, pedidos });
 });
 
+// ── RECUPERAÇÃO MANUAL DE PEDIDO (para casos de perda de dados) ──
+// Recria um pedido "do zero" a partir de informações que o admin já confirmou existirem de verdade
+// (ex: o pagamento aparece no extrato do Mercado Pago/Asaas, mas sumiu do nosso banco). Gera os
+// ingressos e reenvia o e-mail de confirmação normalmente, como se a compra tivesse acabado de ser paga.
+app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { nome, email, telefone, cpf, itens, mpPaymentId, valorPago, provedorPagamento } = req.body;
+  const nomeLimpo = sanitize(nome || '', 100);
+  const emailLimpo = sanitize(email || '', 150).toLowerCase();
+  const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
+  if (!nomeLimpo || !emailLimpo) return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
+  if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Selecione ao menos um item (lote e quantidade).' });
+
+  const itensDetalhados = [];
+  let subtotal = 0;
+  for (const it of itens) {
+    const lote = ev.lotes.find(l => l.id === it.loteId);
+    if (!lote) return res.status(400).json({ error: 'Lote não encontrado: ' + it.loteId });
+    const qtd = it.assento ? 1 : Math.max(1, parseInt(it.qtd) || 1);
+    itensDetalhados.push({ loteId: lote.id, qtd, precoUnit: lote.preco, loteNome: lote.nome, assento: it.assento || undefined });
+    subtotal += lote.preco * qtd;
+  }
+  const valorIngressos = subtotal;
+  const feePercent = db.marketplaceFeePercent || 10;
+  const taxaAdministrativa = Math.round(valorIngressos * (feePercent / 100) * 100) / 100;
+  const total = valorPago !== undefined && valorPago !== '' ? Number(valorPago) : Math.round((valorIngressos + taxaAdministrativa) * 100) / 100;
+
+  const pedido = {
+    id: uuidv4(), eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
+    comprador: { nome: nomeLimpo, email: emailLimpo, telefone: sanitize(telefone || '', 30), cpf: cpfLimpo },
+    compradorUserId: null, provedorPagamento: provedorPagamento || 'mercadopago',
+    itens: itensDetalhados, subtotal, desconto: 0, valorIngressos, taxaAdministrativa, creditoAplicado: 0, total,
+    cupomUsado: null, promoterRef: null,
+    mpPaymentId: mpPaymentId || 'RECUPERADO_MANUALMENTE', tickets: [], createdAt: new Date().toISOString(),
+    recuperadoManualmente: true
+  };
+
+  // Reserva as vagas/assentos normalmente, como qualquer venda real
+  for (const it of itensDetalhados) {
+    const lote = ev.lotes.find(l => l.id === it.loteId);
+    if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd;
+    if (it.assento) { if (!ev.assentosOcupados) ev.assentosOcupados = []; ev.assentosOcupados.push(it.assento); }
+  }
+  gerarTicketsEAtualizar(ev, pedido, null, null);
+  PEDIDOS.push(pedido);
+  persistPedidos(); persistEventos();
+
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  try { await enviarEmailIngressos(pedido, ev, baseUrl); } catch (e) { console.error('Erro ao reenviar e-mail do pedido recuperado:', e.message); }
+
+  res.json({ ok: true, pedidoId: pedido.id, ticketsGerados: pedido.tickets.length });
+});
+
 // ── DOWNLOAD DE E-MAILS (participantes de um evento) — acesso irrestrito de admin ──
 app.get('/api/admin/eventos/:id/participantes.csv', auth, adminOnly, (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
