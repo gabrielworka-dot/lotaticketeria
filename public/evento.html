@@ -53,9 +53,7 @@ a{color:inherit;}
 .fg{margin-bottom:13px;}
 .fg label{font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
 .fi{width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;color:var(--text);font-family:inherit;font-size:16px;outline:none;}
-.fi-mp{width:100%;background:#FFFFFF;border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;height:44px;box-sizing:border-box;}
-.fi-mp.focused{border-color:var(--p2);}
-.fi-mp.invalid{border-color:var(--red2);}
+
 .metodo-tabs{display:flex;gap:8px;margin-bottom:16px;}
 .metodo-tab{flex:1;text-align:center;padding:11px;border-radius:9px;border:1.5px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;color:var(--text2);}
 .metodo-tab.active{background:rgba(232,150,26,.12);border-color:rgba(232,150,26,.4);color:var(--p2);}
@@ -89,6 +87,16 @@ a{color:inherit;}
 <body>
 <div class="topbar" style="justify-content:space-between"><a href="/" class="logo">🎟️ Lota Ticketeria</a><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:36px;height:36px;font-size:15px;cursor:pointer">🌙</button></div>
 <div class="wrap" id="app"><div class="spinner"></div></div>
+
+<!-- Verificação extra de segurança (3D Secure) — o banco emissor às vezes pede essa confirmação
+     antes de aprovar o pagamento. Isso aumenta bastante a chance de aprovação em compras online. -->
+<div id="modal3ds" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto">
+    <h3 style="font-size:15px;font-weight:800;margin-bottom:4px">Verificação de segurança</h3>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Seu banco pediu uma confirmação extra pra aprovar esse pagamento. Siga as instruções abaixo.</p>
+    <div id="statusScreenBrick_container"></div>
+  </div>
+</div>
 <footer style="margin-top:30px;padding:24px 20px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);text-align:center;width:100%;max-width:520px">
   <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:16px;text-align:left">
     <div>
@@ -192,7 +200,6 @@ async function init(){
     injetarPixels(EVENTO.pixels);
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
-    restaurarCarrinhoSalvo();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
   }
@@ -263,37 +270,27 @@ function renderEvento(){
       <div class="err" id="errMsg"></div>
       <div class="fg"><label>Nome completo *</label><input class="fi" id="cNome" placeholder="Seu nome"></div>
       <div class="fg"><label>E-mail *</label><input class="fi" type="email" id="cEmail" placeholder="seu@email.com"></div>
-      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" placeholder="Somente números" maxlength="14" oninput="const h=document.getElementById('form-checkout__identificationNumber'); if(h) h.value=this.value.replace(/[^\d]/g,'');"></div>
+      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" placeholder="Somente números" maxlength="14"></div>
       <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" placeholder="(11) 99999-9999"></div>
     </div>
 
     <div class="card" id="pagamentoCard" style="display:none">
       <div class="card-title">Forma de pagamento</div>
-      <div id="avisoValorDesatualizado" style="display:none;background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:10px 12px;border-radius:9px;font-size:12px;margin-bottom:12px">
-        O valor da compra mudou. As parcelas mostradas abaixo podem estar desatualizadas.
-        <button type="button" onclick="atualizarParcelamentoManualmente()" style="background:none;border:1px solid var(--p2);color:var(--p2);border-radius:6px;padding:4px 10px;font-size:11px;margin-top:6px;display:block;cursor:pointer">🔄 Atualizar valores (recarrega a página, seus ingressos selecionados são mantidos)</button>
-      </div>
       <div class="metodo-tabs">
         <div class="metodo-tab active" id="tabCartao" onclick="selecionarMetodo('cartao')">💳 Cartão de crédito</div>
         <div class="metodo-tab" id="tabPix" onclick="selecionarMetodo('pix')">📱 PIX</div>
       </div>
-      <form id="form-checkout">
-        <div id="areaCartao">
-          <div class="fg"><label>Número do cartão</label><div id="form-checkout__cardNumber" class="fi-mp"></div></div>
-          <div class="fg2">
-            <div class="fg"><label>Validade</label><div id="form-checkout__expirationDate" class="fi-mp"></div></div>
-            <div class="fg"><label>CVV</label><div id="form-checkout__securityCode" class="fi-mp"></div></div>
-          </div>
-          <div class="fg"><label>Nome impresso no cartão</label><input id="form-checkout__cardholderName" class="fi" placeholder="Como está no cartão"></div>
-          <div class="fg"><label>Parcelas</label><select id="form-checkout__installments" class="fi"></select></div>
-          <select id="form-checkout__issuer" style="display:none"></select>
-          <select id="form-checkout__identificationType" style="display:none"></select>
-          <input id="form-checkout__identificationNumber" type="hidden">
-        </div>
-        <div id="areaPix" style="display:none">
+      <div id="areaCartao">
+        <!-- O Card Payment Brick do Mercado Pago desenha aqui o formulário inteiro (número, validade,
+             CVV, parcelas e botão) — ele atualiza o parcelamento sozinho quando o valor muda, sem
+             precisar recarregar nada (diferente do CardForm antigo, que não suportava isso). -->
+        <div id="cardPaymentBrick_container"></div>
+      </div>
+      <form id="form-checkout-pix" style="display:none" onsubmit="event.preventDefault(); processarSubmitPix();">
+        <div id="areaPix">
           <p style="font-size:13px;color:var(--text2);margin-bottom:6px">Ao confirmar, vamos gerar um código PIX pra você pagar na hora, sem precisar sair daqui.</p>
         </div>
-        <button class="btn" id="btnComprar" type="submit">Pagar →</button>
+        <button class="btn" id="btnComprarPix" type="submit">Gerar PIX →</button>
       </form>
     </div>
 
@@ -318,28 +315,6 @@ function renderEvento(){
       <p style="font-size:12px;color:var(--text3);margin-top:14px">Assim que o pagamento for confirmado (geralmente poucos segundos), seus ingressos aparecem aqui automaticamente.</p>
     </div>
   `;
-  // O formulário só existe no DOM a partir daqui (foi criado agora, via innerHTML acima) —
-  // por isso o listener é anexado aqui, e não em DOMContentLoaded (que já teria passado).
-  const form=document.getElementById('form-checkout');
-  if(form && !form.dataset.listenerAnexado){
-    form.addEventListener('submit', event => {
-      // No modo PIX, tratamos o envio diretamente aqui (não precisa de tokenização de cartão).
-      // No modo Cartão, NÃO interceptamos — deixamos o próprio SDK do Mercado Pago capturar esse
-      // envio (ele já está "escutando" o mesmo formulário) pra gerar o token corretamente e então
-      // chamar processarSubmitCartao() através do callback onSubmit configurado no cardForm.
-      if(METODO_ATUAL==='pix'){
-        event.preventDefault();
-        processarSubmitPix();
-      }else if(!CARD_FORM_PRONTO){
-        // Segurança: se o SDK do cartão ainda não terminou de carregar de verdade, evita que o
-        // navegador tente navegar pra outra página (comportamento padrão de envio de formulário).
-        event.preventDefault();
-        const errEl=document.getElementById('errMsg');
-        if(errEl){ errEl.textContent='Formulário de cartão ainda carregando, aguarde alguns segundos e tente novamente.'; errEl.style.display='block'; }
-      }
-    });
-    form.dataset.listenerAnexado='1';
-  }
 }
 
 function alterarQtd(loteId,delta,max){
@@ -444,11 +419,10 @@ function atualizarTotal(){
   if(temItem){
     if(usaAsaas){ dispararInicioCheckout(EVENTO?.pixels,total); }
     else{
-      // A montagem inicial é segura de chamar sempre — ela mesma verifica se já está montada e não
-      // faz nada nesse caso (não há risco de travar campos que a pessoa já esteja preenchendo).
-      // O que NUNCA fazemos é REMONTAR automaticamente depois disso — isso é que travava os campos.
-      montarCardFormSeNecessario();
-      avaliarAvisoValorDesatualizado();
+      // Monta o Brick uma única vez (idempotente); dali em diante, qualquer mudança de valor só
+      // chama update() — que o próprio Brick foi feito pra suportar, sem travar nada.
+      montarCardPaymentBrick();
+      atualizarValorBrick();
       dispararInicioCheckout(EVENTO?.pixels,total);
     }
   }
@@ -479,18 +453,18 @@ function removerCupom(){
 }
 
 // ── CHECKOUT TRANSPARENTE (Mercado Pago) ──
-let MP_INSTANCE=null, CARD_FORM=null, CARD_FORM_MONTADO=false, CARD_FORM_PRONTO=false, METODO_ATUAL='cartao', CARD_FORM_VALOR_MONTADO=0;
+let MP_INSTANCE=null, MP_BRICKS_BUILDER=null, CARD_PAYMENT_BRICK=null, CARD_BRICK_MONTANDO=false, METODO_ATUAL='cartao';
 
 function selecionarMetodo(metodo){
   METODO_ATUAL=metodo;
   document.getElementById('tabCartao').classList.toggle('active', metodo==='cartao');
   document.getElementById('tabPix').classList.toggle('active', metodo==='pix');
   document.getElementById('areaCartao').style.display = metodo==='cartao' ? 'block' : 'none';
-  document.getElementById('areaPix').style.display = metodo==='pix' ? 'block' : 'none';
-  document.getElementById('btnComprar').textContent = metodo==='pix' ? 'Gerar PIX →' : 'Pagar →';
-  // Só monta o formulário de cartão na primeira vez que a pessoa realmente abre essa aba —
+  document.getElementById('form-checkout-pix').style.display = metodo==='pix' ? 'block' : 'none';
+  // O Card Payment Brick só precisa ser montado uma vez, na primeira vez que a aba é aberta —
   // nesse momento o valor do carrinho já está definido, então o parcelamento calculado bate certo.
-  if(metodo==='cartao') montarCardFormSeNecessario();
+  // Diferente do formulário antigo, ele MESMO se atualiza sozinho depois (ver atualizarValorBrick).
+  if(metodo==='cartao') montarCardPaymentBrick();
 }
 
 let METODO_ATUAL_ASAAS='cartao';
@@ -541,105 +515,107 @@ async function processarSubmitAsaas(){
   }
 }
 
-function montarCardFormSeNecessario(){
-  if(CARD_FORM_MONTADO) return;
-  // Limpa os campos antigos (iframes já montados) antes de recriar — evita conflito ao remontar
-  // depois de um pagamento recusado, quando precisamos gerar um token novo.
-  ['form-checkout__cardNumber','form-checkout__expirationDate','form-checkout__securityCode'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.innerHTML='';
-  });
+function montarCardPaymentBrick(){
+  if(CARD_BRICK_MONTANDO || CARD_PAYMENT_BRICK) return;
   if(!EVENTO?.mpPublicKey){
     const errEl=document.getElementById('errMsg');
     if(errEl){ errEl.textContent='Pagamento com cartão indisponível no momento (chave pública do Mercado Pago não configurada). Use o PIX ou avise o produtor.'; errEl.style.display='block'; }
     return;
   }
-  if(typeof MercadoPago==='undefined'){ setTimeout(montarCardFormSeNecessario,300); return; }
+  if(typeof MercadoPago==='undefined'){ setTimeout(montarCardPaymentBrick,300); return; }
+  CARD_BRICK_MONTANDO=true;
   try{
-    MP_INSTANCE=new MercadoPago(EVENTO.mpPublicKey,{locale:'pt-BR'});
-    CARD_FORM=MP_INSTANCE.cardForm({
-      amount: String(TOTAL_ATUAL||1),
-      iframe: true,
-      form: {
-        id: 'form-checkout',
-        cardNumber: { id:'form-checkout__cardNumber', placeholder:'Número do cartão', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
-        expirationDate: { id:'form-checkout__expirationDate', placeholder:'MM/AA', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
-        securityCode: { id:'form-checkout__securityCode', placeholder:'CVV', style:{color:'#18160F',fontSize:'15px','::placeholder':{color:'#8A8378'}} },
-        cardholderName: { id:'form-checkout__cardholderName', placeholder:'Nome impresso no cartão' },
-        issuer: { id:'form-checkout__issuer', placeholder:'Banco emissor' },
-        installments: { id:'form-checkout__installments', placeholder:'Parcelas' },
-        identificationType: { id:'form-checkout__identificationType', placeholder:'Tipo de documento' },
-        identificationNumber: { id:'form-checkout__identificationNumber', placeholder:'CPF' },
-      },
+    if(!MP_INSTANCE) MP_INSTANCE=new MercadoPago(EVENTO.mpPublicKey,{locale:'pt-BR'});
+    if(!MP_BRICKS_BUILDER) MP_BRICKS_BUILDER=MP_INSTANCE.bricks();
+    const temaAtual=document.documentElement.getAttribute('data-theme')==='light'?'default':'dark';
+    MP_BRICKS_BUILDER.create('cardPayment','cardPaymentBrick_container',{
+      initialization: { amount: Number(TOTAL_ATUAL||1) },
+      customization: { visual: { style: { theme: temaAtual } } },
       callbacks: {
-        // Só agora (quando o SDK confirma aqui) o formulário está realmente pronto pra uso —
-        // marcar como "pronto" antes disso causava, em alguns casos raros, o clique em "Pagar"
-        // acontecer numa janela de tempo em que nada ainda estava de fato conectado, resultando
-        // em "dados do cartão incompletos" mesmo com tudo preenchido certinho.
-        onFormMounted: error => {
-          if(error){ console.warn('Erro ao montar formulário de cartão:', error); CARD_FORM_PRONTO=false; return; }
-          CARD_FORM_PRONTO=true;
-        },
-        // IMPORTANTE: a tokenização do cartão (o "token" que mandamos pro servidor) só é gerada de
-        // verdade DENTRO desse callback — é assim que o SDK do Mercado Pago funciona. Chamar
-        // getCardFormData() fora daqui retorna dados incompletos, mesmo com o cartão certinho.
-        onSubmit: event => {
-          event.preventDefault();
-          if(METODO_ATUAL==='cartao') processarSubmitCartao();
-        },
+        onReady: () => { CARD_BRICK_MONTANDO=false; },
+        onError: error => { console.warn('Erro no Card Payment Brick:', error); },
+        // Diferente do formulário antigo (CardForm), o Brick já entrega os dados prontos aqui,
+        // incluindo o token — não precisamos (nem podemos) buscar isso de outro jeito.
+        onSubmit: (cardFormData) => processarSubmitCartaoBrick(cardFormData),
       }
-    });
-    CARD_FORM_MONTADO=true;
-    CARD_FORM_VALOR_MONTADO=TOTAL_ATUAL||1;
-  }catch(e){ console.warn('Erro ao iniciar Mercado Pago SDK:', e); }
+    }).then(controller => { CARD_PAYMENT_BRICK=controller; CARD_BRICK_MONTANDO=false; });
+  }catch(e){ console.warn('Erro ao iniciar Mercado Pago SDK:', e); CARD_BRICK_MONTANDO=false; }
 }
 
-// O SDK do Mercado Pago calcula as opções de parcelamento (juros, valor de cada parcela) com base
-// no "amount" passado na hora de montar o formulário — ele NÃO atualiza sozinho se o carrinho mudar
-// depois (por exemplo, comprador aumenta de 1 pra 3 ingressos). Sem isso, o parcelamento mostrado
-// ficava sempre baseado no valor de quando o formulário foi montado pela primeira vez.
-// Em vez de remontar sozinho quando o valor muda (o que travava os campos caso a pessoa já
-// estivesse digitando o cartão), só mostramos um aviso — a atualização de verdade só acontece
-// se a própria pessoa clicar no botão, evitando qualquer surpresa no meio do preenchimento.
-function avaliarAvisoValorDesatualizado(){
-  const aviso=document.getElementById('avisoValorDesatualizado');
-  if(!aviso) return;
-  const desatualizado=CARD_FORM_MONTADO && Math.abs(TOTAL_ATUAL-CARD_FORM_VALOR_MONTADO)>=0.01;
-  aviso.style.display=desatualizado?'block':'none';
+// Esse é o recurso que o CardForm antigo não tinha: o Brick consegue atualizar sozinho o valor usado
+// pra calcular as parcelas, sem precisar remontar nada — por isso agora a mudança de quantidade de
+// ingressos reflete automaticamente no parcelamento, sem travar nenhum campo e sem precisar de botão.
+function atualizarValorBrick(){
+  if(CARD_PAYMENT_BRICK && typeof CARD_PAYMENT_BRICK.update==='function'){
+    CARD_PAYMENT_BRICK.update({ amount: Number(TOTAL_ATUAL||1) }).catch(e=>console.warn('Erro ao atualizar valor do Brick:', e));
+  }
 }
-function atualizarParcelamentoManualmente(){
-  // Remontar o formulário de cartão "no lugar" não é seguro com o SDK do Mercado Pago — ele não foi
-  // feito pra ser desmontado e recriado no mesmo formulário, e isso pode travar os campos. A forma
-  // 100% confiável de garantir que tudo comece limpo é recarregar a página — e pra isso não atrapalhar
-  // a pessoa, guardamos o carrinho dela agora e devolvemos ele automaticamente assim que a página
-  // recarregar (ver restaurarCarrinhoSalvo, chamada dentro de init()).
+
+async function processarSubmitCartaoBrick(cardFormData){
+  const dados=coletarDadosComprador();
+  const errEl=document.getElementById('errMsg');
+  errEl.style.display='none';
+  if(!validarDadosComprador(dados)){ throw new Error('Preencha nome, e-mail e CPF corretamente antes de continuar.'); }
+  const bodyBase=montarBodyBase(dados);
   try{
-    sessionStorage.setItem('lota_carrinho_'+slug, JSON.stringify({selecoes,assentosSelecionados,cupomAplicado}));
-  }catch(e){}
-  location.reload();
-}
-function restaurarCarrinhoSalvo(){
-  try{
-    const salvo=sessionStorage.getItem('lota_carrinho_'+slug);
-    if(!salvo) return;
-    sessionStorage.removeItem('lota_carrinho_'+slug);
-    const dados=JSON.parse(salvo);
-    selecoes=dados.selecoes||{};
-    assentosSelecionados=dados.assentosSelecionados||{};
-    cupomAplicado=dados.cupomAplicado||null;
-    renderEvento();
-    Object.keys(selecoes).forEach(loteId=>{
-      const el=document.getElementById('qtd-'+loteId);
-      if(el) el.textContent=selecoes[loteId];
-    });
-    if(cupomAplicado){
-      const area=document.getElementById('cupomArea');
-      if(area){
-        const descValor=cupomAplicado.tipo==='fixo'?('R$ '+cupomAplicado.valor.toFixed(2).replace('.',',')):(cupomAplicado.valor+'%');
-        area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(cupomAplicado.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:#4ADE80;cursor:pointer;font-weight:700">✕</button></div>';
-      }
+    if(TOTAL_ATUAL<=0){
+      const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'cartao'});
+      if(d.cortesia){ location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success'; return; }
     }
-    atualizarTotal();
-  }catch(e){ console.warn('Erro ao restaurar carrinho:', e); }
+    const body={
+      ...bodyBase, metodo:'cartao',
+      token: cardFormData.token,
+      installments: cardFormData.installments,
+      paymentMethodId: cardFormData.payment_method_id || cardFormData.paymentMethodId,
+      issuerId: cardFormData.issuer_id || cardFormData.issuerId,
+    };
+    const d=await api('POST','/api/public/checkout',body);
+    if(d.status==='challenge_3ds'){
+      await mostrarVerificacao3ds(d);
+      return;
+    }else if(d.status==='approved'){
+      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success';
+    }else if(d.status==='pending'){
+      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=pending';
+    }else{
+      errEl.textContent=d.motivo||'Pagamento não aprovado.'; errEl.style.display='block';
+      throw new Error(d.motivo||'Pagamento não aprovado.');
+    }
+  }catch(e){
+    errEl.textContent=e.message; errEl.style.display='block';
+    throw e; // o Brick espera receber o erro de volta, pra também sinalizar isso na interface dele
+  }
+}
+
+// Mostra a tela de verificação do banco (3D Secure) e aguarda o resultado final — sem isso, o
+// pagamento ficaria "preso" pra sempre nessa etapa, já que só o banco consegue concluir o processo.
+async function mostrarVerificacao3ds(d){
+  document.getElementById('modal3ds').style.display='flex';
+  try{
+    if(!MP_BRICKS_BUILDER){ MP_INSTANCE=MP_INSTANCE||new MercadoPago(EVENTO.mpPublicKey,{locale:'pt-BR'}); MP_BRICKS_BUILDER=MP_INSTANCE.bricks(); }
+    await MP_BRICKS_BUILDER.create('statusScreen','statusScreenBrick_container',{
+      initialization: {
+        paymentId: String(d.paymentId),
+        additionalInfo: { externalResourceURL: d.threeDsInfo.external_resource_url, creq: d.threeDsInfo.creq }
+      },
+      callbacks: { onReady: () => {}, onError: error => console.warn('Erro na tela de verificação 3DS:', error) }
+    });
+  }catch(e){ console.warn('Erro ao montar tela de verificação 3DS:', e); }
+  // Enquanto o comprador confirma no banco, ficamos de olho no status real do pedido (o mesmo
+  // mecanismo usado pra confirmar PIX), até sair do estado "pendente".
+  const pedidoId=d.pedidoId;
+  let tentativas=0;
+  const verificar=async()=>{
+    tentativas++;
+    try{
+      const status=await api('GET','/api/public/pedido/'+pedidoId);
+      if(status.status==='pago'){ location.href='/e/'+slug+'?pedido='+pedidoId+'&status=success'; return; }
+      if(['recusado','expirado'].includes(status.status)){ location.href='/e/'+slug+'?pedido='+pedidoId+'&status=pending'; return; }
+    }catch(e){}
+    if(tentativas<100) setTimeout(verificar,3000); // até ~5 minutos de espera pela confirmação do banco
+    else location.href='/e/'+slug+'?pedido='+pedidoId+'&status=pending';
+  };
+  setTimeout(verificar,3000);
 }
 
 // (O listener de envio do formulário é anexado dentro de renderEvento(), logo após o
@@ -681,7 +657,7 @@ async function processarSubmitPix(){
   if(!validarDadosComprador(dados)) return;
   const errEl=document.getElementById('errMsg');
   PROCESSANDO_PAGAMENTO=true;
-  const btn=document.getElementById('btnComprar');
+  const btn=document.getElementById('btnComprarPix');
   btn.disabled=true; btn.textContent='Processando...';
   const bodyBase=montarBodyBase(dados);
   try{
@@ -696,53 +672,6 @@ async function processarSubmitPix(){
   }finally{
     PROCESSANDO_PAGAMENTO=false;
     btn.disabled=false; btn.textContent='Gerar PIX →';
-  }
-}
-
-// Chamada de dentro do callback onSubmit do cardForm (ver montarCardFormSeNecessario) — só aí o
-// token do cartão já foi gerado de verdade pelo SDK do Mercado Pago.
-async function processarSubmitCartao(){
-  if(PROCESSANDO_PAGAMENTO) return;
-  const dados=coletarDadosComprador();
-  if(!validarDadosComprador(dados)) return;
-  const errEl=document.getElementById('errMsg');
-  if(!CARD_FORM || !CARD_FORM_PRONTO){ errEl.textContent='Formulário de cartão ainda carregando, aguarde alguns segundos e tente novamente.'; errEl.style.display='block'; return; }
-
-  PROCESSANDO_PAGAMENTO=true;
-  const btn=document.getElementById('btnComprar');
-  btn.disabled=true; btn.textContent='Processando...';
-  const bodyBase=montarBodyBase(dados);
-
-  try{
-    if(TOTAL_ATUAL<=0){
-      const d=await api('POST','/api/public/checkout',{...bodyBase,metodo:'cartao'});
-      if(d.cortesia){ location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success'; return; }
-    }
-    const dadosCartao=CARD_FORM.getCardFormData();
-    if(!dadosCartao.token || !dadosCartao.paymentMethodId){
-      errEl.textContent='Não conseguimos identificar o cartão. Confira o número, a validade e o CVV, e tente novamente.';
-      errEl.style.display='block';
-      return;
-    }
-    const body={...bodyBase, metodo:'cartao', token:dadosCartao.token, installments:dadosCartao.installments, paymentMethodId:dadosCartao.paymentMethodId, issuerId:dadosCartao.issuerId};
-    const d=await api('POST','/api/public/checkout',body);
-    if(d.status==='approved'){
-      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=success';
-    }else if(d.status==='pending'){
-      location.href='/e/'+slug+'?pedido='+d.pedidoId+'&status=pending';
-    }else{
-      errEl.textContent=d.motivo||'Pagamento não aprovado.'; errEl.style.display='block';
-      // O token do cartão já foi usado (e recusado) — precisa gerar um novo token pra tentar de novo,
-      // senão o Mercado Pago recusa com "Invalid card_token_id" na próxima tentativa.
-      CARD_FORM_MONTADO=false;
-      CARD_FORM_PRONTO=false;
-      montarCardFormSeNecessario();
-    }
-  }catch(e){
-    errEl.textContent=e.message; errEl.style.display='block';
-  }finally{
-    PROCESSANDO_PAGAMENTO=false;
-    btn.disabled=false; btn.textContent='Pagar →';
   }
 }
 
