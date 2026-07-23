@@ -1485,6 +1485,12 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       transaction_amount: valorCobranca, token, description: descricao,
       installments: parcelasFinal,
       payment_method_id: paymentMethodId, issuer_id: issuerId || undefined,
+      capture: true,
+      // 3D Secure: pede confirmação de identidade do titular do cartão direto com o banco emissor
+      // quando a transação é considerada de risco — isso aumenta bastante a taxa de aprovação em
+      // casos como o nosso (conta de produção recente), sem prejudicar quem já é de baixo risco
+      // (nesses casos, segue aprovando direto, sem pedir nada extra ao comprador).
+      three_d_secure_mode: 'optional',
       payer: {
         email: comprador.email, identification: { type: 'CPF', number: cpfLimpo },
         first_name: primeiroNome || undefined, last_name: restoNome.join(' ') || undefined,
@@ -1509,7 +1515,14 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     PEDIDOS.push(pedidoBase); persistPedidos();
     const pedidoSalvo = PEDIDOS.find(p => p.id === pedidoId);
 
-    if (cardData.status === 'approved') {
+    if (cardData.status === 'pending' && cardData.status_detail === 'pending_challenge' && cardData.three_ds_info) {
+      // O banco pediu uma confirmação extra de identidade (3D Secure) — o pedido continua "pendente"
+      // no nosso banco (o pagamento só será aprovado depois que o comprador concluir essa etapa com
+      // o banco). O front-end mostra a tela de verificação do Mercado Pago pra isso acontecer.
+      pedidoSalvo.mpPaymentId = String(cardData.id);
+      persistPedidos();
+      return res.json({ ok: true, pedidoId, status: 'challenge_3ds', paymentId: cardData.id, threeDsInfo: cardData.three_ds_info });
+    } else if (cardData.status === 'approved') {
       await processarPagamentoAprovado(pedidoSalvo, cardData.id, baseUrl);
       return res.json({ ok: true, pedidoId, status: 'approved', tickets: pedidoSalvo.tickets });
     } else if (cardData.status === 'in_process' || cardData.status === 'pending') {
