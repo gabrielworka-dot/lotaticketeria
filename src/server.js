@@ -18,6 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'role_dev_secret_change_in_prod';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const ASAAS_WEBHOOK_TOKEN = process.env.ASAAS_WEBHOOK_TOKEN || '';
 
 // ── Security headers ──────────────────────────────────────
 app.use((req, res, next) => {
@@ -990,20 +991,34 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
   try {
     if (pedido.provedorPagamento === 'asaas') {
       if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
-      const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
-      if (!consulta.ok) return res.status(400).json({ error: 'Erro ao consultar a cobrança no Asaas.' });
-      const status = consulta.data.status;
-      if (['CANCELED','EXPIRED'].includes(status) && pedido.status === 'pago') {
-        marcarPedidoComoReembolsado(pedido, ev);
-        persistPedidos(); persistEventos();
-        return res.json({ ok: true, atualizado: true, novoStatus: 'reembolsado' });
+      if (pedido.status === 'pago') {
+        // Nesse ponto, mpPaymentId já foi resolvido pro ID do pagamento real (não do checkout) —
+        // consultamos ele diretamente pra ver se foi estornado.
+        const consultaPagamento = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+        if (!consultaPagamento.ok) return res.status(400).json({ error: 'Erro ao consultar o pagamento no Asaas.' });
+        if (['REFUNDED', 'CHARGEBACK_REQUESTED'].includes(consultaPagamento.data.status)) {
+          marcarPedidoComoReembolsado(pedido, ev);
+          persistPedidos(); persistEventos();
+          return res.json({ ok: true, atualizado: true, novoStatus: 'reembolsado' });
+        }
+        return res.json({ ok: true, atualizado: false, statusMercadoPago: consultaPagamento.data.status, statusAtual: pedido.status });
       }
-      if (status === 'PAID' && pedido.status !== 'pago') {
+      // Pedido ainda pendente — mpPaymentId aqui é o ID do CHECKOUT. Procuramos o pagamento real
+      // gerado por essa sessão (sinal mais direto que o status do checkout em si).
+      const buscaPagamento = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
+      const pagamentoReal = (buscaPagamento.ok && buscaPagamento.data.data && buscaPagamento.data.data[0]) || null;
+      if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) {
         const proto = req.get('x-forwarded-proto') || 'https';
-        await processarPagamentoAprovado(pedido, consulta.data.id, `${proto}://${req.get('host')}`);
+        await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${proto}://${req.get('host')}`);
         return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
       }
-      return res.json({ ok: true, atualizado: false, statusMercadoPago: status, statusAtual: pedido.status });
+      if (!pagamentoReal) {
+        const consultaCheckout = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
+        if (consultaCheckout.ok && ['CANCELED', 'EXPIRED'].includes(consultaCheckout.data.status)) {
+          return res.json({ ok: true, atualizado: false, statusMercadoPago: consultaCheckout.data.status, statusAtual: pedido.status });
+        }
+      }
+      return res.json({ ok: true, atualizado: false, statusMercadoPago: pagamentoReal?.status || 'sem pagamento ainda', statusAtual: pedido.status });
     }
 
     if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
@@ -1809,15 +1824,19 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
 async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   if (pedido.status === 'pago') return;
   pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
-  pedido.mpPaymentId = String(paymentId);
+  const checkoutIdOriginal = String(paymentId);
+  pedido.mpPaymentId = checkoutIdOriginal;
   // No Asaas, o "paymentId" que chega aqui (do webhook de Checkout ou da consulta de status) é o
   // ID do CHECKOUT, não do pagamento em si — e reembolso precisa do ID do pagamento de verdade.
-  // Resolvemos isso buscando o pagamento pelo externalReference (que é o próprio ID do nosso pedido).
+  // Resolvemos isso buscando o pagamento pelo filtro "checkoutSession" (o jeito correto e oficial
+  // de encontrar o pagamento gerado por uma sessão de checkout específica).
   if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
     try {
-      const busca = await asaasFetch(`/payments?externalReference=${pedido.id}`);
+      const busca = await asaasFetch(`/payments?checkoutSession=${checkoutIdOriginal}`);
       if (busca.ok && busca.data.data && busca.data.data.length > 0) {
         pedido.mpPaymentId = String(busca.data.data[0].id);
+      } else {
+        console.error(`Não foi possível localizar o pagamento real da sessão de checkout ${checkoutIdOriginal} — reembolso desse pedido pode precisar do ID manual.`);
       }
     } catch (e) { console.error('Erro ao resolver pagamento real do Checkout Asaas:', e.message); }
   }
@@ -1909,6 +1928,13 @@ app.post('/api/mp/webhook', async (req, res) => {
 // apontando pra: SEU-DOMINIO/api/asaas/webhook
 app.post('/api/asaas/webhook', async (req, res) => {
   try {
+    // Verifica o token de autenticação do webhook, se configurado — o Asaas envia isso no header
+    // "asaas-access-token". Se ainda não configuramos ASAAS_WEBHOOK_TOKEN no servidor, seguimos sem
+    // bloquear (pra não quebrar quem ainda não migrou), mas o recomendado é sempre configurar.
+    if (ASAAS_WEBHOOK_TOKEN && req.headers['asaas-access-token'] !== ASAAS_WEBHOOK_TOKEN) {
+      console.error('Webhook do Asaas recebido com token de autenticação inválido ou ausente.');
+      return res.sendStatus(401);
+    }
     const evento = req.body?.event;
     const payment = req.body?.payment;
     const checkout = req.body?.checkout;
@@ -1960,15 +1986,17 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
   // pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
   if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
     try {
-      // Guardamos o ID do Checkout (não de um pagamento) — por isso consultamos /checkouts, não
-      // /payments. Consultar o endpoint errado sempre retornava vazio/404, e o pedido nunca saía
-      // de "pendente" sozinho, mesmo com o pagamento já confirmado do lado do Asaas.
-      const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
-      if (consulta.ok) {
-        if (consulta.data.status === 'PAID') {
-          const protoF = req.get('x-forwarded-proto') || 'https';
-          await processarPagamentoAprovado(pedido, consulta.data.id, `${protoF}://${req.get('host')}`);
-        } else if (['CANCELED','EXPIRED'].includes(consulta.data.status)) {
+      // Prioridade 1: procura o pagamento de verdade gerado por essa sessão de checkout (sinal mais
+      // direto de que o dinheiro entrou). Só usamos o status do Checkout em si como reserva, pra
+      // detectar sessão cancelada/expirada quando ainda não existe nenhum pagamento associado.
+      const buscaPagamento = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
+      const pagamentoReal = (buscaPagamento.ok && buscaPagamento.data.data && buscaPagamento.data.data[0]) || null;
+      if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) {
+        const protoF = req.get('x-forwarded-proto') || 'https';
+        await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${protoF}://${req.get('host')}`);
+      } else if (!pagamentoReal) {
+        const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
+        if (consulta.ok && ['CANCELED','EXPIRED'].includes(consulta.data.status)) {
           pedido.status = 'recusado';
           const evR = EVENTOS.find(e => e.id === pedido.eventoId);
           if (evR) liberarReservaPedido(pedido, evR);
@@ -2407,6 +2435,7 @@ app.get('/health', (req, res) => {
     provedor_pagamento_ativo: db.provedorPagamento,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
+    asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
     armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
     data_dir: DATA_DIR,
