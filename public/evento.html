@@ -6,6 +6,7 @@
 <title>Lota Ticketeria — Ingresso</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://sdk.mercadopago.com/js/v2"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://www.mercadopago.com/v2/security.js" view="checkout"></script>
 <style>
 :root{
@@ -139,7 +140,7 @@ const slug=location.pathname.split('/').filter(Boolean).pop();
 let EVENTO=null, PROMOTER_INFO=null;
 let selecoes={};
 let cupomAplicado=null;
-const AT_COMPRADOR=localStorage.getItem('role_token')||null;
+let AT_COMPRADOR=localStorage.getItem('role_token')||null;
 
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
@@ -200,6 +201,7 @@ async function init(){
     injetarPixels(EVENTO.pixels);
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
+    if(EVENTO.googleClientId) inicializarGoogleLogin();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
   }
@@ -264,6 +266,34 @@ function renderEvento(){
         <span id="creditoDescontoVal" style="color:var(--green)">- R$ 0,00</span>
       </div>
       <div class="total-row final"><span>Total</span><span class="total-val" id="totalVal">R$ 0,00</span></div>
+    </div>
+    <!-- Login/Cadastro obrigatório antes de comprar — garante que o ingresso sempre apareça em
+         "Meus Ingressos", mesmo se o e-mail de confirmação não chegar por algum motivo. -->
+    <div class="card" id="gateAuthCard" style="display:none">
+      <div class="card-title">Entre ou crie sua conta pra continuar</div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Isso garante que seu ingresso fique salvo na sua conta, em "Meus Ingressos" — mesmo que o e-mail de confirmação não chegue.</p>
+      <div id="areaGoogleLogin" style="display:none;margin-bottom:14px">
+        <div id="googleBtnContainer" style="display:flex;justify-content:center"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--text3);font-size:12px">
+          <div style="flex:1;height:1px;background:var(--border)"></div>ou<div style="flex:1;height:1px;background:var(--border)"></div>
+        </div>
+      </div>
+      <div class="metodo-tabs">
+        <div class="metodo-tab active" id="tabGateLogin" onclick="selecionarAbaGate('login')">Já tenho conta</div>
+        <div class="metodo-tab" id="tabGateCadastro" onclick="selecionarAbaGate('cadastro')">Criar conta</div>
+      </div>
+      <div class="err" id="errGateAuth"></div>
+      <div id="areaGateLogin">
+        <div class="fg"><label>E-mail</label><input class="fi" id="gLoginEmail" type="email" placeholder="seu@email.com"></div>
+        <div class="fg"><label>Senha</label><input class="fi" id="gLoginSenha" type="password" placeholder="Sua senha"></div>
+        <button class="btn" type="button" onclick="fazerLoginGate()">Entrar →</button>
+      </div>
+      <div id="areaGateCadastro" style="display:none">
+        <div class="fg"><label>Nome completo</label><input class="fi" id="gCadNome" placeholder="Seu nome"></div>
+        <div class="fg"><label>E-mail</label><input class="fi" id="gCadEmail" type="email" placeholder="seu@email.com"></div>
+        <div class="fg"><label>Senha</label><input class="fi" id="gCadSenha" type="password" placeholder="Mínimo 6 caracteres"></div>
+        <button class="btn" type="button" onclick="fazerCadastroGate()">Criar conta e continuar →</button>
+      </div>
     </div>
     <div class="card" id="dadosCard" style="display:none">
       <div class="card-title">Seus dados</div>
@@ -416,12 +446,14 @@ function atualizarTotal(){
     document.getElementById('creditoDescontoVal').style.display=creditoAplicado>0?'inline':'none';
     document.getElementById('creditoDescontoVal').textContent='- R$ '+creditoAplicado.toFixed(2).replace('.',',');
   } else cRow.style.display='none';
-  document.getElementById('dadosCard').style.display=temItem?'block':'none';
+  const autenticado=!!AT_COMPRADOR;
+  document.getElementById('gateAuthCard').style.display=(temItem&&!autenticado)?'block':'none';
+  document.getElementById('dadosCard').style.display=(temItem&&autenticado)?'block':'none';
   const usaAsaas=EVENTO?.provedorPagamento==='asaas';
   document.getElementById('camposEnderecoAsaas').style.display=usaAsaas?'block':'none';
-  document.getElementById('pagamentoCard').style.display=(temItem&&!usaAsaas)?'block':'none';
-  document.getElementById('pagamentoCardAsaas').style.display=(temItem&&usaAsaas)?'block':'none';
-  if(temItem){
+  document.getElementById('pagamentoCard').style.display=(temItem&&autenticado&&!usaAsaas)?'block':'none';
+  document.getElementById('pagamentoCardAsaas').style.display=(temItem&&autenticado&&usaAsaas)?'block':'none';
+  if(temItem&&autenticado){
     if(usaAsaas){ dispararInicioCheckout(EVENTO?.pixels,total); }
     else{
       // Monta o Brick uma única vez (idempotente); dali em diante, qualquer mudança de valor só
@@ -459,6 +491,72 @@ function removerCupom(){
 
 // ── CHECKOUT TRANSPARENTE (Mercado Pago) ──
 let MP_INSTANCE=null, MP_BRICKS_BUILDER=null, CARD_PAYMENT_BRICK=null, CARD_BRICK_MONTANDO=false, METODO_ATUAL='cartao';
+
+let GOOGLE_LOGIN_MONTADO=false;
+function inicializarGoogleLogin(){
+  if(GOOGLE_LOGIN_MONTADO) return;
+  if(typeof google==='undefined'||!google.accounts){ setTimeout(inicializarGoogleLogin,300); return; }
+  try{
+    google.accounts.id.initialize({ client_id: EVENTO.googleClientId, callback: aoReceberCredencialGoogle });
+    const container=document.getElementById('googleBtnContainer');
+    if(container){
+      google.accounts.id.renderButton(container, { theme: document.documentElement.getAttribute('data-theme')==='light'?'outline':'filled_black', size: 'large', width: 280, text: 'continue_with' });
+    }
+    document.getElementById('areaGoogleLogin').style.display='block';
+    GOOGLE_LOGIN_MONTADO=true;
+  }catch(e){ console.warn('Erro ao iniciar login do Google:', e); }
+}
+async function aoReceberCredencialGoogle(response){
+  const errEl=document.getElementById('errGateAuth');
+  errEl.style.display='none';
+  try{
+    const d=await api('POST','/api/auth/google',{credential:response.credential});
+    if(d.precisa2FA){ errEl.textContent='Essa conta tem verificação em duas etapas — faça login pela aba "Já tenho conta" pra confirmar o código.'; errEl.style.display='block'; return; }
+    await autenticarEContinuar(d.token,d.user);
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+}
+function selecionarAbaGate(aba){
+  document.getElementById('tabGateLogin').classList.toggle('active',aba==='login');
+  document.getElementById('tabGateCadastro').classList.toggle('active',aba==='cadastro');
+  document.getElementById('areaGateLogin').style.display=aba==='login'?'block':'none';
+  document.getElementById('areaGateCadastro').style.display=aba==='cadastro'?'block':'none';
+  document.getElementById('errGateAuth').style.display='none';
+}
+async function autenticarEContinuar(token,usuario){
+  AT_COMPRADOR=token;
+  localStorage.setItem('role_token',token);
+  // Pré-preenche nome/e-mail com os dados da conta, pra não pedir de novo
+  if(usuario){
+    const campoNome=document.getElementById('cNome'); if(campoNome) campoNome.value=usuario.nome||'';
+    const campoEmail=document.getElementById('cEmail'); if(campoEmail) campoEmail.value=usuario.email||'';
+  }
+  atualizarTotal();
+}
+async function fazerLoginGate(){
+  const email=document.getElementById('gLoginEmail').value.trim();
+  const senha=document.getElementById('gLoginSenha').value;
+  const errEl=document.getElementById('errGateAuth');
+  errEl.style.display='none';
+  if(!email||!senha){ errEl.textContent='Preencha e-mail e senha.'; errEl.style.display='block'; return; }
+  try{
+    const d=await api('POST','/api/auth/login',{email,senha});
+    await autenticarEContinuar(d.token,d.user);
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+}
+async function fazerCadastroGate(){
+  const nome=document.getElementById('gCadNome').value.trim();
+  const email=document.getElementById('gCadEmail').value.trim();
+  const senha=document.getElementById('gCadSenha').value;
+  const errEl=document.getElementById('errGateAuth');
+  errEl.style.display='none';
+  if(!nome||!email||!senha){ errEl.textContent='Preencha todos os campos.'; errEl.style.display='block'; return; }
+  if(senha.length<6){ errEl.textContent='A senha precisa ter pelo menos 6 caracteres.'; errEl.style.display='block'; return; }
+  try{
+    const codigoIndicacao=new URLSearchParams(location.search).get('cupom_indicacao')||'';
+    const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:'cliente',codigoIndicacao});
+    await autenticarEContinuar(d.token,d.user);
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+}
 
 function selecionarMetodo(metodo){
   METODO_ATUAL=metodo;
