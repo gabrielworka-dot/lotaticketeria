@@ -460,7 +460,7 @@ async function renderPedidosEvento(){
         const valorLiquido=p.valorIngressos!==undefined?p.valorIngressos:p.total;
         const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedidoAdmin(\''+p.id+'\')">↩️ Reembolsar</button>':'';
         const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedidoAdmin(\''+p.id+'\')">🔄 Sincronizar</button>':'';
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
