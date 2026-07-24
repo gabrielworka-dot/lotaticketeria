@@ -487,10 +487,14 @@ async function processarSubmitAsaas(){
   const email=document.getElementById('cEmail').value.trim();
   const cpf=document.getElementById('cCpf').value.trim().replace(/[^\d]/g,'');
   const tel=document.getElementById('cTel').value.trim();
+  const cep=document.getElementById('cCep')?.value.trim().replace(/[^\d]/g,'')||'';
   const errEl=document.getElementById('errMsgAsaas');
   errEl.style.display='none';
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
   if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
+  if(METODO_ATUAL_ASAAS==='cartao'){
+    if(!cep||cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
+  }
   const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
@@ -499,7 +503,7 @@ async function processarSubmitAsaas(){
   const btn=document.getElementById('btnComprarAsaas');
   btn.disabled=true; btn.textContent='Processando...';
 
-  const bodyBase={slug,itens,comprador:{nome,email,telefone:tel},cpf,metodo:METODO_ATUAL_ASAAS};
+  const bodyBase={slug,itens,comprador:{nome,email,telefone:tel},cpf,cep,metodo:METODO_ATUAL_ASAAS};
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
   if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
