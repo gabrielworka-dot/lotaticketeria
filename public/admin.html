@@ -250,6 +250,12 @@ a{color:inherit;}
         <select id="recLote" class="fi" style="width:100%"></select>
       </div>
       <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Quantidade</label><input id="recQtd" type="number" min="1" value="1" class="fi" style="width:100%"></div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Provedor de pagamento usado nessa compra</label>
+        <select id="recProvedor" class="fi" style="width:100%">
+          <option value="mercadopago">Mercado Pago</option>
+          <option value="asaas">Asaas</option>
+        </select>
+      </div>
       <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">ID do pagamento no Mercado Pago/Asaas (opcional, mas recomendado)</label><input id="recPaymentId" class="fi" style="width:100%" placeholder="Ex: 168915565207"></div>
       <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Valor total realmente pago pelo comprador (opcional — deixe em branco pra calcular automaticamente)</label><input id="recValorPago" type="number" step="0.01" class="fi" style="width:100%" placeholder="Ex: 132.00"></div>
     </div>
@@ -453,14 +459,16 @@ async function renderPedidosEvento(){
     const pedidos=(d.pedidos||[]).slice().reverse();
     if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado']};
-    el.innerHTML='<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
+    el.innerHTML='<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
         const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
         const valorLiquido=p.valorIngressos!==undefined?p.valorIngressos:p.total;
         const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedidoAdmin(\''+p.id+'\')">↩️ Reembolsar</button>':'';
         const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedidoAdmin(\''+p.id+'\')">🔄 Sincronizar</button>':'';
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+'</td></tr>';
+        const btnReenviarEmail=p.status==='pago'?'<button class="btn bp btn-sm" onclick="reenviarEmailPedido(\''+p.id+'\')">📧 Reenviar</button>':'';
+        const statusEmail=p.status!=='pago'?'—':(p.emailEnviado?'<span class="st-on">✅ Enviado</span>':'<span class="st-off">❌ Falhou</span>');
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
@@ -479,6 +487,13 @@ async function sincronizarPedidoAdmin(pedidoId){
     else{ toast('Já está sincronizado.','ok'); }
   }catch(e){ toast(e.message,'err'); }
 }
+async function reenviarEmailPedido(pedidoId){
+  try{
+    await api('POST','/api/admin/eventos/'+PEDIDOS_EVENTO_ID+'/pedidos/'+pedidoId+'/reenviar-email',{});
+    toast('E-mail reenviado com sucesso!','ok');
+    renderPedidosEvento();
+  }catch(e){ toast(e.message,'err'); }
+}
 async function abrirRecuperarPedido(){
   document.getElementById('recNome').value='';
   document.getElementById('recEmail').value='';
@@ -487,6 +502,7 @@ async function abrirRecuperarPedido(){
   document.getElementById('recQtd').value='1';
   document.getElementById('recPaymentId').value='';
   document.getElementById('recValorPago').value='';
+  document.getElementById('recProvedor').value='mercadopago';
   document.getElementById('recuperarErr').style.display='none';
   const loteSelect=document.getElementById('recLote');
   loteSelect.innerHTML='<option>Carregando...</option>';
@@ -504,6 +520,7 @@ async function confirmarRecuperarPedido(){
   const loteId=document.getElementById('recLote').value;
   const qtd=parseInt(document.getElementById('recQtd').value)||1;
   const mpPaymentId=document.getElementById('recPaymentId').value.trim();
+  const provedorPagamento=document.getElementById('recProvedor').value;
   const valorPagoStr=document.getElementById('recValorPago').value.trim();
   const errEl=document.getElementById('recuperarErr');
   errEl.style.display='none';
@@ -511,7 +528,7 @@ async function confirmarRecuperarPedido(){
   const btn=document.getElementById('btnConfirmarRecuperar');
   btn.disabled=true; btn.textContent='Recuperando...';
   try{
-    const body={ nome, email, telefone, cpf, itens:[{loteId,qtd}], mpPaymentId: mpPaymentId||undefined };
+    const body={ nome, email, telefone, cpf, itens:[{loteId,qtd}], mpPaymentId: mpPaymentId||undefined, provedorPagamento };
     if(valorPagoStr) body.valorPago=parseFloat(valorPagoStr);
     const d=await api('POST','/api/admin/eventos/'+PEDIDOS_EVENTO_ID+'/recuperar-pedido',body);
     toast('Pedido recuperado! '+d.ticketsGerados+' ingresso(s) gerado(s) e e-mail reenviado.','ok');
