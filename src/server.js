@@ -1407,7 +1407,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     if (db.provedorPagamento === 'asaas' && !ASAAS_API_KEY) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Asaas.' });
     if (db.provedorPagamento === 'mercadopago' && !MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
-    const { metodo, cpf, token, installments, paymentMethodId, issuerId, deviceId } = req.body;
+    const { metodo, cpf, token, installments, paymentMethodId, issuerId, deviceId, cep, numero } = req.body;
     const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
     if (!cpfLimpo || cpfLimpo.length !== 11) return res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
 
@@ -1454,9 +1454,14 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           items: [{ name: ev.nome.slice(0, 30), description: descricao.slice(0, 150), quantity: 1, value: valorCobranca }],
           customerData: {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
-            phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined
+            phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined,
+            postalCode: (cep || '').replace(/[^\d]/g, '') || undefined,
+            addressNumber: numero || undefined
           }
         };
+        if (checkoutBody.billingTypes.includes('CREDIT_CARD') && (!checkoutBody.customerData.postalCode || !checkoutBody.customerData.addressNumber)) {
+          return res.status(400).json({ error: 'CEP e número do endereço são obrigatórios pra pagamento com cartão.' });
+        }
         if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 12 };
 
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
