@@ -1438,6 +1438,29 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         // cadastrar um "customer" separado antes.
         const chargeTypes = metodo === 'cartao' ? ['DETACHED', 'INSTALLMENT'] : ['DETACHED'];
         const billingTypesMap = { pix: ['PIX'], cartao: ['CREDIT_CARD'], boleto: ['BOLETO'] };
+        const cepLimpo = (cep || '').replace(/[^\d]/g, '');
+
+        // O Asaas exige um endereço completo (rua, bairro, cidade) pra pagamento com cartão — não
+        // basta enviar só o CEP pra ele completar sozinho, como a documentação de outro endpoint
+        // sugeria. Resolvemos isso consultando o CEP no ViaCEP (serviço público e gratuito) por
+        // trás dos panos, assim o comprador só precisa digitar o CEP mesmo.
+        let enderecoResolvido = null;
+        if (metodo === 'cartao' && cepLimpo.length === 8) {
+          try {
+            const viaCepResp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+            const viaCepData = await viaCepResp.json();
+            if (!viaCepData.erro) {
+              enderecoResolvido = { address: viaCepData.logradouro || 'Endereço não informado', province: viaCepData.bairro || 'Centro', city: parseInt(viaCepData.ibge, 10) || undefined };
+            }
+          } catch (e) { console.error('Erro ao consultar CEP no ViaCEP:', e.message); }
+        }
+        if (metodo === 'cartao' && (!cepLimpo || cepLimpo.length !== 8)) {
+          return res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos pra pagamento com cartão.' });
+        }
+        if (metodo === 'cartao' && !enderecoResolvido) {
+          return res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.' });
+        }
+
         const checkoutBody = {
           billingTypes: billingTypesMap[metodo] || ['PIX', 'CREDIT_CARD'],
           chargeTypes,
@@ -1455,13 +1478,11 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           customerData: {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
             phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined,
-            postalCode: (cep || '').replace(/[^\d]/g, '') || undefined,
-            addressNumber: numero || 'S/N'
+            postalCode: cepLimpo || undefined,
+            addressNumber: numero || 'S/N',
+            ...(enderecoResolvido || {})
           }
         };
-        if (checkoutBody.billingTypes.includes('CREDIT_CARD') && !checkoutBody.customerData.postalCode) {
-          return res.status(400).json({ error: 'CEP é obrigatório pra pagamento com cartão.' });
-        }
         if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 12 };
 
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
