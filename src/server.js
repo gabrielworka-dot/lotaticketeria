@@ -948,15 +948,15 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
   try {
     if (pedido.provedorPagamento === 'asaas') {
       if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
-      const consulta = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+      const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
       if (!consulta.ok) return res.status(400).json({ error: 'Erro ao consultar a cobrança no Asaas.' });
       const status = consulta.data.status;
-      if (['REFUNDED','CHARGEBACK_REQUESTED'].includes(status) && pedido.status === 'pago') {
+      if (['CANCELED','EXPIRED'].includes(status) && pedido.status === 'pago') {
         marcarPedidoComoReembolsado(pedido, ev);
         persistPedidos(); persistEventos();
         return res.json({ ok: true, atualizado: true, novoStatus: 'reembolsado' });
       }
-      if (['CONFIRMED','RECEIVED'].includes(status) && pedido.status !== 'pago') {
+      if (status === 'PAID' && pedido.status !== 'pago') {
         const proto = req.get('x-forwarded-proto') || 'https';
         await processarPagamentoAprovado(pedido, consulta.data.id, `${proto}://${req.get('host')}`);
         return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
@@ -1441,12 +1441,12 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         const billingTypesMap = { pix: ['PIX'], cartao: ['CREDIT_CARD'], boleto: ['BOLETO'] };
         const cepLimpo = (cep || '').replace(/[^\d]/g, '');
 
-        // O Asaas exige um endereço completo (rua, bairro, cidade) pra pagamento com cartão — não
-        // basta enviar só o CEP pra ele completar sozinho, como a documentação de outro endpoint
-        // sugeria. Resolvemos isso consultando o CEP no ViaCEP (serviço público e gratuito) por
-        // trás dos panos, assim o comprador só precisa digitar o CEP mesmo.
+        // O Asaas exige endereço completo (rua, bairro, cidade) sempre que enviamos os dados do
+        // cliente antecipadamente — não importa a forma de pagamento escolhida (PIX, cartão ou
+        // boleto). Resolvemos isso consultando o CEP no ViaCEP (serviço público e gratuito) por
+        // trás dos panos, assim o comprador só precisa digitar o CEP mesmo, em qualquer método.
         let enderecoResolvido = null;
-        if (metodo === 'cartao' && cepLimpo.length === 8) {
+        if (cepLimpo.length === 8) {
           try {
             const viaCepResp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
             const viaCepData = await viaCepResp.json();
@@ -1455,10 +1455,10 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
             }
           } catch (e) { console.error('Erro ao consultar CEP no ViaCEP:', e.message); }
         }
-        if (metodo === 'cartao' && (!cepLimpo || cepLimpo.length !== 8)) {
-          return res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos pra pagamento com cartão.' });
+        if (!cepLimpo || cepLimpo.length !== 8) {
+          return res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos.' });
         }
-        if (metodo === 'cartao' && !enderecoResolvido) {
+        if (!enderecoResolvido) {
           return res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.' });
         }
 
@@ -1767,6 +1767,17 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   if (pedido.status === 'pago') return;
   pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
   pedido.mpPaymentId = String(paymentId);
+  // No Asaas, o "paymentId" que chega aqui (do webhook de Checkout ou da consulta de status) é o
+  // ID do CHECKOUT, não do pagamento em si — e reembolso precisa do ID do pagamento de verdade.
+  // Resolvemos isso buscando o pagamento pelo externalReference (que é o próprio ID do nosso pedido).
+  if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
+    try {
+      const busca = await asaasFetch(`/payments?externalReference=${pedido.id}`);
+      if (busca.ok && busca.data.data && busca.data.data.length > 0) {
+        pedido.mpPaymentId = String(busca.data.data[0].id);
+      }
+    } catch (e) { console.error('Erro ao resolver pagamento real do Checkout Asaas:', e.message); }
+  }
   // Debita o crédito de indicação usado nesse pedido — só agora que o pagamento foi confirmado de verdade,
   // pra não descontar crédito de um pagamento que acabe sendo recusado.
   if (pedido.creditoAplicado > 0 && pedido.compradorUserId) {
@@ -1857,6 +1868,27 @@ app.post('/api/asaas/webhook', async (req, res) => {
   try {
     const evento = req.body?.event;
     const payment = req.body?.payment;
+    const checkout = req.body?.checkout;
+
+    // Eventos de CHECKOUT (CHECKOUT_PAID, etc) — formato separado dos eventos de pagamento comuns,
+    // usado quando a cobrança nasce do Asaas Checkout (nosso caso, desde a migração pro checkout
+    // hospedado com opção de parcelamento).
+    if (checkout && checkout.externalReference) {
+      const pedido = PEDIDOS.find(p => p.id === checkout.externalReference);
+      if (pedido) {
+        if (evento === 'CHECKOUT_PAID' && pedido.status !== 'pago') {
+          const proto = req.get('x-forwarded-proto') || 'https';
+          await processarPagamentoAprovado(pedido, checkout.id, `${proto}://${req.get('host')}`);
+        } else if (['CHECKOUT_CANCELED', 'CHECKOUT_EXPIRED'].includes(evento) && pedido.status === 'pendente') {
+          pedido.status = 'recusado';
+          const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+          if (evR) liberarReservaPedido(pedido, evR);
+          persistPedidos();
+        }
+      }
+      return res.sendStatus(200);
+    }
+
     if (!payment || !payment.externalReference) return res.sendStatus(200);
     const pedido = PEDIDOS.find(p => p.id === payment.externalReference);
     if (!pedido) return res.sendStatus(200);
@@ -1885,12 +1917,15 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
   // pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
   if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
     try {
-      const consulta = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+      // Guardamos o ID do Checkout (não de um pagamento) — por isso consultamos /checkouts, não
+      // /payments. Consultar o endpoint errado sempre retornava vazio/404, e o pedido nunca saía
+      // de "pendente" sozinho, mesmo com o pagamento já confirmado do lado do Asaas.
+      const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
       if (consulta.ok) {
-        if (['CONFIRMED','RECEIVED'].includes(consulta.data.status)) {
+        if (consulta.data.status === 'PAID') {
           const protoF = req.get('x-forwarded-proto') || 'https';
           await processarPagamentoAprovado(pedido, consulta.data.id, `${protoF}://${req.get('host')}`);
-        } else if (consulta.data.status === 'REFUNDED') {
+        } else if (['CANCELED','EXPIRED'].includes(consulta.data.status)) {
           pedido.status = 'recusado';
           const evR = EVENTOS.find(e => e.id === pedido.eventoId);
           if (evR) liberarReservaPedido(pedido, evR);
