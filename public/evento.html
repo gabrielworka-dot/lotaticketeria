@@ -274,7 +274,7 @@ function renderEvento(){
       <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" placeholder="(11) 99999-9999"></div>
       <div id="camposEnderecoAsaas" style="display:none">
         <div class="fg"><label>CEP *</label><input class="fi" id="cCep" placeholder="00000-000" maxlength="9"></div>
-        <p style="font-size:11px;color:var(--text3);margin-top:-6px">Exigido pelo processador de pagamento pra confirmar o cartão.</p>
+        <p style="font-size:11px;color:var(--text3);margin-top:-6px">Exigido pelo processador de pagamento pra confirmar a compra.</p>
       </div>
     </div>
 
@@ -492,9 +492,7 @@ async function processarSubmitAsaas(){
   errEl.style.display='none';
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
   if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
-  if(METODO_ATUAL_ASAAS==='cartao'){
-    if(!cep||cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
-  }
+  if(!cep||cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
   const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
