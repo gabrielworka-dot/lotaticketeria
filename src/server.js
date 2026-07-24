@@ -1451,7 +1451,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           // Um único item combinado (em vez de um por lote) evita qualquer risco de o total dos
           // itens não bater exatamente com o valor já calculado (com desconto de cupom/crédito
           // aplicado) — o valor cobrado sempre reflete exatamente o que já validamos.
-          items: [{ name: ev.nome.slice(0, 100), description: descricao, quantity: 1, value: valorCobranca }],
+          items: [{ name: ev.nome.slice(0, 30), description: descricao.slice(0, 150), quantity: 1, value: valorCobranca }],
           customerData: {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
             phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined
