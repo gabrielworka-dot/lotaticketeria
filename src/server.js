@@ -1456,11 +1456,11 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
             phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined,
             postalCode: (cep || '').replace(/[^\d]/g, '') || undefined,
-            addressNumber: numero || undefined
+            addressNumber: numero || 'S/N'
           }
         };
-        if (checkoutBody.billingTypes.includes('CREDIT_CARD') && (!checkoutBody.customerData.postalCode || !checkoutBody.customerData.addressNumber)) {
-          return res.status(400).json({ error: 'CEP e número do endereço são obrigatórios pra pagamento com cartão.' });
+        if (checkoutBody.billingTypes.includes('CREDIT_CARD') && !checkoutBody.customerData.postalCode) {
+          return res.status(400).json({ error: 'CEP é obrigatório pra pagamento com cartão.' });
         }
         if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 12 };
 
