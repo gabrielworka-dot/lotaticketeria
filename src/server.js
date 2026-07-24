@@ -17,6 +17,7 @@ const speakeasy = require('speakeasy');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'role_dev_secret_change_in_prod';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // ── Security headers ──────────────────────────────────────
 app.use((req, res, next) => {
@@ -229,6 +230,47 @@ function gerarCodigoIndicacaoUnico() {
   do { codigo = Math.random().toString(36).slice(2, 8).toUpperCase(); } while (db.users.find(u => u.codigoIndicacao === codigo));
   return codigo;
 }
+
+// Login/cadastro com Google — confirma o token direto com o Google (sem precisar de biblioteca
+// própria de verificação de JWT), e cria ou reconhece a conta pelo e-mail automaticamente.
+app.post('/api/auth/google', rateLimit(60000, 20), async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) return res.status(400).json({ error: 'Token do Google ausente.' });
+  if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Login com Google não está configurado no servidor.' });
+  try {
+    const verResp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+    const verData = await verResp.json();
+    if (!verResp.ok || verData.aud !== GOOGLE_CLIENT_ID) {
+      return res.status(401).json({ error: 'Token do Google inválido.' });
+    }
+    if (verData.email_verified !== 'true' && verData.email_verified !== true) {
+      return res.status(401).json({ error: 'E-mail do Google não verificado.' });
+    }
+    const email = sanitize(verData.email || '', 150).toLowerCase();
+    let user = db.users.find(u => u.email === email);
+    if (!user) {
+      user = {
+        id: uuidv4(), nome: sanitize(verData.name || email.split('@')[0], 100), email,
+        senha: bcrypt.hashSync(uuidv4(), 12), // senha aleatória — essa conta só entra via Google
+        isAdmin: false, ativo: true, emailVerificado: true, verificado: false, colaboradorDe: null,
+        isOrganizador: false, nomePublico: '', organizadorSlug: '', cpfCnpj: '', tipoDocumento: '',
+        pagamentoInfo: { chavePix: '', tipoChavePix: '', nomeTitular: '', nomeBanco: '', numeroAgencia: '', tipoConta: '' },
+        bio: '', avatarUrl: '', bannerUrl: '', redesSociais: {}, contaGoogle: true,
+        codigoIndicacao: gerarCodigoIndicacaoUnico(), indicadoPor: null, saldoCredito: 0, boasVindasCreditoConcedido: false,
+        createdAt: new Date().toISOString()
+      };
+      db.users.push(user); saveDB(db);
+    } else if (user.ativo === false) {
+      return res.status(403).json({ error: 'Esta conta foi desativada. Entre em contato com o suporte.' });
+    }
+    if (user.twoFactorAtivo) {
+      const preAuthToken = jwt.sign({ id: user.id, tipo: 'pre2fa' }, JWT_SECRET, { expiresIn: '5m' });
+      return res.json({ precisa2FA: true, preAuthToken });
+    }
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, user: safe(user) });
+  } catch (e) { res.status(500).json({ error: 'Erro ao verificar login do Google: ' + e.message }); }
+});
 
 async function enviarEmailVerificacao(user, proto, host) {
   const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
@@ -1275,6 +1317,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     lotes: lotesPublicos, pixels: ev.pixels, testMode: isTestToken(MP_PLATFORM_TOKEN),
     feePercent: db.marketplaceFeePercent || 10,
     mpPublicKey: MP_PUBLIC_KEY,
+    googleClientId: GOOGLE_CLIENT_ID || undefined,
     provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
