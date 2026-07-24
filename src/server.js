@@ -1400,7 +1400,8 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       };
       gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
       PEDIDOS.push(pedido); persistPedidos(); persistEventos();
-      await enviarEmailIngressos(pedido, ev, baseUrl);
+      pedido.emailEnviado = await enviarEmailIngressos(pedido, ev, baseUrl);
+      persistPedidos();
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
@@ -1728,8 +1729,8 @@ async function gerarPdfIngressos(pedido, ev) {
 
 async function enviarEmailIngressos(pedido, ev, baseUrl) {
   console.log(`Preparando e-mail de ingressos para ${pedido.comprador?.email} (pedido ${pedido.id})`);
-  if (!RESEND_API_KEY) { console.error('RESEND_API_KEY não configurada — e-mail de ingressos não enviado.'); return; }
-  if (!pedido.comprador?.email) { console.error('Pedido sem e-mail de comprador — não é possível enviar.'); return; }
+  if (!RESEND_API_KEY) { console.error('RESEND_API_KEY não configurada — e-mail de ingressos não enviado.'); return false; }
+  if (!pedido.comprador?.email) { console.error('Pedido sem e-mail de comprador — não é possível enviar.'); return false; }
   const nomeEvento = ev.nome || 'Evento';
   const linkPdf = baseUrl ? `${baseUrl}/api/public/pedido/${pedido.id}/pdf` : '';
   const ticketsHtml = (pedido.tickets || []).map(t => `
@@ -1755,9 +1756,10 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
   } catch (e) { console.error('Erro ao gerar PDF do ingresso — e-mail seguirá sem anexo, mas com o link de download:', e.message); }
   try {
     const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
-    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o envio do e-mail de ingressos:', r.status, errBody); }
-    else console.log(`E-mail de ingressos enviado com sucesso para ${pedido.comprador.email} (pedido ${pedido.id})`);
-  } catch(e) { console.error('Erro de rede ao enviar e-mail de ingressos:', e.message); }
+    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o envio do e-mail de ingressos:', r.status, errBody); return false; }
+    console.log(`E-mail de ingressos enviado com sucesso para ${pedido.comprador.email} (pedido ${pedido.id})`);
+    return true;
+  } catch(e) { console.error('Erro de rede ao enviar e-mail de ingressos:', e.message); return false; }
 }
 
 // ── WEBHOOK MERCADO PAGO ──
@@ -1777,8 +1779,7 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
     const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
     gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
     persistEventos();
-    await enviarEmailIngressos(pedido, ev, baseUrl);
-    pedido.emailEnviado = true;
+    pedido.emailEnviado = await enviarEmailIngressos(pedido, ev, baseUrl);
   }
   persistPedidos();
   // Programa de indicação: concede crédito na PRIMEIRA compra de verdade (paga) do indicado
@@ -2162,6 +2163,22 @@ app.get('/api/admin/eventos/:id', auth, adminOnly, (req, res) => {
 // Recria um pedido "do zero" a partir de informações que o admin já confirmou existirem de verdade
 // (ex: o pagamento aparece no extrato do Mercado Pago/Asaas, mas sumiu do nosso banco). Gera os
 // ingressos e reenvia o e-mail de confirmação normalmente, como se a compra tivesse acabado de ser paga.
+// Reenvio manual do e-mail com o ingresso (PDF) — útil quando o comprador avisa que não recebeu.
+app.post('/api/admin/eventos/:id/pedidos/:pedidoId/reenviar-email', auth, adminOnly, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  if (pedido.status !== 'pago') return res.status(400).json({ error: 'Só é possível reenviar o e-mail de pedidos pagos.' });
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  const enviado = await enviarEmailIngressos(pedido, ev, baseUrl);
+  pedido.emailEnviado = enviado;
+  persistPedidos();
+  if (!enviado) return res.status(500).json({ error: 'Não conseguimos enviar o e-mail agora. Confira os logs do servidor pra mais detalhes, ou baixe o PDF direto pela lista de pedidos.' });
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
