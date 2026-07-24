@@ -1432,24 +1432,38 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     // ── ASAAS — checkout hospedado (redireciona o comprador pra fatura do Asaas) ──
     if (db.provedorPagamento === 'asaas') {
       try {
-        const clienteId = await buscarOuCriarClienteAsaas(comprador, cpfLimpo);
-        const billingTypeMap = { pix: 'PIX', cartao: 'CREDIT_CARD', boleto: 'BOLETO' };
-        const criacao = await asaasFetch('/payments', {
-          method: 'POST',
-          body: JSON.stringify({
-            customer: clienteId,
-            billingType: billingTypeMap[metodo] || 'UNDEFINED',
-            value: valorCobranca,
-            dueDate: new Date().toISOString().slice(0, 10),
-            description: descricao,
-            externalReference: pedidoId,
-            callback: { successUrl: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=success`, autoRedirect: true }
-          })
-        });
-        if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar cobrança no Asaas.' });
-        pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID da cobrança do Asaas nesse mesmo campo
+        // Produto "Asaas Checkout" — diferente da cobrança básica que usávamos antes, esse permite
+        // configurar quantas parcelas oferecer no cartão (o antigo não tinha essa opção, por isso
+        // o parcelamento não aparecia). Também aceita os dados do cliente direto, sem precisar
+        // cadastrar um "customer" separado antes.
+        const chargeTypes = metodo === 'cartao' ? ['DETACHED', 'INSTALLMENT'] : ['DETACHED'];
+        const billingTypesMap = { pix: ['PIX'], cartao: ['CREDIT_CARD'], boleto: ['BOLETO'] };
+        const checkoutBody = {
+          billingTypes: billingTypesMap[metodo] || ['PIX', 'CREDIT_CARD'],
+          chargeTypes,
+          minutesToExpire: 60,
+          externalReference: pedidoId,
+          callback: {
+            successUrl: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=success`,
+            cancelUrl: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=pending`,
+            expiredUrl: `${baseUrl}/e/${slug}?pedido=${pedidoId}&status=pending`,
+          },
+          // Um único item combinado (em vez de um por lote) evita qualquer risco de o total dos
+          // itens não bater exatamente com o valor já calculado (com desconto de cupom/crédito
+          // aplicado) — o valor cobrado sempre reflete exatamente o que já validamos.
+          items: [{ name: ev.nome.slice(0, 100), description: descricao, quantity: 1, value: valorCobranca }],
+          customerData: {
+            name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
+            phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined
+          }
+        };
+        if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 12 };
+
+        const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
+        if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
+        pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID do checkout do Asaas nesse mesmo campo
         PEDIDOS.push(pedidoBase); persistPedidos();
-        return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.invoiceUrl });
+        return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.link });
       } catch (e) { return res.status(500).json({ error: e.message }); }
     }
 
