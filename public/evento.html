@@ -273,10 +273,7 @@ function renderEvento(){
       <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" placeholder="Somente números" maxlength="14"></div>
       <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" placeholder="(11) 99999-9999"></div>
       <div id="camposEnderecoAsaas" style="display:none">
-        <div class="fg2">
-          <div class="fg"><label>CEP *</label><input class="fi" id="cCep" placeholder="00000-000" maxlength="9"></div>
-          <div class="fg"><label>Número *</label><input class="fi" id="cNumero" placeholder="Ex: 123"></div>
-        </div>
+        <div class="fg"><label>CEP *</label><input class="fi" id="cCep" placeholder="00000-000" maxlength="9"></div>
         <p style="font-size:11px;color:var(--text3);margin-top:-6px">Exigido pelo processador de pagamento pra confirmar o cartão.</p>
       </div>
     </div>
@@ -652,7 +649,6 @@ function validarDadosComprador(dados){
   if(!dados.cpf||dados.cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return false;}
   if(EVENTO?.provedorPagamento==='asaas'){
     if(!dados.cep||dados.cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return false;}
-    if(!dados.numero){errEl.textContent='Preencha o número do endereço.';errEl.style.display='block';return false;}
   }
   if(!dados.itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return false;}
   return true;
