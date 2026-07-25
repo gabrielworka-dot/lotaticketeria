@@ -2285,6 +2285,34 @@ app.post('/api/admin/eventos/:id/pedidos/:pedidoId/reenviar-email', auth, adminO
   res.json({ ok: true });
 });
 
+// Corrige os dados do comprador de um pedido já existente — útil quando algo foi digitado errado
+// (na compra normal, ou numa recuperação manual). Não mexe em itens/valores, só nos dados de contato.
+app.patch('/api/admin/eventos/:id/pedidos/:pedidoId', auth, adminOnly, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  const { nome, email, telefone, cpf, mpPaymentId } = req.body;
+  const nomeLimpo = sanitize(nome || '', 100);
+  const emailLimpo = sanitize(email || '', 150).toLowerCase();
+  if (!nomeLimpo || !emailLimpo) return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) return res.status(400).json({ error: 'E-mail inválido.' });
+  const emailAntigo = (pedido.comprador?.email || '').toLowerCase();
+  pedido.comprador = {
+    nome: nomeLimpo, email: emailLimpo,
+    telefone: sanitize(telefone || '', 30), cpf: sanitize(cpf || '', 20).replace(/[^\d]/g, '')
+  };
+  // Os tickets guardam o nome/e-mail de quem recebe individualmente (pode ter sido transferido pra
+  // outra pessoa depois da compra) — só atualizamos o titular dos ingressos que ainda pertencem ao
+  // comprador original, sem sobrescrever quem já recebeu por transferência.
+  (pedido.tickets || []).forEach(t => {
+    if ((t.titularEmail || '').toLowerCase() === emailAntigo) { t.titularNome = nomeLimpo; t.titularEmail = emailLimpo; }
+  });
+  if (mpPaymentId !== undefined) pedido.mpPaymentId = mpPaymentId || pedido.mpPaymentId;
+  persistPedidos();
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
