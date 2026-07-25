@@ -244,6 +244,23 @@ a{color:inherit;text-decoration:none;}
     <div class="fg"><label>Nova senha (deixe vazio pra não trocar)</label><input class="fi" id="contaNovaSenha" type="password" placeholder="Mínimo 6 caracteres"></div>
     <div class="fg"><label>Senha atual <span style="color:var(--text3);font-weight:400">(obrigatória só se for trocar e-mail ou senha)</span></label><input class="fi" id="contaSenhaAtual" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')salvarMinhaConta()"></div>
     <button class="btn bp" id="btnSalvarConta" style="width:100%;padding:12px" onclick="salvarMinhaConta()">Salvar alterações →</button>
+
+    <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px">Privacidade e seus dados</div>
+      <button class="btn bo btn-sm" style="width:100%;margin-bottom:8px" onclick="baixarMeusDados()">📥 Baixar meus dados</button>
+      <button class="btn bo btn-sm" style="width:100%;color:#F87171;border-color:rgba(239,68,68,.4)" onclick="abrirExcluirConta()">🗑️ Excluir minha conta</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DE EXCLUSÃO DE CONTA -->
+<div class="mo" id="excluirContaModal" onclick="if(event.target===this)closeModal('excluirContaModal')">
+  <div class="modal">
+    <h2>Excluir minha conta</h2>
+    <p class="sub">Isso remove permanentemente seus dados pessoais da plataforma (nome, e-mail, contatos). Pedidos já pagos são mantidos de forma anônima, apenas pra fins de registro financeiro/fiscal, como exige a lei. Essa ação não pode ser desfeita.</p>
+    <div class="err" id="excluirContaErr"></div>
+    <div class="fg"><label>Confirme sua senha</label><input class="fi" id="excluirContaSenha" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')confirmarExclusaoConta()"></div>
+    <button class="btn bdng" style="width:100%;padding:12px" onclick="confirmarExclusaoConta()">Excluir minha conta permanentemente</button>
   </div>
 </div>
 
@@ -478,6 +495,35 @@ async function abrirIndicacao(ev){
 function copiarLinkIndicacao(){
   const texto=document.getElementById('linkIndicacaoTexto').textContent;
   navigator.clipboard?.writeText(texto).then(()=>toast('Link copiado!','ok')).catch(()=>{});
+}
+async function baixarMeusDados(){
+  try{
+    const r=await fetch('/api/auth/meus-dados',{headers:{'Authorization':'Bearer '+AT}});
+    if(!r.ok){ const d=await r.json(); toast(d.error||'Erro','err'); return; }
+    const blob=await r.blob();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='meus-dados-lota-ticketeria.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }catch(e){ toast('Erro ao baixar seus dados.','err'); }
+}
+function abrirExcluirConta(){
+  document.getElementById('excluirContaSenha').value='';
+  document.getElementById('excluirContaErr').style.display='none';
+  closeModal('contaModal');
+  openModal('excluirContaModal');
+}
+async function confirmarExclusaoConta(){
+  const senha=document.getElementById('excluirContaSenha').value;
+  const errEl=document.getElementById('excluirContaErr');
+  errEl.style.display='none';
+  if(!senha){ errEl.textContent='Digite sua senha pra confirmar.'; errEl.style.display='block'; return; }
+  if(!confirm('Tem certeza? Essa ação não pode ser desfeita.')) return;
+  try{
+    await api('POST','/api/auth/excluir-conta',{senha});
+    toast('Conta excluída. Até logo!','ok');
+    setTimeout(()=>{ doLogout(); }, 1500);
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
 async function salvarMinhaConta(){
   const nome=document.getElementById('contaNome').value.trim();
