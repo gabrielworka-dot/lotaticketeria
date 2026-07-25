@@ -266,6 +266,29 @@ a{color:inherit;}
   </div>
 </div>
 
+<!-- MODAL DE EDIÇÃO DE PEDIDO -->
+<div id="editarModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:250;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <h2 style="font-size:17px;font-weight:800;margin-bottom:6px">Editar Dados do Pedido</h2>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px">Corrige nome, e-mail, telefone ou CPF caso algo tenha sido digitado errado. Não altera os ingressos nem o valor.</p>
+    <div id="editarErr" style="display:none;font-size:12px;color:#F87171;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:9px 12px;margin-bottom:12px"></div>
+    <div style="display:grid;gap:10px">
+      <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Nome do comprador *</label><input id="edNome" class="fi" style="width:100%"></div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">E-mail *</label><input id="edEmail" type="email" class="fi" style="width:100%"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Telefone</label><input id="edTel" class="fi" style="width:100%"></div>
+        <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">CPF</label><input id="edCpf" class="fi" style="width:100%"></div>
+      </div>
+      <div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">ID do pagamento no Mercado Pago/Asaas</label><input id="edPaymentId" class="fi" style="width:100%"></div>
+    </div>
+    <p style="font-size:11px;color:var(--text3);margin-top:10px">Se o e-mail for alterado, use o botão "📧 Reenviar" na lista de pedidos depois de salvar, pra mandar o ingresso pro endereço novo.</p>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn bo" style="flex:1" onclick="document.getElementById('editarModal').style.display='none'">Cancelar</button>
+      <button class="btn bp" id="btnConfirmarEditar" style="flex:1" onclick="confirmarEditarPedido()">Salvar alterações →</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let AT=localStorage.getItem('role_token')||null;
 let CU=null;
@@ -445,6 +468,7 @@ async function baixarCsv(url, nomeArquivo){
 function baixarEmailsEvento(id,slug){ baixarCsv('/api/admin/eventos/'+id+'/participantes.csv', 'emails-'+slug+'.csv'); }
 
 let PEDIDOS_EVENTO_ID=null;
+let PEDIDOS_CACHE=[];
 async function abrirPedidosEvento(eventoId,nomeEvento){
   PEDIDOS_EVENTO_ID=eventoId;
   document.getElementById('pedidosModalTitulo').textContent='Pedidos — '+nomeEvento;
@@ -457,6 +481,7 @@ async function renderPedidosEvento(){
   try{
     const d=await api('GET','/api/admin/eventos/'+PEDIDOS_EVENTO_ID);
     const pedidos=(d.pedidos||[]).slice().reverse();
+    PEDIDOS_CACHE=pedidos;
     if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado']};
     el.innerHTML='<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
@@ -467,8 +492,9 @@ async function renderPedidosEvento(){
         const btnReembolso=p.status==='pago'?'<button class="btn bdng btn-sm" onclick="reembolsarPedidoAdmin(\''+p.id+'\')">↩️ Reembolsar</button>':'';
         const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedidoAdmin(\''+p.id+'\')">🔄 Sincronizar</button>':'';
         const btnReenviarEmail=p.status==='pago'?'<button class="btn bp btn-sm" onclick="reenviarEmailPedido(\''+p.id+'\')">📧 Reenviar</button>':'';
+        const btnEditar='<button class="btn bo btn-sm" onclick="abrirEditarPedido(\''+p.id+'\')">✏️ Editar</button>';
         const statusEmail=p.status!=='pago'?'—':(p.emailEnviado?'<span class="st-on">✅ Enviado</span>':'<span class="st-off">❌ Falhou</span>');
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+'</td></tr>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+btnEditar+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
@@ -493,6 +519,38 @@ async function reenviarEmailPedido(pedidoId){
     toast('E-mail reenviado com sucesso!','ok');
     renderPedidosEvento();
   }catch(e){ toast(e.message,'err'); }
+}
+let EDITANDO_PEDIDO_ID=null;
+function abrirEditarPedido(pedidoId){
+  const p=PEDIDOS_CACHE.find(x=>x.id===pedidoId);
+  if(!p){ toast('Pedido não encontrado na lista atual.','err'); return; }
+  EDITANDO_PEDIDO_ID=pedidoId;
+  document.getElementById('edNome').value=p.comprador?.nome||'';
+  document.getElementById('edEmail').value=p.comprador?.email||'';
+  document.getElementById('edTel').value=p.comprador?.telefone||'';
+  document.getElementById('edCpf').value=p.comprador?.cpf||'';
+  document.getElementById('edPaymentId').value=(p.mpPaymentId&&p.mpPaymentId!=='CORTESIA'&&!String(p.mpPaymentId).startsWith('SIMULADO'))?p.mpPaymentId:'';
+  document.getElementById('editarErr').style.display='none';
+  document.getElementById('editarModal').style.display='flex';
+}
+async function confirmarEditarPedido(){
+  const nome=document.getElementById('edNome').value.trim();
+  const email=document.getElementById('edEmail').value.trim();
+  const telefone=document.getElementById('edTel').value.trim();
+  const cpf=document.getElementById('edCpf').value.trim();
+  const mpPaymentId=document.getElementById('edPaymentId').value.trim();
+  const errEl=document.getElementById('editarErr');
+  errEl.style.display='none';
+  if(!nome||!email){ errEl.textContent='Preencha nome e e-mail.'; errEl.style.display='block'; return; }
+  const btn=document.getElementById('btnConfirmarEditar');
+  btn.disabled=true; btn.textContent='Salvando...';
+  try{
+    await api('PATCH','/api/admin/eventos/'+PEDIDOS_EVENTO_ID+'/pedidos/'+EDITANDO_PEDIDO_ID,{nome,email,telefone,cpf,mpPaymentId});
+    toast('Dados atualizados com sucesso!','ok');
+    document.getElementById('editarModal').style.display='none';
+    renderPedidosEvento();
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+  finally{ btn.disabled=false; btn.textContent='Salvar alterações →'; }
 }
 async function abrirRecuperarPedido(){
   document.getElementById('recNome').value='';
