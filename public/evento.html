@@ -89,6 +89,60 @@ a{color:inherit;}
 <div class="topbar" style="justify-content:space-between"><a href="/" class="logo">🎟️ Lota Ticketeria</a><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:36px;height:36px;font-size:15px;cursor:pointer">🌙</button></div>
 <div class="wrap" id="app"><div class="spinner"></div></div>
 
+<!-- Botões flutuantes de suporte: FAQ, WhatsApp e formulário de contato -->
+<div style="position:fixed;bottom:20px;right:20px;z-index:150;display:flex;flex-direction:column;gap:10px;align-items:flex-end">
+  <a id="btnWhatsappFlutuante" href="#" target="_blank" style="display:none;width:52px;height:52px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;font-size:26px;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Fale conosco pelo WhatsApp">💬</a>
+  <button onclick="abrirContato()" style="width:52px;height:52px;border-radius:50%;background:var(--p2);border:none;color:#18160F;font-size:22px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Enviar uma mensagem">✉️</button>
+  <button onclick="abrirFaq()" style="width:52px;height:52px;border-radius:50%;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Dúvidas frequentes">❓</button>
+</div>
+
+<!-- MODAL FAQ / SAC -->
+<div id="faqModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <h2 style="font-size:18px;font-weight:800">Dúvidas Frequentes</h2>
+      <button onclick="document.getElementById('faqModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Quem tem direito a meia-entrada?</div>
+        <p style="font-size:13px;color:var(--text2);line-height:1.5">Pela lei federal (Lei nº 12.933/2013), têm direito estudantes, jovens de 15 a 29 anos inscritos no CadÚnico (baixa renda), pessoas com deficiência (e um acompanhante) e idosos com 60 anos ou mais. Algumas cidades e estados podem ter regras próprias adicionais — confira também as condições específicas descritas na página de cada evento.</p>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Qual documento apresentar na entrada?</div>
+        <p style="font-size:13px;color:var(--text2);line-height:1.5">Pra ingressos de meia-entrada: carteira de estudante (com foto, dentro da validade) para estudantes, documento oficial com foto pra idosos, ou o documento correspondente ao benefício (CadÚnico, laudo de PCD, etc). Pra qualquer ingresso, é sempre bom levar um documento de identificação com foto e o ingresso em mãos (impresso ou no celular).</p>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Para onde vai meu ingresso depois da compra?</div>
+        <p style="font-size:13px;color:var(--text2);line-height:1.5">Assim que o pagamento é confirmado, o ingresso (com QR Code) é enviado automaticamente pro seu e-mail, e também fica salvo na sua conta, na aba <strong>"Meus Ingressos"</strong> — é só fazer login com a conta usada na compra pra acessar a qualquer momento, mesmo que o e-mail não chegue por algum motivo.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FORMULÁRIO DE CONTATO -->
+<div id="contatoModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:440px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <h2 style="font-size:17px;font-weight:800">Fale com a gente</h2>
+      <button onclick="document.getElementById('contatoModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px">Manda sua dúvida — respondemos por e-mail o quanto antes.</p>
+    <div id="contatoSucesso" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:36px;margin-bottom:8px">✅</div>
+      <p style="font-size:14px;font-weight:700">Mensagem enviada!</p>
+      <p style="font-size:12px;color:var(--text3);margin-top:4px">Vamos te responder por e-mail em breve.</p>
+    </div>
+    <div id="contatoFormArea">
+      <div class="err" id="errContato"></div>
+      <div class="fg"><label>Nome</label><input class="fi" id="ctNome" placeholder="Seu nome"></div>
+      <div class="fg"><label>E-mail</label><input class="fi" type="email" id="ctEmail" placeholder="seu@email.com"></div>
+      <div class="fg"><label>Mensagem</label><textarea class="fta" id="ctMensagem" placeholder="Como podemos ajudar?" rows="4"></textarea></div>
+      <button class="btn" type="button" onclick="enviarContato()" id="btnEnviarContato">Enviar mensagem →</button>
+    </div>
+  </div>
+</div>
+
 <!-- Verificação extra de segurança (3D Secure) — o banco emissor às vezes pede essa confirmação
      antes de aprovar o pagamento. Isso aumenta bastante a chance de aprovação em compras online. -->
 <div id="modal3ds" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;align-items:center;justify-content:center;padding:16px">
@@ -202,6 +256,11 @@ async function init(){
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
     if(EVENTO.googleClientId) inicializarGoogleLogin();
+    if(EVENTO.suporteWhatsapp){
+      const btnWpp=document.getElementById('btnWhatsappFlutuante');
+      btnWpp.href='https://wa.me/'+EVENTO.suporteWhatsapp+'?text='+encodeURIComponent('Olá! Tenho uma dúvida sobre o evento '+EVENTO.nome);
+      btnWpp.style.display='flex';
+    }
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
   }
@@ -515,6 +574,32 @@ async function aoReceberCredencialGoogle(response){
     await autenticarEContinuar(d.token,d.user);
   }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
+function abrirFaq(){ document.getElementById('faqModal').style.display='flex'; }
+function abrirContato(){
+  document.getElementById('contatoModal').style.display='flex';
+  document.getElementById('contatoFormArea').style.display='block';
+  document.getElementById('contatoSucesso').style.display='none';
+  document.getElementById('ctNome').value='';
+  document.getElementById('ctEmail').value='';
+  document.getElementById('ctMensagem').value='';
+  document.getElementById('errContato').style.display='none';
+}
+async function enviarContato(){
+  const nome=document.getElementById('ctNome').value.trim();
+  const email=document.getElementById('ctEmail').value.trim();
+  const mensagem=document.getElementById('ctMensagem').value.trim();
+  const errEl=document.getElementById('errContato');
+  errEl.style.display='none';
+  if(!nome||!email||!mensagem){ errEl.textContent='Preencha todos os campos.'; errEl.style.display='block'; return; }
+  const btn=document.getElementById('btnEnviarContato');
+  btn.disabled=true; btn.textContent='Enviando...';
+  try{
+    await api('POST','/api/public/contato',{nome,email,mensagem,eventoSlug:slug});
+    document.getElementById('contatoFormArea').style.display='none';
+    document.getElementById('contatoSucesso').style.display='block';
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+  finally{ btn.disabled=false; btn.textContent='Enviar mensagem →'; }
+}
 function selecionarAbaGate(aba){
   document.getElementById('tabGateLogin').classList.toggle('active',aba==='login');
   document.getElementById('tabGateCadastro').classList.toggle('active',aba==='cadastro');
@@ -639,7 +724,7 @@ function montarCardPaymentBrick(){
         visual: { style: { theme: temaAtual } },
         // Sem isso configurado explicitamente, o Brick pode limitar o parcelamento a apenas 1x —
         // aqui garantimos que ele ofereça o máximo de parcelas que o banco do comprador permitir.
-        paymentMethods: { minInstallments: 1, maxInstallments: 12 }
+        paymentMethods: { minInstallments: 1, maxInstallments: 3 }
       },
       callbacks: {
         onReady: () => { CARD_BRICK_MONTANDO=false; },
