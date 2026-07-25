@@ -5,6 +5,7 @@
 
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const crypto  = require('crypto');
 const jwt     = require('jsonwebtoken');
 const fetch   = require('node-fetch');
 const fs      = require('fs');
@@ -17,6 +18,50 @@ const speakeasy = require('speakeasy');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'role_dev_secret_change_in_prod';
+const SUPORTE_WHATSAPP = process.env.SUPORTE_WHATSAPP || ''; // formato: 5511999998888 (só números, com DDI)
+const SUPORTE_EMAIL = process.env.SUPORTE_EMAIL || '';
+
+// ── Criptografia de dados sensíveis em repouso (CPF) ──
+// Usa AES-256-GCM (padrão da indústria). A chave deve ter 32 bytes em hexadecimal (64 caracteres) —
+// gere uma com: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+// Isso protege o CPF salvo nos arquivos de dados mesmo que alguém tenha acesso direto ao Volume —
+// o resto do sistema continua funcionando normalmente com o valor decifrado em memória.
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
+function criptografar(texto) {
+  if (!ENCRYPTION_KEY || !texto || String(texto).startsWith('enc:')) return texto;
+  try {
+    const iv = crypto.randomBytes(12);
+    const key = Buffer.from(ENCRYPTION_KEY, 'hex');
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(String(texto), 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag();
+    return `enc:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+  } catch (e) { console.error('Erro ao criptografar dado:', e.message); return texto; }
+}
+function descriptografar(valor) {
+  if (!valor || !String(valor).startsWith('enc:') || !ENCRYPTION_KEY) return valor;
+  try {
+    const [, ivHex, authTagHex, encrypted] = String(valor).split(':');
+    const key = Buffer.from(ENCRYPTION_KEY, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) { console.error('Erro ao descriptografar dado (chave pode ter mudado):', e.message); return valor; }
+}
+// Cifra/decifra só o CPF dos pedidos e usuários — no momento exato de salvar/carregar do disco.
+// O resto do código nunca precisa saber disso: em memória, o valor sempre está em texto puro.
+function cifrarCpfPedidos(pedidos) {
+  if (!ENCRYPTION_KEY) return pedidos;
+  return pedidos.map(p => (p.comprador?.cpf && !String(p.comprador.cpf).startsWith('enc:'))
+    ? { ...p, comprador: { ...p.comprador, cpf: criptografar(p.comprador.cpf) } } : p);
+}
+function decifrarCpfPedidos(pedidos) {
+  return pedidos.map(p => (p.comprador?.cpf && String(p.comprador.cpf).startsWith('enc:'))
+    ? { ...p, comprador: { ...p.comprador, cpf: descriptografar(p.comprador.cpf) } } : p);
+}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const ASAAS_WEBHOOK_TOKEN = process.env.ASAAS_WEBHOOK_TOKEN || '';
 
@@ -57,6 +102,24 @@ const POSSIBLE_PUBLIC = [ path.join(__dirname, '../public'), path.join(process.c
 const PUBLIC_DIR = POSSIBLE_PUBLIC.find(p => { try { return fs.existsSync(path.join(p,'index.html')); } catch(e) { return false; }}) || path.join(__dirname,'../public');
 
 app.use(express.json({ limit: '5mb' }));
+
+// Proteção contra "prototype pollution" — um tipo de ataque de injeção onde alguém manda um JSON
+// com chaves especiais (__proto__, constructor, prototype) tentando corromper o comportamento
+// interno do JavaScript em todo o servidor. Removemos essas chaves de qualquer requisição recebida,
+// em qualquer nível de profundidade do objeto.
+function removerChavesPerigosas(obj, profundidade = 0) {
+  if (profundidade > 10 || obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) { obj.forEach(item => removerChavesPerigosas(item, profundidade + 1)); return obj; }
+  for (const chave of ['__proto__', 'constructor', 'prototype']) {
+    if (Object.prototype.hasOwnProperty.call(obj, chave)) delete obj[chave];
+  }
+  for (const k in obj) { if (Object.prototype.hasOwnProperty.call(obj, k)) removerChavesPerigosas(obj[k], profundidade + 1); }
+  return obj;
+}
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') removerChavesPerigosas(req.body);
+  next();
+});
 app.use(express.static(PUBLIC_DIR));
 
 function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -107,7 +170,13 @@ function extrairYoutubeId(url) {
 // ── Database (usuários) ───────────────────────────────────
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 function loadDB() {
-  try { if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch(e) {}
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const dados = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      if (dados.users) dados.users = dados.users.map(u => (u.cpfCnpj && String(u.cpfCnpj).startsWith('enc:')) ? { ...u, cpfCnpj: descriptografar(u.cpfCnpj) } : u);
+      return dados;
+    }
+  } catch(e) {}
   return {
     users: [{
       id: 'admin-001', nome: 'Administrador', email: 'admin@role.com',
@@ -119,7 +188,12 @@ function loadDB() {
     ticketSlugs: {}, marketplaceFeePercent: 10, loginAttempts: {}
   };
 }
-function saveDB(d) { fs.writeFile(DB_FILE, JSON.stringify(d, null, 2), (err) => { if (err) console.error('Erro ao salvar db.json:', err.message); }); }
+function saveDB(d) {
+  const paraSalvar = ENCRYPTION_KEY && d.users
+    ? { ...d, users: d.users.map(u => (u.cpfCnpj && !String(u.cpfCnpj).startsWith('enc:')) ? { ...u, cpfCnpj: criptografar(u.cpfCnpj) } : u) }
+    : d;
+  fs.writeFile(DB_FILE, JSON.stringify(paraSalvar, null, 2), (err) => { if (err) console.error('Erro ao salvar db.json:', err.message); });
+}
 let db = loadDB();
 if (!db.loginAttempts) db.loginAttempts = {};
 if (!db.ticketSlugs) db.ticketSlugs = {};
@@ -134,12 +208,14 @@ function loadColecao(nome) {
 }
 function saveColecao(nome, arr) { fs.writeFile(path.join(DATA_DIR, nome + '.json'), JSON.stringify(arr), (err) => { if (err) console.error(`Erro ao salvar ${nome}.json:`, err.message); }); }
 let EVENTOS  = loadColecao('eventos');
-let PEDIDOS  = loadColecao('pedidos');
+let PEDIDOS  = decifrarCpfPedidos(loadColecao('pedidos'));
+let MENSAGENS = loadColecao('mensagens');
+function persistMensagens() { saveColecao('mensagens', MENSAGENS); }
 let POSTS    = loadColecao('posts');
 let FOLLOWS  = loadColecao('follows');
 let ADIANTAMENTOS = loadColecao('adiantamentos');
 function persistEventos() { saveColecao('eventos', EVENTOS); }
-function persistPedidos() { saveColecao('pedidos', PEDIDOS); }
+function persistPedidos() { saveColecao('pedidos', cifrarCpfPedidos(PEDIDOS)); }
 function persistPosts()   { saveColecao('posts', POSTS); }
 function persistFollows() { saveColecao('follows', FOLLOWS); }
 function persistAdiantamentos() { saveColecao('adiantamentos', ADIANTAMENTOS); }
@@ -361,6 +437,38 @@ app.post('/api/auth/2fa/desativar', auth, (req, res) => {
 });
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ user: safe(req.user) }));
+
+// ── FERRAMENTAS DE PRIVACIDADE (LGPD) ──
+// Exporta todos os dados pessoais que temos sobre o usuário logado — perfil e pedidos onde ele foi
+// o comprador. Atende ao direito de acesso/portabilidade previsto na LGPD.
+app.get('/api/auth/meus-dados', auth, (req, res) => {
+  const meusPedidos = PEDIDOS.filter(p => p.compradorUserId === req.user.id || (p.comprador?.email || '').toLowerCase() === req.user.email.toLowerCase());
+  res.setHeader('Content-Disposition', 'attachment; filename="meus-dados-lota-ticketeria.json"');
+  res.json({
+    exportadoEm: new Date().toISOString(),
+    perfil: safe(req.user),
+    pedidos: meusPedidos.map(p => ({ evento: EVENTOS.find(e => e.id === p.eventoId)?.nome || p.eventoId, status: p.status, total: p.total, data: p.createdAt, ingressos: (p.tickets || []).map(t => t.codigo) }))
+  });
+});
+
+// Exclui/anonimiza a conta do usuário — atende ao direito de eliminação previsto na LGPD. Não
+// apaga pedidos já pagos (obrigação legal de manter registro fiscal/financeiro por um tempo), mas
+// remove os dados pessoais identificáveis, mantendo só o necessário pra histórico financeiro.
+app.post('/api/auth/excluir-conta', auth, async (req, res) => {
+  const { senha } = req.body;
+  if (!senha || !bcrypt.compareSync(senha, req.user.senha)) return res.status(401).json({ error: 'Senha incorreta.' });
+  if (req.user.isAdmin) return res.status(400).json({ error: 'Não é possível excluir a conta de administrador por aqui.' });
+  const anonimo = `usuario-removido-${req.user.id.slice(0, 8)}@removido.local`;
+  req.user.nome = 'Usuário removido';
+  req.user.email = anonimo;
+  req.user.senha = bcrypt.hashSync(uuidv4(), 12);
+  req.user.ativo = false;
+  req.user.cpfCnpj = '';
+  req.user.bio = ''; req.user.avatarUrl = ''; req.user.bannerUrl = ''; req.user.redesSociais = {};
+  req.user.pagamentoInfo = { chavePix: '', tipoChavePix: '', nomeTitular: '', nomeBanco: '', numeroAgencia: '', tipoConta: '' };
+  saveDB(db);
+  res.json({ ok: true });
+});
 
 // ════════════════════════════════════════════════════════
 // RECUPERAÇÃO DE EMERGÊNCIA DO ADMIN — não depende de e-mail.
@@ -607,7 +715,7 @@ app.get('/api/meus-eventos', auth, organizadorOuColaborador, (req, res) => {
 });
 
 app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
-  const { nome, descricao, dataEvento, horaEvento, local, cidade, categoria, imagemCapa, videoUrl } = req.body;
+  const { nome, descricao, dataEvento, horaEvento, local, cidade, categoria, imagemCapa, videoUrl, capacidadeMaxima } = req.body;
   if (!nome || !dataEvento) return res.status(400).json({ error: 'Nome e data obrigatórios.' });
   const slugsExistentes = Object.keys(db.ticketSlugs);
   const slug = gerarSlugUnico(nome, slugsExistentes);
@@ -621,6 +729,8 @@ app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
     videoUrl: extrairYoutubeId(videoUrl || '') ? sanitize(videoUrl, 200) : '',
     status: 'rascunho',
     cores: { primaria: '#C47B14', fundo: '#18160F' },
+    // Limite total de ingressos do evento (soma de todos os lotes) — 0 ou vazio significa sem limite.
+    capacidadeMaxima: Math.max(0, parseInt(capacidadeMaxima) || 0),
     lotes: [], cupons: [], promoters: [],
     pixels: { metaPixelId: '', tiktokPixelId: '', gaMeasurementId: '', googleAdsConversionId: '', googleAdsConversionLabel: '' },
     politicaCancelamento: 'sem-cancelamento',
@@ -645,6 +755,14 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const campos = ['nome','descricao','dataEvento','horaEvento','local','cidade','categoria','politicaCancelamento'];
   campos.forEach(c => { if (req.body[c] !== undefined) ev[c] = typeof req.body[c] === 'string' ? sanitize(req.body[c], c === 'descricao' ? 2000 : 150) : req.body[c]; });
+  if (req.body.capacidadeMaxima !== undefined) {
+    const novoLimite = Math.max(0, parseInt(req.body.capacidadeMaxima) || 0);
+    const totalAtual = (ev.lotes || []).reduce((s, l) => s + l.qtdTotal, 0);
+    if (novoLimite > 0 && totalAtual > novoLimite) {
+      return res.status(400).json({ error: `Já existem ${totalAtual} ingressos configurados nos lotes — reduza os lotes antes de diminuir o limite pra ${novoLimite}.` });
+    }
+    ev.capacidadeMaxima = novoLimite;
+  }
   if (req.body.imagemCapa !== undefined) ev.imagemCapa = sanitizeImagem(req.body.imagemCapa);
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
@@ -734,12 +852,19 @@ app.patch('/api/eventos/:id/lotes', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   if (!Array.isArray(req.body.lotes)) return res.status(400).json({ error: 'Lotes inválidos.' });
-  ev.lotes = req.body.lotes.map(l => ({
+  const novosLotes = req.body.lotes.map(l => ({
     id: l.id || uuidv4(), nome: sanitize(l.nome || 'Lote', 60),
     preco: l.cortesia ? 0 : Math.max(0, parseFloat(l.preco) || 0),
     qtdTotal: Math.max(0, parseInt(l.qtdTotal) || 0), vendidos: parseInt(l.vendidos) || 0,
     ativo: l.ativo !== false, cortesia: !!l.cortesia, exclusivoPromoter: !!l.exclusivoPromoter
   }));
+  if (ev.capacidadeMaxima > 0) {
+    const totalNovo = novosLotes.reduce((s, l) => s + l.qtdTotal, 0);
+    if (totalNovo > ev.capacidadeMaxima) {
+      return res.status(400).json({ error: `A soma dos lotes (${totalNovo}) ultrapassa o limite máximo de ${ev.capacidadeMaxima} ingressos definido para este evento.` });
+    }
+  }
+  ev.lotes = novosLotes;
   ev.updatedAt = new Date().toISOString();
   persistEventos();
   res.json({ evento: ev });
@@ -1284,6 +1409,35 @@ app.delete('/api/posts/:id', auth, (req, res) => {
 // ════════════════════════════════════════════════════════
 // MARKETPLACE PÚBLICO
 // ════════════════════════════════════════════════════════
+// ── FORMULÁRIO DE CONTATO / SUPORTE ──
+app.post('/api/public/contato', rateLimit(60000, 5), async (req, res) => {
+  const nome = sanitize(req.body.nome || '', 100);
+  const email = sanitize(req.body.email || '', 150).toLowerCase();
+  const mensagem = sanitize(req.body.mensagem || '', 2000);
+  const eventoSlug = sanitize(req.body.eventoSlug || '', 100);
+  if (!nome || !email || !mensagem) return res.status(400).json({ error: 'Preencha nome, e-mail e mensagem.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-mail inválido.' });
+  const msg = { id: uuidv4(), nome, email, mensagem, eventoSlug, respondida: false, createdAt: new Date().toISOString() };
+  MENSAGENS.push(msg); persistMensagens();
+  if (SUPORTE_EMAIL) {
+    enviarEmailGenerico(SUPORTE_EMAIL, `Nova mensagem de contato — ${nome}`,
+      `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Nova mensagem pelo formulário de contato</h3><p><strong>Nome:</strong> ${esc(nome)}</p><p><strong>E-mail:</strong> ${esc(email)}</p>${eventoSlug ? `<p><strong>Evento:</strong> ${esc(eventoSlug)}</p>` : ''}<p><strong>Mensagem:</strong><br>${esc(mensagem).replace(/\n/g, '<br>')}</p></div>`
+    ).catch(e => console.error('Erro ao notificar suporte sobre nova mensagem:', e.message));
+  }
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/mensagens', auth, adminOnly, (req, res) => {
+  res.json({ mensagens: MENSAGENS.slice().reverse() });
+});
+app.patch('/api/admin/mensagens/:id', auth, adminOnly, (req, res) => {
+  const msg = MENSAGENS.find(m => m.id === req.params.id);
+  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+  if (req.body.respondida !== undefined) msg.respondida = !!req.body.respondida;
+  persistMensagens();
+  res.json({ ok: true });
+});
+
 app.get('/api/public/cidades', rateLimit(60000, 60), (req, res) => {
   const cidades = [...new Set(EVENTOS.filter(e => e.status === 'publicado' && e.cidade).map(e => e.cidade))].sort();
   res.json({ cidades });
@@ -1322,6 +1476,8 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   if (!ref) return res.status(404).json({ error: 'Evento não encontrado.' });
   const ev = EVENTOS.find(e => e.id === ref.eventoId);
   if (!ev || ev.status !== 'publicado') return res.status(404).json({ error: 'Evento não encontrado ou não publicado.' });
+  ev.visualizacoes = (ev.visualizacoes || 0) + 1;
+  persistEventos();
   const organizador = db.users.find(u => u.id === ev.organizadorId);
   const lotesPublicos = ev.lotes.filter(l => l.ativo && !l.exclusivoPromoter && l.vendidos < l.qtdTotal)
     .map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos }));
@@ -1333,6 +1489,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     feePercent: db.marketplaceFeePercent || 10,
     mpPublicKey: MP_PUBLIC_KEY,
     googleClientId: GOOGLE_CLIENT_ID || undefined,
+    suporteWhatsapp: SUPORTE_WHATSAPP || undefined,
     provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
@@ -1542,7 +1699,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
             ...(enderecoResolvido || {})
           }
         };
-        if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 12 };
+        if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 3 };
 
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
         if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
@@ -2464,6 +2621,8 @@ app.get('/health', (req, res) => {
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
     asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
+    criptografia_cpf: ENCRYPTION_KEY ? '✅ ativa' : '⚠️ não configurada (recomendado configurar ENCRYPTION_KEY)',
+    backup_automatico: fs.existsSync(BACKUP_DIR) ? `✅ ativo (${fs.readdirSync(BACKUP_DIR).length} backup(s) guardado(s))` : '⏳ ainda não rodou (primeiro backup ocorre 1 min após o servidor iniciar)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
     armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
     data_dir: DATA_DIR,
@@ -2476,6 +2635,38 @@ app.get('*', (req, res) => {
   if (fs.existsSync(idx)) return res.sendFile(idx);
   res.status(500).send('index.html não encontrado.');
 });
+
+// ── BACKUP AUTOMÁTICO ──
+// Guarda uma cópia de segurança dos dados (usuários, eventos, pedidos, mensagens) todos os dias,
+// numa subpasta separada dentro do mesmo Volume persistente. Mantém os últimos 7 dias, apagando
+// backups mais antigos automaticamente. Isso é uma proteção adicional contra erro humano (por
+// exemplo, apagar um evento sem querer) — não substitui um backup fora do Volume pra casos de
+// perda total da infraestrutura, mas já cobre a maioria dos cenários do dia a dia.
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const BACKUP_RETENCAO_DIAS = 7;
+function fazerBackup() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const pastaBackup = path.join(BACKUP_DIR, timestamp);
+    fs.mkdirSync(pastaBackup, { recursive: true });
+    ['db.json', 'eventos.json', 'pedidos.json', 'mensagens.json'].forEach(arquivo => {
+      const origem = path.join(DATA_DIR, arquivo);
+      if (fs.existsSync(origem)) fs.copyFileSync(origem, path.join(pastaBackup, arquivo));
+    });
+    console.log(`[Backup] Cópia de segurança criada em ${timestamp}`);
+    // Remove backups mais antigos que o período de retenção
+    const pastas = fs.readdirSync(BACKUP_DIR).filter(n => fs.statSync(path.join(BACKUP_DIR, n)).isDirectory());
+    const limiteMs = Date.now() - BACKUP_RETENCAO_DIAS * 24 * 60 * 60 * 1000;
+    pastas.forEach(nome => {
+      const caminho = path.join(BACKUP_DIR, nome);
+      const stat = fs.statSync(caminho);
+      if (stat.birthtimeMs < limiteMs) { fs.rmSync(caminho, { recursive: true, force: true }); console.log(`[Backup] Removido backup antigo: ${nome}`); }
+    });
+  } catch (e) { console.error('[Backup] Erro ao criar cópia de segurança:', e.message); }
+}
+setInterval(fazerBackup, 24 * 60 * 60 * 1000); // a cada 24 horas
+setTimeout(fazerBackup, 60000); // primeiro backup 1 minuto após o servidor subir
 
 // ── LIMPEZA DE RESERVAS EXPIRADAS ──
 // Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo de pagamento já passou (sem confirmação
