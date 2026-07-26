@@ -255,6 +255,7 @@ function eventoDoUsuario(eventoId, userId) {
 function eventoVisivelPara(eventoId, user) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev) return null;
+  if (user.isAdmin) return ev;
   if (ev.organizadorId === user.id) return ev;
   if (user.colaboradorDe && ev.organizadorId === user.colaboradorDe) return ev;
   return null;
@@ -1183,7 +1184,20 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   pedidos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDia[d]) porDia[d] = { qtd: 0, receita: 0 }; porDia[d].qtd += (p.tickets||[]).length; porDia[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
   const porPromoter = ev.promoters.map(pr => ({ nome: pr.nome, vendas: pr.vendas, receita: pr.receita }));
   const porCupom = ev.cupons.map(c => ({ codigo: c.codigo, usos: c.usosAtuais }));
-  res.json({ totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom });
+
+  // Vendas por período — usado no filtro "hoje / últimos 7 dias / últimos 30 dias" do painel.
+  const agora = Date.now();
+  const inicioHoje = new Date(); inicioHoje.setHours(0,0,0,0);
+  const limite7dias = agora - 7 * 24 * 60 * 60 * 1000;
+  const limite30dias = agora - 30 * 24 * 60 * 60 * 1000;
+  const janela = (limiteMs) => pedidos.reduce((acc, p) => {
+    const dataPedido = new Date(p.pagoEm || p.createdAt).getTime();
+    if (dataPedido >= limiteMs) { acc.ingressos += (p.tickets || []).length; acc.receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); }
+    return acc;
+  }, { ingressos: 0, receita: 0 });
+  const vendasPorPeriodo = { hoje: janela(inicioHoje.getTime()), ultimos7dias: janela(limite7dias), ultimos30dias: janela(limite30dias) };
+
+  res.json({ totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo });
 });
 
 app.get('/api/eventos/:id/participantes.csv', auth, (req, res) => {
