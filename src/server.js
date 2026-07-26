@@ -71,6 +71,20 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // HSTS — força HTTPS em todas as visitas futuras (o navegador lembra por 1 ano)
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // CSP — restringe de onde a página pode carregar scripts/imagens/etc, reduzindo bastante o risco
+  // de um script malicioso injetado conseguir rodar. Listamos explicitamente todos os serviços
+  // externos que a própria plataforma já usa (Mercado Pago, Google, QR Code, jsQR).
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://accounts.google.com https://cdnjs.cloudflare.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https: blob:",
+    "connect-src 'self' https://api.mercadopago.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com",
+    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com",
+    "font-src 'self' data:",
+  ].join('; '));
   next();
 });
 
@@ -210,6 +224,18 @@ function saveColecao(nome, arr) { fs.writeFile(path.join(DATA_DIR, nome + '.json
 let EVENTOS  = loadColecao('eventos');
 let PEDIDOS  = decifrarCpfPedidos(loadColecao('pedidos'));
 let MENSAGENS = loadColecao('mensagens');
+let AUDITORIA = loadColecao('auditoria');
+function persistAuditoria() { saveColecao('auditoria', AUDITORIA); }
+// Registra uma ação sensível feita por um admin — quem, o quê, quando. Útil pra investigar depois
+// se algo inesperado acontecer (reembolso indevido, edição de dados, etc). Nunca bloqueia a ação
+// em si — só guarda o registro em paralelo, silenciosamente.
+function registrarAuditoria(user, acao, detalhes) {
+  try {
+    AUDITORIA.push({ id: uuidv4(), userId: user.id, userNome: user.nome, userEmail: user.email, acao, detalhes: detalhes || {}, createdAt: new Date().toISOString() });
+    if (AUDITORIA.length > 5000) AUDITORIA = AUDITORIA.slice(-5000); // evita crescer sem limite
+    persistAuditoria();
+  } catch (e) { console.error('Erro ao registrar auditoria:', e.message); }
+}
 function persistMensagens() { saveColecao('mensagens', MENSAGENS); }
 let POSTS    = loadColecao('posts');
 let FOLLOWS  = loadColecao('follows');
@@ -402,7 +428,6 @@ app.post('/api/auth/2fa/verificar-login', rateLimit(60000, 10), (req, res) => {
 });
 
 app.post('/api/auth/2fa/setup', auth, (req, res) => {
-  if (!req.user.isAdmin) return res.status(403).json({ error: 'Disponível apenas para contas de administrador.' });
   const secret = speakeasy.generateSecret({ name: `Lota Ticketeria (${req.user.email})`, length: 20 });
   const user = db.users.find(u => u.id === req.user.id);
   user.twoFactorSecretPendente = secret.base32;
@@ -413,7 +438,6 @@ app.post('/api/auth/2fa/setup', auth, (req, res) => {
 });
 
 app.post('/api/auth/2fa/ativar', auth, (req, res) => {
-  if (!req.user.isAdmin) return res.status(403).json({ error: 'Disponível apenas para contas de administrador.' });
   const user = db.users.find(u => u.id === req.user.id);
   if (!user.twoFactorSecretPendente) return res.status(400).json({ error: 'Inicie a configuração antes de confirmar.' });
   const { codigo } = req.body;
@@ -1061,6 +1085,7 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
 
   marcarPedidoComoReembolsado(pedido, ev);
   persistPedidos(); persistEventos();
+  registrarAuditoria(req.user, 'reembolso_pedido', { pedidoId: pedido.id, eventoId: ev.id, eventoNome: ev.nome, valor: pedido.total, compradorEmail: pedido.comprador?.email });
   res.json({ ok: true, reembolsoReal: !semPagamentoReal });
 });
 
@@ -1439,6 +1464,10 @@ app.post('/api/public/contato', rateLimit(60000, 5), async (req, res) => {
     ).catch(e => console.error('Erro ao notificar suporte sobre nova mensagem:', e.message));
   }
   res.json({ ok: true });
+});
+
+app.get('/api/admin/auditoria', auth, adminOnly, (req, res) => {
+  res.json({ registros: AUDITORIA.slice(-500).reverse() });
 });
 
 app.get('/api/admin/mensagens', auth, adminOnly, (req, res) => {
@@ -2354,7 +2383,9 @@ app.get('/api/admin/marketplace-fee', auth, adminOnly, (req, res) => res.json({ 
 app.patch('/api/admin/marketplace-fee', auth, adminOnly, (req, res) => {
   const v = parseFloat(req.body.feePercent);
   if (isNaN(v) || v < 0 || v > 50) return res.status(400).json({ error: 'Valor inválido (0-50%).' });
+  const valorAnterior = db.marketplaceFeePercent;
   db.marketplaceFeePercent = v; saveDB(db);
+  registrarAuditoria(req.user, 'alterou_comissao', { de: valorAnterior, para: v });
   res.json({ ok: true, feePercent: v });
 });
 app.get('/api/admin/provedor-pagamento', auth, adminOnly, (req, res) => res.json({
@@ -2366,7 +2397,9 @@ app.patch('/api/admin/provedor-pagamento', auth, adminOnly, (req, res) => {
   if (!['mercadopago', 'asaas'].includes(provedor)) return res.status(400).json({ error: 'Provedor inválido.' });
   if (provedor === 'mercadopago' && !MP_PLATFORM_TOKEN) return res.status(400).json({ error: 'MP_ACCESS_TOKEN não está configurado no servidor.' });
   if (provedor === 'asaas' && !ASAAS_API_KEY) return res.status(400).json({ error: 'ASAAS_API_KEY não está configurado no servidor.' });
+  const anterior = db.provedorPagamento;
   db.provedorPagamento = provedor; saveDB(db);
+  registrarAuditoria(req.user, 'trocou_provedor_pagamento', { de: anterior, para: provedor });
   res.json({ ok: true, provedor });
 });
 
@@ -2378,6 +2411,7 @@ app.patch('/api/admin/usuarios/:id/ativo', auth, adminOnly, (req, res) => {
   if (user.isAdmin) return res.status(400).json({ error: 'Não é possível desativar uma conta de administrador.' });
   user.ativo = !!req.body.ativo;
   saveDB(db);
+  registrarAuditoria(req.user, user.ativo ? 'reativou_usuario' : 'desativou_usuario', { userId: user.id, userNome: user.nome, userEmail: user.email });
   res.json({ ok: true, usuario: safe(user) });
 });
 
@@ -2481,6 +2515,7 @@ app.patch('/api/admin/eventos/:id/pedidos/:pedidoId', auth, adminOnly, async (re
   });
   if (mpPaymentId !== undefined) pedido.mpPaymentId = mpPaymentId || pedido.mpPaymentId;
   persistPedidos();
+  registrarAuditoria(req.user, 'editou_dados_pedido', { pedidoId: pedido.id, eventoId: ev.id, emailAnterior: emailAntigo, emailNovo: emailLimpo });
   res.json({ ok: true });
 });
 
@@ -2532,6 +2567,7 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
   const baseUrl = `${proto}://${req.get('host')}`;
   try { await enviarEmailIngressos(pedido, ev, baseUrl); } catch (e) { console.error('Erro ao reenviar e-mail do pedido recuperado:', e.message); }
 
+  registrarAuditoria(req.user, 'recuperou_pedido_manualmente', { pedidoId: pedido.id, eventoId: ev.id, compradorEmail: pedido.comprador?.email, valor: pedido.total });
   res.json({ ok: true, pedidoId: pedido.id, ticketsGerados: pedido.tickets.length });
 });
 
@@ -2637,6 +2673,7 @@ app.get('/health', (req, res) => {
     asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
     criptografia_cpf: ENCRYPTION_KEY ? '✅ ativa' : '⚠️ não configurada (recomendado configurar ENCRYPTION_KEY)',
     backup_automatico: fs.existsSync(BACKUP_DIR) ? `✅ ativo (${fs.readdirSync(BACKUP_DIR).length} backup(s) guardado(s))` : '⏳ ainda não rodou (primeiro backup ocorre 1 min após o servidor iniciar)',
+    backup_por_email: (SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email) ? `✅ enviado pra ${SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email}` : '⚠️ sem destinatário configurado (configure SUPORTE_EMAIL)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
     armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
     data_dir: DATA_DIR,
@@ -2664,7 +2701,8 @@ function fazerBackup() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const pastaBackup = path.join(BACKUP_DIR, timestamp);
     fs.mkdirSync(pastaBackup, { recursive: true });
-    ['db.json', 'eventos.json', 'pedidos.json', 'mensagens.json'].forEach(arquivo => {
+    const arquivosBackup = ['db.json', 'eventos.json', 'pedidos.json', 'mensagens.json'];
+    arquivosBackup.forEach(arquivo => {
       const origem = path.join(DATA_DIR, arquivo);
       if (fs.existsSync(origem)) fs.copyFileSync(origem, path.join(pastaBackup, arquivo));
     });
@@ -2677,7 +2715,36 @@ function fazerBackup() {
       const stat = fs.statSync(caminho);
       if (stat.birthtimeMs < limiteMs) { fs.rmSync(caminho, { recursive: true, force: true }); console.log(`[Backup] Removido backup antigo: ${nome}`); }
     });
+    // Envia uma cópia por e-mail também — diferente do backup acima (que fica no mesmo Volume),
+    // isso garante uma cópia genuinamente FORA da infraestrutura do Railway. Se o Volume inteiro
+    // falhar ou for perdido, essa cópia continua existindo na caixa de entrada do e-mail configurado.
+    enviarBackupPorEmail(pastaBackup, arquivosBackup, timestamp).catch(e => console.error('[Backup] Erro ao enviar cópia por e-mail:', e.message));
   } catch (e) { console.error('[Backup] Erro ao criar cópia de segurança:', e.message); }
+}
+
+async function enviarBackupPorEmail(pastaBackup, arquivosBackup, timestamp) {
+  const destinatario = SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email;
+  if (!destinatario || !RESEND_API_KEY) { console.log('[Backup] Envio por e-mail pulado — configure SUPORTE_EMAIL pra ativar essa camada extra de segurança.'); return; }
+  const LIMITE_ANEXO_BYTES = 15 * 1024 * 1024; // ~15MB por arquivo — margem segura dentro do limite do Resend
+  const attachments = [];
+  let algumArquivoGrandeDemais = false;
+  for (const arquivo of arquivosBackup) {
+    const caminho = path.join(pastaBackup, arquivo);
+    if (!fs.existsSync(caminho)) continue;
+    const stat = fs.statSync(caminho);
+    if (stat.size > LIMITE_ANEXO_BYTES) { algumArquivoGrandeDemais = true; console.error(`[Backup] Arquivo ${arquivo} grande demais pra anexar por e-mail (${stat.size} bytes) — considere configurar um backup em nuvem dedicado.`); continue; }
+    attachments.push({ filename: arquivo, content: fs.readFileSync(caminho).toString('base64') });
+  }
+  if (!attachments.length) return;
+  const html = `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Backup automático — Lota Ticketeria</h3><p>Cópia de segurança gerada em ${timestamp}.</p>${algumArquivoGrandeDemais ? '<p style="color:#c00"><strong>Atenção:</strong> um ou mais arquivos ficaram grandes demais pra anexar por e-mail e não estão incluídos aqui. Considere configurar um backup em nuvem dedicado (ex: S3) além deste.</p>' : ''}<p style="font-size:12px;color:#666">Guarde este e-mail em um local seguro — ele contém dados sensíveis da plataforma.</p></div>`;
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({ from: RESEND_FROM, to: destinatario, subject: `Backup automático — ${timestamp}`, html, attachments })
+    });
+    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('[Backup] Resend recusou o e-mail de backup:', r.status, errBody); }
+    else console.log(`[Backup] Cópia enviada por e-mail com sucesso para ${destinatario}`);
+  } catch (e) { console.error('[Backup] Erro de rede ao enviar backup por e-mail:', e.message); }
 }
 setInterval(fazerBackup, 24 * 60 * 60 * 1000); // a cada 24 horas
 setTimeout(fazerBackup, 60000); // primeiro backup 1 minuto após o servidor subir
