@@ -629,7 +629,25 @@ function buscar(){ carregarEventos(document.getElementById('searchInput').value.
     try{ const d=await api('GET','/api/auth/me'); CU=d.user; initLoggedIn(); }
     catch(e){ AT=null; localStorage.removeItem('role_token'); }
   }
-  carregarCidades();
+  // Permite abrir a home já filtrada por cidade/categoria — usado pelas páginas de SEO
+  // (/eventos/cidade/:slug e /eventos/categoria/:slug), que injetam esse valor direto na página
+  // (sem precisar de redirecionamento) através de window.SEO_FILTRO_PRESET.
+  const preset=window.SEO_FILTRO_PRESET;
+  const params=new URLSearchParams(location.search);
+  const categoriaUrl=preset?.tipo==='categoria'?preset.valor:params.get('categoria');
+  const cidadeUrl=preset?.tipo==='cidade'?preset.valor:params.get('cidade');
+  if(categoriaUrl){
+    categoriaAtual=categoriaUrl;
+    document.querySelectorAll('.filter-chip').forEach(el=>el.classList.remove('active'));
+    const chipCorrespondente=[...document.querySelectorAll('.filter-chip')].find(el=>el.getAttribute('onclick')?.includes("'"+categoriaUrl+"'"));
+    if(chipCorrespondente) chipCorrespondente.classList.add('active');
+  }
+  await carregarCidades();
+  if(cidadeUrl){
+    cidadeAtual=cidadeUrl;
+    const sel=document.getElementById('cidadeSelect');
+    if(sel) sel.value=cidadeUrl;
+  }
   carregarEventos();
 })();
 </script>
