@@ -199,6 +199,7 @@ a{color:inherit;}
         <div class="fg"><label>Categoria</label><select class="fs" id="nvCategoria"><option>Festas e shows</option><option>Espetáculos</option><option>Stand-up</option><option>Universitário</option><option>Esportes</option></select></div>
       </div>
       <div class="fg"><label>Local</label><input class="fi" id="nvLocal" placeholder="Nome do local / endereço"></div>
+      <div class="fg"><label>Número máximo de ingressos (opcional)</label><input class="fi" type="number" min="0" id="nvCapacidade" placeholder="Deixe em branco pra não limitar"></div>
       <div class="fg"><label>Imagem de capa</label>
         <div style="display:flex;gap:10px;align-items:center">
           <div id="nvImgPreview" style="width:64px;height:64px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden">🎪</div>
@@ -482,7 +483,7 @@ async function criarEvento(){
   const nome=gv('nvNome'), data=gv('nvData');
   if(!nome||!data){ toast('Nome e data obrigatórios.','err'); return; }
   try{
-    const d=await api('POST','/api/eventos',{nome,descricao:gv('nvDesc'),dataEvento:data,horaEvento:gv('nvHora'),cidade:gv('nvCidade'),categoria:gv('nvCategoria'),local:gv('nvLocal'),imagemCapa:gv('nvImg')});
+    const d=await api('POST','/api/eventos',{nome,descricao:gv('nvDesc'),dataEvento:data,horaEvento:gv('nvHora'),cidade:gv('nvCidade'),categoria:gv('nvCategoria'),local:gv('nvLocal'),imagemCapa:gv('nvImg'),capacidadeMaxima:gv('nvCapacidade')});
     toast('Evento criado!','ok');
     abrirEvento(d.evento.id);
   }catch(e){ toast(e.message,'err'); }
@@ -560,12 +561,17 @@ async function togglePublicar(){
 
 function renderTabGeral(){
   document.getElementById('evTabGeral').innerHTML=`
+    <div class="card" style="display:flex;align-items:center;gap:12px">
+      <div style="font-size:28px">👁️</div>
+      <div><div style="font-size:22px;font-weight:800">${(EV_ATUAL.visualizacoes||0).toLocaleString('pt-BR')}</div><div style="font-size:12px;color:var(--text3)">visualizações da página deste evento</div></div>
+    </div>
     <div class="card">
       <div class="ct">Informações do Evento</div>
       <div class="fg"><label>Nome</label><input class="fi" id="edNome" value="${esc(EV_ATUAL.nome)}"></div>
       <div class="fg"><label>Descrição</label><textarea class="fta" id="edDesc">${esc(EV_ATUAL.descricao)}</textarea></div>
       <div class="fg2"><div class="fg"><label>Data</label><input class="fi" type="date" id="edData" value="${EV_ATUAL.dataEvento}"></div><div class="fg"><label>Hora</label><input class="fi" type="time" id="edHora" value="${EV_ATUAL.horaEvento||''}"></div></div>
       <div class="fg2"><div class="fg"><label>Cidade</label><input class="fi" id="edCidade" value="${esc(EV_ATUAL.cidade)}"></div><div class="fg"><label>Local</label><input class="fi" id="edLocal" value="${esc(EV_ATUAL.local)}"></div></div>
+      <div class="fg"><label>Número máximo de ingressos (opcional)</label><input class="fi" type="number" min="0" id="edCapacidade" value="${EV_ATUAL.capacidadeMaxima||''}" placeholder="Deixe em branco pra não limitar"></div>
       <div class="fg"><label>Imagem de capa</label>
         <div style="display:flex;gap:10px;align-items:center">
           <div id="edImgPreview" style="width:64px;height:64px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden">${EV_ATUAL.imagemCapa?'<img src="'+esc(EV_ATUAL.imagemCapa)+'" style="width:100%;height:100%;object-fit:cover">':'🎪'}</div>
@@ -589,7 +595,7 @@ function renderTabGeral(){
 async function salvarGeral(){
   if(bloqueiaSomenteLeitura())return;
   try{
-    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),videoUrl:gv('edVideo')});
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),videoUrl:gv('edVideo'),capacidadeMaxima:gv('edCapacidade')});
     EV_ATUAL=d.evento; toast('Salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
@@ -605,11 +611,14 @@ let _lotesTemp=[];
 function renderTabLotes(){
   _lotesTemp=JSON.parse(JSON.stringify(EV_ATUAL.lotes||[]));
   const el=document.getElementById('evTabLotes');
-  el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div><div id="lotesListEl"></div><div class="br"><button class="btn bo btn-sm" onclick="abrirNovoLote()">+ Adicionar Lote</button><button class="btn bp" onclick="salvarLotes()">💾 Salvar</button></div></div>';
+  const avisoCapacidade=EV_ATUAL.capacidadeMaxima>0?'<p style="font-size:12px;color:var(--text3);margin:-6px 0 12px">Limite deste evento: <strong id="capacidadeUsadaEl"></strong> de '+EV_ATUAL.capacidadeMaxima+' ingressos</p>':'';
+  el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div>'+avisoCapacidade+'<div id="lotesListEl"></div><div class="br"><button class="btn bo btn-sm" onclick="abrirNovoLote()">+ Adicionar Lote</button><button class="btn bp" onclick="salvarLotes()">💾 Salvar</button></div></div>';
   renderLotesLista();
 }
 function renderLotesLista(){
   const el=document.getElementById('lotesListEl');
+  const capEl=document.getElementById('capacidadeUsadaEl');
+  if(capEl) capEl.textContent=_lotesTemp.reduce((s,l)=>s+(parseInt(l.qtdTotal)||0),0);
   if(!_lotesTemp.length){ el.innerHTML='<div class="empty" style="padding:16px"><p>Nenhum lote ainda.</p></div>'; return; }
   el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row"><div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div><button class="btn bo btn-sm" onclick="abrirEditarLote('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_lotesTemp.splice('+i+',1);renderLotesLista()">✕</button></div>').join('');
 }
@@ -811,6 +820,13 @@ async function renderTabRelatorios(){
         <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
         <div class="met-c"><div class="met-l">Ticket Médio</div><div class="met-v">${r.totalIngressos>0?'R$'+(r.totalReceita/r.totalIngressos).toFixed(2):'—'}</div></div>
       </div>
+      <div class="card"><div class="ct">Vendas por Período</div>
+        <div class="met-g">
+          <div class="met-c"><div class="met-l">Hoje</div><div class="met-v">${r.vendasPorPeriodo.hoje.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.hoje.receita.toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Últimos 7 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos7dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.ultimos7dias.receita.toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Últimos 30 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos30dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.ultimos30dias.receita.toFixed(2)}</div></div>
+        </div>
+      </div>
       <div class="card"><div class="ct">Vendas por Dia</div><div id="graficoVendas"></div></div>
       <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+d.receita.toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
       <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
@@ -892,13 +908,39 @@ async function validarCheckin(){
   }
 }
 let _scanStream=null,_scanRAF=null;
-function garantirJsQR(cb){ if(window.jsQR){cb();return;} const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js'; s.onload=cb; document.head.appendChild(s); }
+function garantirJsQR(cb){
+  if(window.jsQR){cb();return;}
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js';
+  s.onload=cb;
+  s.onerror=()=>toast('Não foi possível carregar o leitor de QR Code. Confira sua conexão com a internet e tente de novo.','err');
+  document.head.appendChild(s);
+}
 function abrirScanner(){ garantirJsQR(()=>{ document.getElementById('scanModal').classList.add('show'); iniciarScanner(); }); }
 function fecharScanner(){ if(_scanRAF) cancelAnimationFrame(_scanRAF); if(_scanStream) _scanStream.getTracks().forEach(t=>t.stop()); document.getElementById('scanModal').classList.remove('show'); }
 async function iniciarScanner(){
+  const statusEl=document.getElementById('scanStatus');
+  statusEl.style.color='var(--text3)';
+  statusEl.textContent='Solicitando acesso à câmera...';
+  // Verificação de contexto seguro: câmera só funciona em HTTPS (ou localhost). Se o site estiver
+  // sendo acessado sem HTTPS por algum motivo, isso explica a câmera nunca abrir.
+  if(!window.isSecureContext){
+    statusEl.style.color='var(--red)';
+    statusEl.textContent='A câmera só funciona em conexão segura (HTTPS). Verifique o endereço do site.';
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    statusEl.style.color='var(--red)';
+    statusEl.textContent='Este navegador não suporta acesso à câmera. Tente outro navegador (Chrome ou Safari atualizados).';
+    return;
+  }
   try{
     _scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const video=document.getElementById('scanVideo'); video.srcObject=_scanStream; await video.play();
+    const video=document.getElementById('scanVideo');
+    video.srcObject=_scanStream; video.muted=true; video.setAttribute('muted','');
+    await video.play();
+    statusEl.style.color='var(--text3)';
+    statusEl.textContent='Aponte a câmera para o QR Code...';
     const canvas=document.getElementById('scanCanvas'); const ctx=canvas.getContext('2d');
     const tick=()=>{
       if(!document.getElementById('scanModal').classList.contains('show')) return;
@@ -912,7 +954,20 @@ async function iniciarScanner(){
       _scanRAF=requestAnimationFrame(tick);
     };
     _scanRAF=requestAnimationFrame(tick);
-  }catch(e){ document.getElementById('scanStatus').textContent='Erro: '+e.message; }
+  }catch(e){
+    statusEl.style.color='var(--red)';
+    // Mensagens específicas por tipo de erro — ajuda a identificar a causa real na hora, em vez de
+    // um erro genérico que não diz o que fazer.
+    if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){
+      statusEl.textContent='Permissão de câmera negada. Vá nas configurações do site no navegador e libere o acesso à câmera pra essa página, depois tente de novo.';
+    }else if(e.name==='NotFoundError'||e.name==='DevicesNotFoundError'){
+      statusEl.textContent='Nenhuma câmera foi encontrada neste dispositivo.';
+    }else if(e.name==='NotReadableError'||e.name==='TrackStartError'){
+      statusEl.textContent='A câmera está sendo usada por outro aplicativo. Feche outros apps que possam estar usando a câmera e tente de novo.';
+    }else{
+      statusEl.textContent='Erro ao abrir a câmera: '+e.message+' — você ainda pode digitar o código manualmente no campo acima.';
+    }
+  }
 }
 
 // ─── SALDO E ADIANTAMENTO ────────────────────────────────────
