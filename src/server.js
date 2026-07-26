@@ -20,6 +20,9 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'role_dev_secret_change_in_prod';
 const SUPORTE_WHATSAPP = process.env.SUPORTE_WHATSAPP || ''; // formato: 5511999998888 (só números, com DDI)
 const SUPORTE_EMAIL = process.env.SUPORTE_EMAIL || '';
+// Usado só em contextos sem uma requisição em andamento (como o job de limpeza abaixo), pra montar
+// o link do PDF do ingresso no e-mail. Se não configurado, tenta adivinhar a partir do Railway.
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
 
 // ── Criptografia de dados sensíveis em repouso (CPF) ──
 // Usa AES-256-GCM (padrão da indústria). A chave deve ter 32 bytes em hexadecimal (64 caracteres) —
@@ -1685,7 +1688,9 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       // Se o pagamento não for confirmado até esse horário, a reserva do ingresso/assento é liberada
       // automaticamente (ver job de limpeza mais abaixo) — evita que tentativas abandonadas travem
       // vagas pra sempre num evento concorrido.
-      expiraEm: new Date(Date.now() + 20 * 60000).toISOString()
+      // Prazo generoso (90 min) — dá margem confortável além do prazo de 60 min que o próprio
+      // Asaas usa pra sessão de checkout, e cobre bem o tempo que alguém pode levar pra pagar um PIX.
+      expiraEm: new Date(Date.now() + 90 * 60000).toISOString()
     };
 
     // ── ASAAS — checkout hospedado (redireciona o comprador pra fatura do Asaas) ──
@@ -2048,6 +2053,16 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   }
   const ev = EVENTOS.find(e => e.id === pedido.eventoId);
   if (ev) {
+    // Se a reserva já tinha sido liberada antes (ex: pedido foi marcado "expirado" cedo demais, mas
+    // o pagamento acabou confirmando depois), precisamos contar a vaga de novo — senão o lote fica
+    // com a contagem de vendidos desatualizada, mesmo com o ingresso gerado corretamente.
+    if (pedido.reservaLiberada) {
+      for (const it of (pedido.itens || [])) {
+        if (it.assento) { if (!ev.assentosOcupados) ev.assentosOcupados = []; if (!ev.assentosOcupados.includes(it.assento)) ev.assentosOcupados.push(it.assento); }
+        else { const lote = ev.lotes.find(l => l.id === it.loteId); if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd; }
+      }
+      pedido.reservaLiberada = false;
+    }
     const cupomObj = pedido.cupomUsado ? ev.cupons.find(c => c.codigo === pedido.cupomUsado) : null;
     const promoterObj = pedido.promoterRef ? ev.promoters.find(p => p.id === pedido.promoterRef) : null;
     gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
@@ -2184,7 +2199,7 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
   // Rede de segurança: se o webhook não chegou por algum motivo (comum em PIX, que pode demorar
   // pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
-  if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
+  if (['pendente','expirado'].includes(pedido.status) && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
     try {
       // Prioridade 1: procura o pagamento de verdade gerado por essa sessão de checkout (sinal mais
       // direto de que o dinheiro entrou). Só usamos o status do Checkout em si como reserva, pra
@@ -2204,7 +2219,7 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
         }
       }
     } catch(e) { console.error('Erro ao verificar pagamento (Asaas):', e.message); }
-  } else if (pedido.status === 'pendente' && pedido.mpPaymentId && pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN) {
+  } else if (['pendente','expirado'].includes(pedido.status) && pedido.mpPaymentId && pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN) {
     try {
       const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
       const payData = await payResp.json();
@@ -2750,22 +2765,43 @@ setInterval(fazerBackup, 24 * 60 * 60 * 1000); // a cada 24 horas
 setTimeout(fazerBackup, 60000); // primeiro backup 1 minuto após o servidor subir
 
 // ── LIMPEZA DE RESERVAS EXPIRADAS ──
-// Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo de pagamento já passou (sem confirmação
-// nem recusa via webhook) tem sua reserva de ingresso/assento liberada automaticamente. Isso é essencial
-// em eventos concorridos — sem isso, tentativas de pagamento abandonadas (ex: gerou PIX e desistiu)
-// prenderiam vagas pra sempre.
-setInterval(() => {
+// Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo já passou tem uma ÚLTIMA checagem
+// ao vivo com o provedor de pagamento antes de ser marcado como expirado — isso existe justamente
+// pra evitar o problema de marcar como "expirado" um pedido que na verdade FOI pago (por exemplo,
+// um PIX confirmado poucos minutos depois do prazo, ou um webhook que atrasou). Só libera a reserva
+// de vaga de verdade se a checagem confirmar que não foi pago.
+setInterval(async () => {
   const agora = Date.now();
-  let liberados = 0;
-  for (const pedido of PEDIDOS) {
-    if (pedido.status === 'pendente' && pedido.expiraEm && new Date(pedido.expiraEm).getTime() < agora) {
-      const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+  let liberados = 0, recuperados = 0;
+  const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.expiraEm && new Date(p.expiraEm).getTime() < agora);
+  for (const pedido of candidatos) {
+    const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+    let foiPago = false;
+    try {
+      if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY && pedido.mpPaymentId) {
+        const busca = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
+        const pagamentoReal = (busca.ok && busca.data.data && busca.data.data[0]) || null;
+        if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) foiPago = true;
+      } else if (pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN && pedido.mpPaymentId) {
+        const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+        const payData = await payResp.json().catch(() => ({}));
+        if (payResp.ok && payData.status === 'approved') foiPago = true;
+      }
+    } catch (e) { console.error('[Limpeza] Erro ao verificar pagamento antes de expirar:', e.message); }
+
+    if (foiPago) {
+      await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
+      recuperados++;
+    } else {
       pedido.status = 'expirado';
       if (ev) liberarReservaPedido(pedido, ev);
       liberados++;
     }
   }
-  if (liberados > 0) { persistPedidos(); console.log(`[Limpeza] ${liberados} reserva(s) expirada(s) liberada(s).`); }
+  if (liberados > 0 || recuperados > 0) {
+    persistPedidos();
+    console.log(`[Limpeza] ${liberados} reserva(s) expirada(s) liberada(s), ${recuperados} pedido(s) recuperado(s) numa última checagem antes de expirar.`);
+  }
 }, 5 * 60000);
 
 app.listen(PORT, () => {
