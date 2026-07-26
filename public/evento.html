@@ -911,8 +911,8 @@ async function renderStatusPedido(){
   const badge={success:['ok','✅ Pagamento aprovado!'],pending:['pending','⏳ Pagamento em processamento'],failure:['fail','❌ Pagamento não aprovado']};
   const [cls,label]=badge[statusParam]||['pending','⏳ Verificando...'];
   document.getElementById('app').innerHTML=`<div class="card" style="text-align:center"><div class="badge ${cls}">${label}</div><div id="pedidoContent"><div class="spinner"></div></div></div>`;
-  let tentativas=0;
-  const poll=async()=>{
+  window.tentativasPedido=0;
+  window.pollPedido=async()=>{
     try{
       const d=await api('GET','/api/public/pedido/'+pedidoParam);
       if(d.status==='pago' && d.tickets.length){
@@ -920,7 +920,7 @@ async function renderStatusPedido(){
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Seus ingressos, ${esc(d.comprador.nome)}:</p>
           ${d.tickets.map(t=>`<div class="ticket"><div class="ticket-qr" id="qr-${t.codigo}"></div><div><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}</div></div></div>`).join('')}
           <a href="/api/public/pedido/${pedidoParam}/pdf" target="_blank" class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:14px">📄 Abrir ingresso em PDF</a>
-          <p style="font-size:11px;color:var(--text3);margin-top:10px">Guarde estes códigos. Apresente-os na entrada.</p>`;
+          <p style="font-size:11px;color:var(--text3);margin-top:10px">Guarde estes códigos. Apresente-os na entrada. Também enviamos por e-mail, e ele fica disponível em "Meus Ingressos" a qualquer momento.</p>`;
         d.tickets.forEach(t=>gerarQR(t.codigo));
         // BUG corrigido: essa página (confirmação) nunca passava por injetarPixels() antes de tentar
         // disparar a conversão — o script do Meta/GA/TikTok nunca era carregado aqui, então o evento
@@ -933,12 +933,26 @@ async function renderStatusPedido(){
         return;
       }
       if(d.status==='recusado'){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Pagamento não aprovado. Tente novamente.</p>'; return; }
-      tentativas++;
-      if(tentativas<10) setTimeout(poll,3000);
-      else document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">Ainda processando. Atualize a página em instantes.</p>';
+      window.tentativasPedido++;
+      // Verifica por bem mais tempo (uns 10 minutos no total) — PIX pode demorar até a pessoa
+      // confirmar no banco. Sem isso, a página desistia cedo demais, mesmo o pagamento confirmando
+      // pouco depois — e a pessoa achava que o ingresso nunca chegaria.
+      if(window.tentativasPedido<20) setTimeout(window.pollPedido,3000); // primeiro minuto: a cada 3s
+      else if(window.tentativasPedido<80) setTimeout(window.pollPedido,10000); // depois: a cada 10s, por ~9 minutos
+      else{
+        document.getElementById('pedidoContent').innerHTML=`
+          <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Ainda estamos aguardando a confirmação do pagamento. Isso pode acontecer se o PIX ainda não foi pago, por exemplo.</p>
+          <button class="btn" onclick="reiniciarVerificacaoPedido()">🔄 Verificar novamente</button>
+          <p style="font-size:11px;color:var(--text3);margin-top:14px">Assim que o pagamento confirmar, o ingresso chega automaticamente no seu e-mail e fica disponível em "Meus Ingressos" (fazendo login com a conta usada na compra) — não precisa continuar nessa página.</p>`;
+      }
     }catch(e){ document.getElementById('pedidoContent').innerHTML='<p style="font-size:13px;color:var(--text2)">'+esc(e.message)+'</p>'; }
   };
-  poll();
+  window.pollPedido();
+}
+function reiniciarVerificacaoPedido(){
+  window.tentativasPedido=0;
+  document.getElementById('pedidoContent').innerHTML='<div class="spinner"></div>';
+  window.pollPedido();
 }
 function gerarQR(texto){
   const el=document.getElementById('qr-'+texto);
