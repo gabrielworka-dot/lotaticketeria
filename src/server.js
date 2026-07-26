@@ -2327,6 +2327,21 @@ app.get('/e/:slug', (req, res) => {
       const descricaoLimpa = sanitize(ev.descricao || `Ingressos para ${ev.nome}`, 200).replace(/\n/g, ' ');
       const dataFormatada = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR') : '';
       const tituloOg = `${ev.nome}${dataFormatada ? ' — ' + dataFormatada : ''}`;
+      // Dados estruturados (Schema.org Event) — ajuda o Google a entender que essa página é um
+      // evento de verdade (com data, local e preço), podendo exibir isso de forma destacada na
+      // busca, inclusive na aba "Eventos" do Google, não só como um link comum.
+      const menorPreco = ev.lotes && ev.lotes.length ? Math.min(...ev.lotes.filter(l => l.ativo).map(l => l.preco)) : 0;
+      const dataISO = ev.dataEvento ? `${ev.dataEvento}${ev.horaEvento ? 'T' + ev.horaEvento : 'T00:00'}:00-03:00` : undefined;
+      const organizadorEv = db.users.find(u => u.id === ev.organizadorId);
+      const schemaEvento = {
+        '@context': 'https://schema.org', '@type': 'Event',
+        name: ev.nome, description: descricaoLimpa, image: [imageUrl],
+        startDate: dataISO, eventStatus: 'https://schema.org/EventScheduled',
+        eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+        location: { '@type': 'Place', name: ev.local || ev.nome, address: { '@type': 'PostalAddress', addressLocality: ev.cidade || '', addressCountry: 'BR' } },
+        offers: { '@type': 'Offer', url: pageUrl, price: menorPreco, priceCurrency: 'BRL', availability: 'https://schema.org/InStock', validFrom: ev.createdAt },
+        organizer: organizadorEv ? { '@type': 'Organization', name: organizadorEv.nomePublico || organizadorEv.nome } : undefined
+      };
       const metaTags = `
     <meta property="og:type" content="website">
     <meta property="og:title" content="${esc(tituloOg)}">
@@ -2338,7 +2353,8 @@ app.get('/e/:slug', (req, res) => {
     <meta name="twitter:title" content="${esc(tituloOg)}">
     <meta name="twitter:description" content="${esc(descricaoLimpa)}">
     <meta name="twitter:image" content="${imageUrl}">
-    <title>${esc(ev.nome)} — Lota Ticketeria</title>`;
+    <title>${esc(ev.nome)} — Lota Ticketeria</title>
+    <script type="application/ld+json">${JSON.stringify(schemaEvento)}</script>`;
       // Substitui o <title> estático da página pelas tags dinâmicas (incluindo um novo <title>)
       html = html.replace(/<title>.*?<\/title>/i, metaTags);
     }
@@ -2389,6 +2405,43 @@ app.get('/o/:slug', (req, res) => {
   } catch (e) {
     res.sendFile(p);
   }
+});
+
+// ── Páginas de cidade e categoria (SEO) — servem a home com meta tags específicas e já filtrada ──
+function renderPaginaFiltrada(req, res, tipo, nomeReal, valorParaUrl) {
+  const p = path.join(PUBLIC_DIR, 'index.html');
+  if (!fs.existsSync(p)) return res.status(404).send('Não encontrado.');
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  const tituloOg = tipo === 'cidade' ? `Eventos em ${nomeReal}` : `Eventos de ${nomeReal}`;
+  const descricaoOg = tipo === 'cidade'
+    ? `Confira os próximos eventos, shows e ingressos em ${nomeReal}. Compre com segurança pela Lota Ticketeria.`
+    : `Encontre eventos de ${nomeReal.toLowerCase()} com ingressos disponíveis. Compre com segurança pela Lota Ticketeria.`;
+  let html = fs.readFileSync(p, 'utf8');
+  const metaTags = `
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="${esc(tituloOg)}">
+    <meta property="og:description" content="${esc(descricaoOg)}">
+    <meta property="og:url" content="${baseUrl}${req.originalUrl}">
+    <meta property="og:site_name" content="Lota Ticketeria">
+    <title>${esc(tituloOg)} — Lota Ticketeria</title>`;
+  html = html.replace(/<title>.*?<\/title>/i, metaTags);
+  // Em vez de redirecionar via JS (o que causaria um recarregamento visível), injetamos o valor
+  // direto numa variável global — o script da home já lê isso na inicialização, sem piscar a tela.
+  html = html.replace('<script>', `<script>window.SEO_FILTRO_PRESET={tipo:${JSON.stringify(tipo)},valor:${JSON.stringify(nomeReal)}};</script>\n<script>`);
+  res.send(html);
+}
+app.get('/eventos/cidade/:slug', (req, res) => {
+  const eventosPublicados = EVENTOS.filter(e => e.status === 'publicado');
+  const cidadeReal = eventosPublicados.map(e => e.cidade).find(c => c && slugify(c) === req.params.slug);
+  if (!cidadeReal) return res.redirect('/');
+  renderPaginaFiltrada(req, res, 'cidade', cidadeReal);
+});
+app.get('/eventos/categoria/:slug', (req, res) => {
+  const eventosPublicados = EVENTOS.filter(e => e.status === 'publicado');
+  const categoriaReal = eventosPublicados.map(e => e.categoria).find(c => c && slugify(c) === req.params.slug);
+  if (!categoriaReal) return res.redirect('/');
+  renderPaginaFiltrada(req, res, 'categoria', categoriaReal);
 });
 
 // ════════════════════════════════════════════════════════
@@ -2694,6 +2747,45 @@ app.get('/health', (req, res) => {
     data_dir: DATA_DIR,
     uptime: Math.round(process.uptime()) + 's'
   });
+});
+
+// ── SEO: sitemap.xml e robots.txt ──
+app.get('/robots.txt', (req, res) => {
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  res.type('text/plain').send(
+`User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /painel.html
+Disallow: /admin.html
+Disallow: /meus-ingressos.html
+
+Sitemap: ${baseUrl}/sitemap.xml`
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  const paginasFixas = ['', 'sobre-nos.html', 'termos.html', 'privacidade.html'];
+  const eventosPublicados = EVENTOS.filter(e => e.status === 'publicado');
+  const cidadesUnicas = [...new Set(eventosPublicados.map(e => e.cidade).filter(Boolean))];
+  const categoriasUnicas = [...new Set(eventosPublicados.map(e => e.categoria).filter(Boolean))];
+
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
+  paginasFixas.forEach(p => { xml += `  <url><loc>${baseUrl}/${p}</loc><changefreq>daily</changefreq><priority>${p === '' ? '1.0' : '0.5'}</priority></url>\n`; });
+  eventosPublicados.forEach(ev => {
+    xml += `  <url><loc>${baseUrl}/e/${ev.slug}</loc><lastmod>${(ev.updatedAt || ev.createdAt).slice(0, 10)}</lastmod><changefreq>daily</changefreq><priority>0.9</priority></url>\n`;
+  });
+  cidadesUnicas.forEach(cidade => {
+    xml += `  <url><loc>${baseUrl}/eventos/cidade/${encodeURIComponent(slugify(cidade))}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>\n`;
+  });
+  categoriasUnicas.forEach(categoria => {
+    xml += `  <url><loc>${baseUrl}/eventos/categoria/${encodeURIComponent(slugify(categoria))}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>\n`;
+  });
+  xml += '</urlset>';
+  res.type('application/xml').send(xml);
 });
 
 app.get('*', (req, res) => {
