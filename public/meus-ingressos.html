@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon-192.png">
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Meus Ingressos — Lota Ticketeria</title>
@@ -11,7 +14,7 @@
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;width:100%;}
 a{color:inherit;text-decoration:none;}
 .topbar{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
-.logo{font-size:18px;font-weight:900;color:var(--p2);}
+.logo{display:inline-flex;align-items:center;font-size:18px;font-weight:900;color:var(--p2);}
 .btn{padding:8px 16px;border-radius:20px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--border);background:transparent;color:var(--text2);}
 .wrap{max-width:640px;margin:0 auto;padding:24px 16px 60px;}
 h1{font-size:22px;font-weight:900;margin-bottom:20px;}
@@ -33,7 +36,7 @@ h1{font-size:22px;font-weight:900;margin-bottom:20px;}
 </style>
 </head>
 <body>
-<div class="topbar"><a href="/" class="logo">🎟️ Lota Ticketeria</a><a href="/"><button class="btn">← Voltar</button></a></div>
+<div class="topbar"><a href="/" class="logo"><img src="/logo-header.png" alt="Lota Ticketeria" style="height:26px;vertical-align:middle;margin-right:7px">Lota Ticketeria</a><a href="/"><button class="btn">← Voltar</button></a></div>
 <div class="wrap">
   <h1>Meus Ingressos</h1>
   <div id="content"><div class="spinner"></div></div>
