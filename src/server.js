@@ -81,11 +81,15 @@ app.use((req, res, next) => {
   // externos que a própria plataforma já usa (Mercado Pago, Google, QR Code, jsQR).
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://accounts.google.com https://cdnjs.cloudflare.com",
+    // Inclui os domínios de script dos pixels de rastreamento (Meta, Google Analytics/Ads, TikTok)
+    // e do jsQR — sem isso, o CSP bloqueia silenciosamente esses scripts de carregar, mesmo que o
+    // resto do código esteja certo (foi exatamente isso que quebrou os pixels antes).
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://accounts.google.com https://cdnjs.cloudflare.com https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com https://www.googleadservices.com https://googleads.g.doubleclick.net",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://api.mercadopago.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com",
-    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com",
+    "connect-src 'self' https://api.mercadopago.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://analytics.tiktok.com",
+    // Inclui o YouTube — sem isso, o vídeo do evento (usando <iframe>) fica bloqueado pelo navegador
+    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com https://www.youtube.com https://www.youtube-nocookie.com",
     "font-src 'self' data:",
   ].join('; '));
   next();
@@ -383,7 +387,7 @@ async function enviarEmailVerificacao(user, proto, host) {
   const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
   const link = `${proto}://${host}/verificar-email.html?token=${verifyToken}`;
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">🎟️ Lota Ticketeria</div>
+    <div style="margin-bottom:20px;"><img src="${proto}://${host}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
     <h2 style="font-size:18px;margin-bottom:12px;">Confirme seu e-mail</h2>
     <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Clique no botão abaixo para confirmar seu cadastro. O link expira em 3 dias.</p>
     <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Confirmar e-mail →</a>
@@ -667,7 +671,7 @@ async function notificarSeguidoresNovoEvento(ev, organizador, baseUrl) {
     const seguidor = db.users.find(u => u.id === f.userId);
     if (!seguidor?.email) continue;
     const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-      <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
       <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeExibicao)} acabou de publicar um novo evento</p>
       <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:10px;">${esc(ev.nome)}</h2>
       ${dataStr ? `<p style="font-size:13px;color:#A09880;margin-bottom:20px;">📅 ${dataStr}${ev.cidade ? ' · ' + esc(ev.cidade) : ''}</p>` : ''}
@@ -691,7 +695,7 @@ app.post('/api/auth/esqueci-senha', rateLimit(60000, 5), async (req, res) => {
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const link = `${proto}://${host}/redefinir-senha.html?token=${token}`;
     const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-      <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">🎟️ Lota Ticketeria</div>
+      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
       <h2 style="font-size:18px;margin-bottom:12px;">Redefinir sua senha</h2>
       <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Clique no botão abaixo para criar uma nova senha. Este link expira em 30 minutos.</p>
       <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Redefinir senha →</a>
@@ -1294,9 +1298,13 @@ async function gerarPdfBordero(ev, pedidos) {
   const BORDA = '#E4DDD1';
   const VERDE = '#16A34A';
 
-  doc.rect(0, 0, PAGE_W, 80).fill(LARANJA);
-  doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN, 24);
-  doc.fontSize(11).font('Helvetica').text('Borderô de Vendas', MARGIN, 50);
+  doc.rect(0, 0, PAGE_W, 80).fill(ESCURO);
+  try {
+    const logoPath = path.join(PUBLIC_DIR, 'logo.png');
+    if (fs.existsSync(logoPath)) doc.image(logoPath, MARGIN, 14, { height: 36 });
+  } catch (e) { console.error('Erro ao carregar logo no PDF:', e.message); }
+  doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN + 44, 24);
+  doc.fontSize(11).font('Helvetica').text('Borderô de Vendas', MARGIN + 44, 50);
 
   let y = 100;
   doc.fillColor(ESCURO).fontSize(17).font('Helvetica-Bold').text(ev.nome, MARGIN, y, { width: CONTENT_W });
@@ -1920,9 +1928,13 @@ async function gerarPdfIngressos(pedido, ev) {
     const t = tickets[i];
     if (i > 0) doc.addPage({ size: 'A4', margin: 0 });
 
-    // ── Faixa superior colorida ──
-    doc.rect(0, 0, PAGE_W, 80).fill(LARANJA);
-    doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN, 32);
+    // ── Faixa superior com a logo ──
+    doc.rect(0, 0, PAGE_W, 80).fill(ESCURO);
+    try {
+      const logoPath = path.join(PUBLIC_DIR, 'logo.png');
+      if (fs.existsSync(logoPath)) doc.image(logoPath, MARGIN, 20, { height: 40 });
+    } catch (e) { console.error('Erro ao carregar logo no PDF:', e.message); }
+    doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN + 48, 32);
 
     // ── Nome do evento e dados ──
     let y = 105;
@@ -2002,7 +2014,7 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
       <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · Assento '+esc(t.assento):''}</div></div>
     </div>`).join('');
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:4px;">Lota Ticketeria</div>
+    <div style="margin-bottom:4px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
     <p style="font-size:14px;color:#A09880;margin-bottom:24px;">Confirmação de compra</p>
     <h2 style="font-size:18px;margin-bottom:6px;">Seu ingresso para</h2>
     <p style="font-size:20px;font-weight:800;color:#fff;margin-bottom:20px;">${esc(nomeEvento)}</p>
@@ -2088,12 +2100,12 @@ async function concederCreditoIndicacao(compradorUserId, baseUrl) {
   saveDB(db);
   console.log(`Crédito de indicação concedido: ${comprador.email} e ${indicador.email} ganharam R$${CREDITO_INDICACAO_VALOR} cada.`);
   const htmlComprador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
     <p style="font-size:14px;">Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito por ter usado um código de indicação na sua primeira compra!</p>
     <p style="font-size:12px;color:#A09880;margin-top:10px;">Use esse crédito na sua próxima compra na Lota Ticketeria.</p>
     </div></div>`;
   const htmlIndicador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
     <p style="font-size:14px;">${esc(comprador.nome)}, que você indicou, fez a primeira compra! Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito.</p>
     <p style="font-size:12px;color:#A09880;margin-top:10px;">Continue indicando amigos pra ganhar mais créditos.</p>
     </div></div>`;
@@ -2286,7 +2298,7 @@ app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(600
       const linkPdf = `${baseUrl}/api/public/pedido/${pedido.id}/pdf`;
       // Avisa quem recebeu o ingresso
       const htmlNovo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-        <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+        <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
         <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeAntigo)} transferiu um ingresso pra você</p>
         <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:16px;">${esc(ev.nome)}</h2>
         <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:16px;background:#161410;">
@@ -2300,7 +2312,7 @@ app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(600
       // Avisa quem transferiu, confirmando
       if (emailAntigo) {
         const htmlAntigo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-          <div style="font-size:22px;font-weight:800;color:#C47B14;margin-bottom:20px;">Lota Ticketeria</div>
+          <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
           <p style="font-size:14px;color:#F0EDE8;">O ingresso <strong style="color:#E8961A">${ticket.codigo}</strong> pra <strong>${esc(ev.nome)}</strong> foi transferido pra ${esc(nomeLimpo)} (${esc(emailLimpo)}) com sucesso.</p>
           <p style="font-size:11px;color:#605848;margin-top:16px;">Se você não fez essa transferência, entre em contato com o suporte imediatamente.</p>
           </div></div>`;
