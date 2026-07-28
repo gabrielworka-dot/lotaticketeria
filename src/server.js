@@ -231,6 +231,8 @@ function saveColecao(nome, arr) { fs.writeFile(path.join(DATA_DIR, nome + '.json
 let EVENTOS  = loadColecao('eventos');
 let PEDIDOS  = decifrarCpfPedidos(loadColecao('pedidos'));
 let MENSAGENS = loadColecao('mensagens');
+let CONSUMOS_BAR = loadColecao('consumos_bar');
+function persistConsumosBar() { saveColecao('consumos_bar', CONSUMOS_BAR); }
 let AUDITORIA = loadColecao('auditoria');
 function persistAuditoria() { saveColecao('auditoria', AUDITORIA); }
 // Registra uma ação sensível feita por um admin — quem, o quê, quando. Útil pra investigar depois
@@ -727,7 +729,16 @@ app.get('/api/meus-ingressos', auth, (req, res) => {
   const meusPedidos = PEDIDOS.filter(p => p.status === 'pago' && (p.compradorUserId === req.user.id || (p.comprador?.email || '').toLowerCase() === req.user.email.toLowerCase()));
   const comEvento = meusPedidos.map(p => {
     const ev = EVENTOS.find(e => e.id === p.eventoId);
-    return { pedidoId: p.id, eventoNome: ev?.nome || 'Evento', eventoSlug: ev?.slug || '', dataEvento: ev?.dataEvento || null, imagemCapa: ev?.imagemCapa || '', total: p.total, tickets: p.tickets || [], createdAt: p.createdAt };
+    // Se o evento tem o sistema de bar ativo, mostra o saldo/conta em aberto de cada ingresso —
+    // assim o comprador acompanha isso sem precisar perguntar pro staff do bar.
+    const tickets = (p.tickets || []).map(t => {
+      if (ev?.barConfig?.ativo) {
+        const conta = calcularContaBar(ev.id, t.codigo);
+        return { ...t, barAtivo: true, saldoCashless: conta.saldoCashless, contaAbertaPosPago: conta.contaAbertaPosPago };
+      }
+      return t;
+    });
+    return { pedidoId: p.id, eventoId: p.eventoId, eventoNome: ev?.nome || 'Evento', eventoSlug: ev?.slug || '', dataEvento: ev?.dataEvento || null, imagemCapa: ev?.imagemCapa || '', total: p.total, tickets, createdAt: p.createdAt };
   }).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json({ pedidos: comEvento });
 });
@@ -1387,6 +1398,224 @@ async function gerarPdfBordero(ev, pedidos) {
 }
 
 // ── CHECK-IN ──
+// ════════════════════════════════════════════════════════
+// SISTEMA DE BAR (comanda cashless usando o QR Code do próprio ingresso)
+// ════════════════════════════════════════════════════════
+function calcularContaBar(eventoId, codigo) {
+  const registros = CONSUMOS_BAR.filter(c => c.eventoId === eventoId && c.ticketCodigo === codigo);
+  const saldoCashless = registros.reduce((s, c) => {
+    // Recargas feitas online (PIX) começam como "pendente" até o pagamento confirmar — só contam
+    // pro saldo depois de confirmadas. Recargas feitas na hora pelo staff (dinheiro/cartão físico)
+    // não têm esse campo, então já contam de cara.
+    if (c.tipo === 'recarga' && c.status !== 'pendente') return s + c.valor;
+    if (c.tipo === 'consumo' && c.modo === 'pre-pago') return s - c.valor;
+    if (c.tipo === 'estorno') return s + c.valor;
+    return s;
+  }, 0);
+  const contaAbertaPosPago = registros.filter(c => c.tipo === 'consumo' && c.modo === 'pos-pago' && c.status === 'em_aberto').reduce((s, c) => s + c.valor, 0);
+  return { saldoCashless: Math.round(saldoCashless * 100) / 100, contaAbertaPosPago: Math.round(contaAbertaPosPago * 100) / 100, historico: registros.slice().reverse() };
+}
+function encontrarTicketPorCodigo(eventoId, codigo) {
+  const pedidos = PEDIDOS.filter(p => p.eventoId === eventoId);
+  for (const p of pedidos) { const t = (p.tickets || []).find(tk => tk.codigo === sanitize(codigo, 40)); if (t) return { ticket: t, pedido: p }; }
+  return null;
+}
+
+app.get('/api/eventos/:id/bar-config', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.id, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  res.json({ barConfig: ev.barConfig || { ativo: false, modo: 'ambos', produtos: [] } });
+});
+app.patch('/api/eventos/:id/bar-config', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { ativo, modo, produtos } = req.body;
+  if (!ev.barConfig) ev.barConfig = { ativo: false, modo: 'ambos', produtos: [] };
+  if (ativo !== undefined) ev.barConfig.ativo = !!ativo;
+  if (modo !== undefined && ['pre-pago', 'pos-pago', 'ambos'].includes(modo)) ev.barConfig.modo = modo;
+  if (Array.isArray(produtos)) {
+    ev.barConfig.produtos = produtos.map(p => ({
+      id: p.id || uuidv4(), nome: sanitize(p.nome || 'Item', 60),
+      preco: Math.max(0, parseFloat(p.preco) || 0), categoria: sanitize(p.categoria || 'Bebidas', 40),
+      ativo: p.ativo !== false
+    }));
+  }
+  persistEventos();
+  res.json({ ok: true, barConfig: ev.barConfig });
+});
+
+// Consulta uma comanda pelo código do ingresso (QR Code) — quem opera precisa ser dono do evento
+// ou colaborador dele.
+app.get('/api/bar/:eventoId/ticket/:codigo', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.eventoId, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const encontrado = encontrarTicketPorCodigo(req.params.eventoId, req.params.codigo);
+  if (!encontrado) return res.status(404).json({ error: 'Ingresso não encontrado neste evento.' });
+  const { ticket, pedido } = encontrado;
+  if (ticket.cancelado) return res.status(400).json({ error: 'Este ingresso foi cancelado.' });
+  const conta = calcularContaBar(req.params.eventoId, ticket.codigo);
+  res.json({
+    titular: ticket.titularNome || pedido.comprador?.nome, codigo: ticket.codigo,
+    loteNome: ticket.loteNome, ...conta
+  });
+});
+
+app.post('/api/bar/:eventoId/ticket/:codigo/recarga', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.eventoId, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const encontrado = encontrarTicketPorCodigo(req.params.eventoId, req.params.codigo);
+  if (!encontrado) return res.status(404).json({ error: 'Ingresso não encontrado.' });
+  const valor = Math.round((parseFloat(req.body.valor) || 0) * 100) / 100;
+  if (valor <= 0) return res.status(400).json({ error: 'Informe um valor válido.' });
+  const formaPagamento = sanitize(req.body.formaPagamento || 'dinheiro', 20);
+  CONSUMOS_BAR.push({
+    id: uuidv4(), eventoId: req.params.eventoId, ticketCodigo: encontrado.ticket.codigo,
+    tipo: 'recarga', valor, formaPagamento, operadorNome: req.user.nome,
+    createdAt: new Date().toISOString()
+  });
+  persistConsumosBar();
+  res.json({ ok: true, ...calcularContaBar(req.params.eventoId, encontrado.ticket.codigo) });
+});
+
+app.post('/api/bar/:eventoId/ticket/:codigo/consumo', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.eventoId, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const encontrado = encontrarTicketPorCodigo(req.params.eventoId, req.params.codigo);
+  if (!encontrado) return res.status(404).json({ error: 'Ingresso não encontrado.' });
+  const { itens, modo } = req.body;
+  if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Selecione ao menos um item.' });
+  if (!['pre-pago', 'pos-pago'].includes(modo)) return res.status(400).json({ error: 'Modo inválido.' });
+  const barConfig = ev.barConfig || { produtos: [] };
+  const itensDetalhados = [];
+  let total = 0;
+  for (const it of itens) {
+    const produto = barConfig.produtos.find(p => p.id === it.produtoId);
+    if (!produto) return res.status(400).json({ error: 'Produto não encontrado no cardápio.' });
+    const qtd = Math.max(1, parseInt(it.qtd) || 1);
+    itensDetalhados.push({ produtoId: produto.id, nome: produto.nome, qtd, precoUnit: produto.preco });
+    total += produto.preco * qtd;
+  }
+  total = Math.round(total * 100) / 100;
+  if (modo === 'pre-pago') {
+    const { saldoCashless } = calcularContaBar(req.params.eventoId, encontrado.ticket.codigo);
+    if (total > saldoCashless) return res.status(400).json({ error: `Saldo insuficiente. Saldo atual: R$ ${saldoCashless.toFixed(2)}.` });
+  }
+  CONSUMOS_BAR.push({
+    id: uuidv4(), eventoId: req.params.eventoId, ticketCodigo: encontrado.ticket.codigo,
+    tipo: 'consumo', itens: itensDetalhados, valor: total, modo,
+    status: modo === 'pre-pago' ? 'pago' : 'em_aberto',
+    operadorNome: req.user.nome, createdAt: new Date().toISOString()
+  });
+  persistConsumosBar();
+  res.json({ ok: true, ...calcularContaBar(req.params.eventoId, encontrado.ticket.codigo) });
+});
+
+// Fecha a conta em aberto (pós-pago) — o pagamento em si (dinheiro/cartão/PIX na maquininha) é
+// feito fora do sistema, aqui só registramos que foi quitado, pra sair da lista de contas abertas.
+app.post('/api/bar/:eventoId/ticket/:codigo/fechar-conta', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.eventoId, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const registrosAbertos = CONSUMOS_BAR.filter(c => c.eventoId === req.params.eventoId && c.ticketCodigo === req.params.codigo && c.tipo === 'consumo' && c.modo === 'pos-pago' && c.status === 'em_aberto');
+  if (!registrosAbertos.length) return res.status(400).json({ error: 'Não há conta em aberto pra esse ingresso.' });
+  const formaPagamento = sanitize(req.body.formaPagamento || 'dinheiro', 20);
+  registrosAbertos.forEach(c => { c.status = 'pago'; c.formaPagamentoFechamento = formaPagamento; c.fechadoEm = new Date().toISOString(); });
+  persistConsumosBar();
+  res.json({ ok: true, ...calcularContaBar(req.params.eventoId, req.params.codigo) });
+});
+
+app.get('/api/eventos/:id/bar-relatorio', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.id, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const registros = CONSUMOS_BAR.filter(c => c.eventoId === req.params.id);
+  const consumos = registros.filter(c => c.tipo === 'consumo');
+  const recargas = registros.filter(c => c.tipo === 'recarga');
+  const totalVendidoBar = consumos.reduce((s, c) => s + c.valor, 0);
+  const totalRecarregado = recargas.reduce((s, c) => s + c.valor, 0);
+  const totalEmAberto = consumos.filter(c => c.status === 'em_aberto').reduce((s, c) => s + c.valor, 0);
+  const porProdutoMap = {};
+  consumos.forEach(c => (c.itens || []).forEach(it => {
+    if (!porProdutoMap[it.nome]) porProdutoMap[it.nome] = { qtd: 0, valor: 0 };
+    porProdutoMap[it.nome].qtd += it.qtd;
+    porProdutoMap[it.nome].valor += it.precoUnit * it.qtd;
+  }));
+  const porProduto = Object.entries(porProdutoMap).map(([nome, d]) => ({ nome, ...d })).sort((a, b) => b.valor - a.valor);
+  // Por operador — quem processou quanto, útil pra conferência de caixa ao final do turno
+  const porOperadorMap = {};
+  registros.forEach(c => {
+    const nome = c.operadorNome || 'Desconhecido';
+    if (!porOperadorMap[nome]) porOperadorMap[nome] = { consumos: 0, valorConsumos: 0, recargas: 0, valorRecargas: 0 };
+    if (c.tipo === 'consumo') { porOperadorMap[nome].consumos++; porOperadorMap[nome].valorConsumos += c.valor; }
+    if (c.tipo === 'recarga' && c.status !== 'pendente') { porOperadorMap[nome].recargas++; porOperadorMap[nome].valorRecargas += c.valor; }
+  });
+  const porOperador = Object.entries(porOperadorMap).map(([nome, d]) => ({
+    nome, consumos: d.consumos, valorConsumos: Math.round(d.valorConsumos * 100) / 100,
+    recargas: d.recargas, valorRecargas: Math.round(d.valorRecargas * 100) / 100,
+    totalMovimentado: Math.round((d.valorConsumos + d.valorRecargas) * 100) / 100
+  })).sort((a, b) => b.totalMovimentado - a.totalMovimentado);
+  res.json({ totalVendidoBar: Math.round(totalVendidoBar * 100) / 100, totalRecarregado: Math.round(totalRecarregado * 100) / 100, totalEmAberto: Math.round(totalEmAberto * 100) / 100, totalConsumos: consumos.length, porProduto, porOperador });
+});
+
+// ── Recarga online (PIX) — o próprio comprador carrega saldo antes do evento, direto de "Meus
+// Ingressos". Usa o mesmo provedor de pagamento configurado na plataforma (Mercado Pago ou Asaas).
+app.post('/api/public/bar/:eventoId/ticket/:codigo/recarga-pix', auth, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.eventoId);
+  if (!ev || !ev.barConfig?.ativo) return res.status(400).json({ error: 'Sistema de bar não está ativo pra esse evento.' });
+  const encontrado = encontrarTicketPorCodigo(req.params.eventoId, req.params.codigo);
+  if (!encontrado) return res.status(404).json({ error: 'Ingresso não encontrado.' });
+  const { ticket, pedido } = encontrado;
+  // Confirma que quem está pedindo a recarga é o próprio titular do ingresso
+  const emailTitular = (ticket.titularEmail || pedido.comprador?.email || '').toLowerCase();
+  if (emailTitular !== req.user.email.toLowerCase()) return res.status(403).json({ error: 'Esse ingresso não pertence à sua conta.' });
+
+  const valor = Math.round((parseFloat(req.body.valor) || 0) * 100) / 100;
+  if (valor < 5) return res.status(400).json({ error: 'Valor mínimo de recarga: R$ 5,00.' });
+
+  const recargaId = uuidv4();
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  const descricao = `Recarga de saldo — ${ev.nome}`.slice(0, 100);
+
+  try {
+    if (db.provedorPagamento === 'asaas') {
+      if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
+      const cpfLimpo = (req.user.cpfCnpj || '').replace(/[^\d]/g, '');
+      if (!cpfLimpo) return res.status(400).json({ error: 'Cadastre seu CPF no perfil antes de recarregar.' });
+      const checkoutBody = {
+        billingTypes: ['PIX'], chargeTypes: ['DETACHED'], minutesToExpire: 30,
+        externalReference: `recarga:${recargaId}`,
+        callback: { successUrl: `${baseUrl}/meus-ingressos.html?recarga=sucesso`, cancelUrl: `${baseUrl}/meus-ingressos.html`, expiredUrl: `${baseUrl}/meus-ingressos.html` },
+        items: [{ name: 'Recarga de saldo'.slice(0, 30), description: descricao, quantity: 1, value: valor }],
+        customerData: { name: req.user.nome, cpfCnpj: cpfLimpo, email: req.user.email }
+      };
+      const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
+      if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar recarga no Asaas.' });
+      CONSUMOS_BAR.push({ id: recargaId, eventoId: req.params.eventoId, ticketCodigo: ticket.codigo, tipo: 'recarga', valor, formaPagamento: 'pix', status: 'pendente', paymentId: String(criacao.data.id), provedorPagamento: 'asaas', createdAt: new Date().toISOString() });
+      persistConsumosBar();
+      return res.json({ ok: true, recargaId, invoiceUrl: criacao.data.link });
+    } else {
+      if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
+      const pixBody = {
+        transaction_amount: valor, description: descricao, payment_method_id: 'pix',
+        payer: { email: req.user.email, first_name: sanitize(req.user.nome, 50) },
+        external_reference: `recarga:${recargaId}`, notification_url: `${baseUrl}/api/mp/webhook?recarga=${recargaId}`
+      };
+      const pixResp = await fetch(`${MP_API}/v1/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'X-Idempotency-Key': uuidv4() }, body: JSON.stringify(pixBody) });
+      const pixData = await pixResp.json();
+      if (!pixResp.ok) return res.status(400).json({ error: pixData.message || 'Erro ao gerar PIX.' });
+      CONSUMOS_BAR.push({ id: recargaId, eventoId: req.params.eventoId, ticketCodigo: ticket.codigo, tipo: 'recarga', valor, formaPagamento: 'pix', status: 'pendente', paymentId: String(pixData.id), provedorPagamento: 'mercadopago', createdAt: new Date().toISOString() });
+      persistConsumosBar();
+      const td = pixData.point_of_interaction?.transaction_data || {};
+      return res.json({ ok: true, recargaId, qrCode: td.qr_code || '', qrCodeBase64: td.qr_code_base64 || '' });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/public/bar/recarga/:recargaId/status', auth, (req, res) => {
+  const recarga = CONSUMOS_BAR.find(c => c.id === req.params.recargaId && c.tipo === 'recarga');
+  if (!recarga) return res.status(404).json({ error: 'Recarga não encontrada.' });
+  res.json({ status: recarga.status === 'pendente' ? 'pendente' : 'confirmada', valor: recarga.valor });
+});
+
 app.post('/api/checkin/validar', auth, rateLimit(60000, 60), (req, res) => {
   const { eventoId, codigo } = req.body;
   const ev = eventoDoUsuario(eventoId, req.user.id);
@@ -2161,12 +2390,22 @@ app.post('/api/mp/webhook', async (req, res) => {
     const paymentId = req.body?.data?.id || req.query['data.id'] || (req.query.topic === 'payment' ? req.query.id : null);
     const isPaymentNotif = req.body?.type === 'payment' || req.query.type === 'payment' || req.query.topic === 'payment';
     if (!isPaymentNotif || !paymentId) return res.sendStatus(200);
-    const { ped: pedidoId } = req.query;
+    const { ped: pedidoId, recarga: recargaId } = req.query;
     if (!MP_PLATFORM_TOKEN) return res.sendStatus(200);
 
     const payResp = await fetch(`${MP_API}/v1/payments/${paymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
     const payment = await payResp.json();
     if (!payResp.ok) return res.sendStatus(200);
+
+    // Recarga de saldo do bar — fluxo separado dos pedidos de ingresso normais
+    if (recargaId) {
+      const recarga = CONSUMOS_BAR.find(c => c.id === recargaId && c.tipo === 'recarga');
+      if (recarga && recarga.status === 'pendente' && payment.status === 'approved') {
+        recarga.status = 'pago';
+        persistConsumosBar();
+      }
+      return res.sendStatus(200);
+    }
 
     // Se o pedidoId não veio na URL (por algum motivo), localizamos pelo external_reference do próprio pagamento
     const pedido = PEDIDOS.find(p => p.id === (pedidoId || payment.external_reference));
@@ -2210,6 +2449,16 @@ app.post('/api/asaas/webhook', async (req, res) => {
     // usado quando a cobrança nasce do Asaas Checkout (nosso caso, desde a migração pro checkout
     // hospedado com opção de parcelamento).
     if (checkout && checkout.externalReference) {
+      // Recarga de saldo do bar — identificada pelo prefixo "recarga:" no externalReference
+      if (checkout.externalReference.startsWith('recarga:')) {
+        const recargaId = checkout.externalReference.slice('recarga:'.length);
+        const recarga = CONSUMOS_BAR.find(c => c.id === recargaId && c.tipo === 'recarga');
+        if (recarga && recarga.status === 'pendente' && evento === 'CHECKOUT_PAID') {
+          recarga.status = 'pago';
+          persistConsumosBar();
+        }
+        return res.sendStatus(200);
+      }
       const pedido = PEDIDOS.find(p => p.id === checkout.externalReference);
       if (pedido) {
         if (evento === 'CHECKOUT_PAID' && pedido.status !== 'pago') {
@@ -2226,6 +2475,15 @@ app.post('/api/asaas/webhook', async (req, res) => {
     }
 
     if (!payment || !payment.externalReference) return res.sendStatus(200);
+    if (payment.externalReference.startsWith('recarga:')) {
+      const recargaId = payment.externalReference.slice('recarga:'.length);
+      const recarga = CONSUMOS_BAR.find(c => c.id === recargaId && c.tipo === 'recarga');
+      if (recarga && recarga.status === 'pendente' && ['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento)) {
+        recarga.status = 'pago';
+        persistConsumosBar();
+      }
+      return res.sendStatus(200);
+    }
     const pedido = PEDIDOS.find(p => p.id === payment.externalReference);
     if (!pedido) return res.sendStatus(200);
 
@@ -3049,6 +3307,30 @@ setInterval(async () => {
   if (recuperados > 0) { persistPedidos(); console.log(`[Verificação proativa] ${recuperados} pedido(s) confirmado(s) que ainda não tinham sido reconhecidos automaticamente.`); }
 }, 3 * 60000);
 
+// Mesma ideia acima, mas pras recargas de saldo do bar — evita que uma recarga fique "pendente"
+// pra sempre se o webhook falhar.
+setInterval(async () => {
+  const agora = Date.now();
+  let confirmadas = 0;
+  const candidatas = CONSUMOS_BAR.filter(c => c.tipo === 'recarga' && c.status === 'pendente' && c.paymentId && (agora - new Date(c.createdAt).getTime()) > 2 * 60000);
+  for (const recarga of candidatas) {
+    try {
+      let pago = false;
+      if (recarga.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
+        const busca = await asaasFetch(`/payments?checkoutSession=${recarga.paymentId}`);
+        const pagamentoReal = (busca.ok && busca.data.data && busca.data.data[0]) || null;
+        if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) pago = true;
+      } else if (MP_PLATFORM_TOKEN) {
+        const payResp = await fetch(`${MP_API}/v1/payments/${recarga.paymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+        const payData = await payResp.json().catch(() => ({}));
+        if (payResp.ok && payData.status === 'approved') pago = true;
+      }
+      if (pago) { recarga.status = 'pago'; confirmadas++; }
+    } catch (e) { console.error('Erro ao verificar recarga pendente:', e.message); }
+  }
+  if (confirmadas > 0) { persistConsumosBar(); console.log(`[Verificação proativa] ${confirmadas} recarga(s) de bar confirmada(s).`); }
+}, 3 * 60000);
+
 // ── LIMPEZA DE RESERVAS EXPIRADAS ──
 // Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo já passou tem uma ÚLTIMA checagem
 // ao vivo com o provedor de pagamento antes de ser marcado como expirado — isso existe justamente
@@ -3083,3 +3365,57 @@ app.listen(PORT, () => {
   console.log(`   Mercado Pago: ${MP_PLATFORM_TOKEN ? '✅' : '❌'}`);
   console.log(`   Resend: ${RESEND_API_KEY ? '✅' : '❌'}\n`);
 });
+
+// ── REEMBOLSO AUTOMÁTICO DE SALDO CASHLESS NÃO USADO ──
+// Roda a cada 6 horas: qualquer evento com sistema de bar ativo, que já terminou há pelo menos 24h
+// (margem de segurança pra garantir que todo mundo já fechou a conta), tem o saldo não usado de
+// cada ingresso devolvido automaticamente — como crédito na conta da plataforma, usável na próxima
+// compra. Isso evita ter que estornar pagamento por pagamento direto no Mercado Pago/Asaas (que seria
+// bem mais complexo, já que uma pessoa pode ter feito várias recargas diferentes ao longo do evento).
+setInterval(async () => {
+  const agora = Date.now();
+  const margemHoras = 24 * 60 * 60 * 1000;
+  let eventosProcessados = 0, pessoasReembolsadas = 0, valorTotalReembolsado = 0;
+
+  for (const ev of EVENTOS) {
+    if (!ev.barConfig?.ativo || ev.barSaldosReembolsados) continue;
+    if (!ev.dataEvento) continue;
+    const dataHoraEvento = new Date(`${ev.dataEvento}T${ev.horaEvento || '23:59'}:00`).getTime();
+    if (isNaN(dataHoraEvento) || (agora - dataHoraEvento) < margemHoras) continue;
+
+    const pedidosDoEvento = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+    const codigosProcessados = new Set();
+    for (const pedido of pedidosDoEvento) {
+      for (const ticket of (pedido.tickets || [])) {
+        if (ticket.cancelado || codigosProcessados.has(ticket.codigo)) continue;
+        codigosProcessados.add(ticket.codigo);
+        const { saldoCashless } = calcularContaBar(ev.id, ticket.codigo);
+        if (saldoCashless <= 0) continue;
+
+        const emailTitular = (ticket.titularEmail || pedido.comprador?.email || '').toLowerCase();
+        const conta = db.users.find(u => u.email.toLowerCase() === emailTitular);
+        if (conta) {
+          conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
+          enviarEmailGenerico(conta.email,
+            `Saldo do bar devolvido — ${ev.nome}`,
+            `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota Ticketeria — é só usar na sua próxima compra de ingresso.</p></div>`
+          ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
+        }
+        // Zera o saldo (registrando como estorno) — independente de existir conta vinculada, já que o
+        // valor não fica "esquecido" gerando saldo fantasma em consultas futuras dessa comanda.
+        CONSUMOS_BAR.push({
+          id: uuidv4(), eventoId: ev.id, ticketCodigo: ticket.codigo, tipo: 'consumo', modo: 'pre-pago',
+          status: 'pago', valor: saldoCashless, itens: [{ produtoId: 'reembolso-automatico', nome: 'Reembolso automático (saldo não usado)', qtd: 1, precoUnit: saldoCashless }],
+          operadorNome: 'Sistema (automático)', createdAt: new Date().toISOString()
+        });
+        pessoasReembolsadas++; valorTotalReembolsado += saldoCashless;
+      }
+    }
+    ev.barSaldosReembolsados = true;
+    eventosProcessados++;
+  }
+  if (eventosProcessados > 0) {
+    persistConsumosBar(); persistEventos(); saveDB(db);
+    console.log(`[Reembolso Bar] ${eventosProcessados} evento(s) processado(s), ${pessoasReembolsadas} pessoa(s) reembolsada(s), total R$ ${valorTotalReembolsado.toFixed(2)}.`);
+  }
+}, 6 * 60 * 60 * 1000);
