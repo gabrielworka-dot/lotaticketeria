@@ -2599,6 +2599,25 @@ app.patch('/api/admin/eventos/:id/pedidos/:pedidoId', auth, adminOnly, async (re
   res.json({ ok: true });
 });
 
+// Exclui um pedido definitivamente — útil pra corrigir um pedido criado a mais por engano (ex: na
+// recuperação manual) ou pra limpar a lista de pedidos recusados/expirados que não interessam mais.
+// Libera qualquer vaga/assento que ainda estivesse reservado em nome desse pedido antes de apagar.
+app.delete('/api/admin/eventos/:id/pedidos/:pedidoId', auth, adminOnly, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  if (pedido.status === 'pago' && !req.body.confirmarExclusaoPago) {
+    return res.status(400).json({ error: 'Esse pedido está pago — confirme novamente se realmente quer excluir (isso não estorna o pagamento, só remove o registro daqui).', precisaConfirmar: true });
+  }
+  if (pedido.status !== 'reembolsado') liberarReservaPedido(pedido, ev);
+  const idx = PEDIDOS.indexOf(pedido);
+  PEDIDOS.splice(idx, 1);
+  persistPedidos();
+  registrarAuditoria(req.user, 'excluiu_pedido', { pedidoId: pedido.id, eventoId: ev.id, statusAnterior: pedido.status, compradorEmail: pedido.comprador?.email });
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
