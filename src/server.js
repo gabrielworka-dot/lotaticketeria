@@ -2626,7 +2626,11 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
   const pedido = {
     id: uuidv4(), eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
     comprador: { nome: nomeLimpo, email: emailLimpo, telefone: sanitize(telefone || '', 30), cpf: cpfLimpo },
-    compradorUserId: null, provedorPagamento: provedorPagamento || 'mercadopago',
+    // Como o login já é obrigatório pra comprar, o cliente quase sempre já tem uma conta com esse
+    // e-mail — vinculamos automaticamente, senão o ingresso recuperado nunca aparece em "Meus
+    // Ingressos" (só chegaria por e-mail, que era exatamente o problema que estávamos corrigindo).
+    compradorUserId: (db.users.find(u => u.email.toLowerCase() === emailLimpo)?.id) || null,
+    provedorPagamento: provedorPagamento || 'mercadopago',
     itens: itensDetalhados, subtotal, desconto: 0, valorIngressos, taxaAdministrativa, creditoAplicado: 0, total,
     cupomUsado: null, promoterRef: null,
     mpPaymentId: mpPaymentId || 'RECUPERADO_MANUALMENTE', tickets: [], createdAt: new Date().toISOString(),
@@ -2868,6 +2872,44 @@ async function enviarBackupPorEmail(pastaBackup, arquivosBackup, timestamp) {
 setInterval(fazerBackup, 24 * 60 * 60 * 1000); // a cada 24 horas
 setTimeout(fazerBackup, 60000); // primeiro backup 1 minuto após o servidor subir
 
+// Verifica se um pedido pendente já foi realmente pago, consultando o provedor de pagamento direto
+// — usado tanto pela limpeza de reservas expiradas quanto pela verificação proativa abaixo.
+async function pedidoFoiPagoDeVerdade(pedido) {
+  try {
+    if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY && pedido.mpPaymentId) {
+      const busca = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
+      const pagamentoReal = (busca.ok && busca.data.data && busca.data.data[0]) || null;
+      return !!(pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status));
+    } else if (pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN && pedido.mpPaymentId) {
+      const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+      const payData = await payResp.json().catch(() => ({}));
+      return payResp.ok && payData.status === 'approved';
+    }
+  } catch (e) { console.error('Erro ao verificar pagamento:', e.message); }
+  return false;
+}
+
+// ── VERIFICAÇÃO PROATIVA DE PAGAMENTOS PENDENTES ──
+// Roda a cada 3 minutos: confere TODO pedido pendente (não só os que já expiraram) direto com o
+// provedor de pagamento. Isso existe como uma segunda camada de segurança independente do webhook —
+// se o webhook falhar ou atrasar por qualquer motivo, e o comprador fechar a página de confirmação
+// sem esperar, esse job garante que o pedido seja reconhecido como pago em poucos minutos mesmo assim,
+// sem depender de ninguém estar olhando a tela na hora.
+setInterval(async () => {
+  const agora = Date.now();
+  let recuperados = 0;
+  // Só confere pedidos com pelo menos 2 minutos de vida — dá tempo do webhook normal chegar primeiro,
+  // evitando checagens desnecessárias em pedidos criados há poucos segundos.
+  const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.mpPaymentId && (agora - new Date(p.createdAt).getTime()) > 2 * 60000);
+  for (const pedido of candidatos) {
+    if (await pedidoFoiPagoDeVerdade(pedido)) {
+      await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
+      recuperados++;
+    }
+  }
+  if (recuperados > 0) { persistPedidos(); console.log(`[Verificação proativa] ${recuperados} pedido(s) confirmado(s) que ainda não tinham sido reconhecidos automaticamente.`); }
+}, 3 * 60000);
+
 // ── LIMPEZA DE RESERVAS EXPIRADAS ──
 // Roda a cada 5 minutos: qualquer pedido "pendente" cujo prazo já passou tem uma ÚLTIMA checagem
 // ao vivo com o provedor de pagamento antes de ser marcado como expirado — isso existe justamente
@@ -2880,18 +2922,7 @@ setInterval(async () => {
   const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.expiraEm && new Date(p.expiraEm).getTime() < agora);
   for (const pedido of candidatos) {
     const ev = EVENTOS.find(e => e.id === pedido.eventoId);
-    let foiPago = false;
-    try {
-      if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY && pedido.mpPaymentId) {
-        const busca = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
-        const pagamentoReal = (busca.ok && busca.data.data && busca.data.data[0]) || null;
-        if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) foiPago = true;
-      } else if (pedido.provedorPagamento !== 'asaas' && MP_PLATFORM_TOKEN && pedido.mpPaymentId) {
-        const payResp = await fetch(`${MP_API}/v1/payments/${pedido.mpPaymentId}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
-        const payData = await payResp.json().catch(() => ({}));
-        if (payResp.ok && payData.status === 'approved') foiPago = true;
-      }
-    } catch (e) { console.error('[Limpeza] Erro ao verificar pagamento antes de expirar:', e.message); }
+    const foiPago = await pedidoFoiPagoDeVerdade(pedido);
 
     if (foiPago) {
       await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
