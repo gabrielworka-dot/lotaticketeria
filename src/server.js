@@ -122,7 +122,7 @@ console.log(`[Lota] Usando DATA_DIR = ${DATA_DIR}${DATA_DIR === '/data' ? ' (Vol
 const POSSIBLE_PUBLIC = [ path.join(__dirname, '../public'), path.join(process.cwd(), 'public'), '/app/public' ];
 const PUBLIC_DIR = POSSIBLE_PUBLIC.find(p => { try { return fs.existsSync(path.join(p,'index.html')); } catch(e) { return false; }}) || path.join(__dirname,'../public');
 
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // Proteção contra "prototype pollution" — um tipo de ataque de injeção onde alguém manda um JSON
 // com chaves especiais (__proto__, constructor, prototype) tentando corromper o comportamento
@@ -1481,6 +1481,46 @@ app.get('/api/admin/auditoria', auth, adminOnly, (req, res) => {
   res.json({ registros: AUDITORIA.slice(-500).reverse() });
 });
 
+// ── DICAS PRA PRODUTORES (vídeo/PDF) — o admin publica, todo produtor vê no próprio painel ──
+app.get('/api/produtor/dicas', auth, organizadorOnly, (req, res) => {
+  const dicas = db.dicasProdutores || {};
+  res.json({
+    titulo: dicas.titulo || '', descricao: dicas.descricao || '',
+    videoYoutubeId: extrairYoutubeId(dicas.videoUrl || ''),
+    temPdf: !!dicas.pdfBase64, pdfNome: dicas.pdfNome || '',
+    atualizadoEm: dicas.atualizadoEm || null
+  });
+});
+app.get('/api/produtor/dicas/pdf', auth, organizadorOnly, (req, res) => {
+  const dicas = db.dicasProdutores || {};
+  if (!dicas.pdfBase64) return res.status(404).send('Nenhum PDF disponível.');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${dicas.pdfNome || 'dicas.pdf'}"`);
+  res.send(Buffer.from(dicas.pdfBase64, 'base64'));
+});
+app.get('/api/admin/dicas', auth, adminOnly, (req, res) => {
+  const dicas = db.dicasProdutores || {};
+  res.json({ titulo: dicas.titulo || '', descricao: dicas.descricao || '', videoUrl: dicas.videoUrl || '', pdfNome: dicas.pdfNome || '', temPdf: !!dicas.pdfBase64, atualizadoEm: dicas.atualizadoEm || null });
+});
+app.patch('/api/admin/dicas', auth, adminOnly, (req, res) => {
+  const { titulo, descricao, videoUrl, pdfBase64, pdfNome, removerPdf } = req.body;
+  if (!db.dicasProdutores) db.dicasProdutores = {};
+  if (titulo !== undefined) db.dicasProdutores.titulo = sanitize(titulo, 150);
+  if (descricao !== undefined) db.dicasProdutores.descricao = sanitize(descricao, 2000);
+  if (videoUrl !== undefined) db.dicasProdutores.videoUrl = videoUrl && extrairYoutubeId(videoUrl) ? sanitize(videoUrl, 200) : '';
+  if (removerPdf) { db.dicasProdutores.pdfBase64 = ''; db.dicasProdutores.pdfNome = ''; }
+  else if (pdfBase64) {
+    // Limite generoso (~9MB em base64) — arquivo grande demais é rejeitado com mensagem clara
+    if (pdfBase64.length > 9_000_000) return res.status(400).json({ error: 'PDF grande demais (limite aproximado de 6-7MB). Tente compactar o arquivo.' });
+    db.dicasProdutores.pdfBase64 = pdfBase64;
+    db.dicasProdutores.pdfNome = sanitize(pdfNome || 'dicas.pdf', 100);
+  }
+  db.dicasProdutores.atualizadoEm = new Date().toISOString();
+  saveDB(db);
+  registrarAuditoria(req.user, 'atualizou_dicas_produtores', { titulo: db.dicasProdutores.titulo });
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/mensagens', auth, adminOnly, (req, res) => {
   res.json({ mensagens: MENSAGENS.slice().reverse() });
 });
@@ -2523,6 +2563,61 @@ app.get('/api/admin/overview', auth, adminOnly, (req, res) => {
   });
 });
 
+// ── Visão detalhada por produtor — cada produtor com seus eventos, vendas por período, ticket
+// médio e comissão. Usado na Visão Geral reorganizada, agrupando tudo por produtor em vez de uma
+// lista solta de eventos ou usuários.
+app.get('/api/admin/produtores-detalhado', auth, adminOnly, (req, res) => {
+  const agora = Date.now();
+  const limiteDiario = agora - 24 * 60 * 60 * 1000;
+  const limiteSemanal = agora - 7 * 24 * 60 * 60 * 1000;
+  const limiteSemestral = agora - 182 * 24 * 60 * 60 * 1000; // ~6 meses
+
+  const calcularJanela = (pedidosPagos, limiteMs) => {
+    const doPeriodo = pedidosPagos.filter(p => new Date(p.pagoEm || p.createdAt).getTime() >= limiteMs);
+    const ingressos = doPeriodo.reduce((s, p) => s + (p.tickets?.length || 0), 0);
+    const valorVendido = doPeriodo.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
+    const comissao = doPeriodo.reduce((s, p) => s + (p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)), 0);
+    return { ingressos, valorVendido: Math.round(valorVendido * 100) / 100, comissao: Math.round(comissao * 100) / 100 };
+  };
+
+  const produtores = db.users.filter(u => u.isOrganizador && !u.isAdmin);
+  const resultado = produtores.map(produtor => {
+    const eventosDoProdutor = EVENTOS.filter(e => e.organizadorId === produtor.id);
+    const eventosDetalhados = eventosDoProdutor.map(ev => {
+      const pedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+      const totalIngressos = pedidosPagos.reduce((s, p) => s + (p.tickets?.length || 0), 0);
+      const totalVendido = pedidosPagos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
+      const totalComissao = pedidosPagos.reduce((s, p) => s + (p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)), 0);
+      return {
+        eventoId: ev.id, eventoNome: ev.nome, status: ev.status,
+        diario: calcularJanela(pedidosPagos, limiteDiario),
+        semanal: calcularJanela(pedidosPagos, limiteSemanal),
+        semestral: calcularJanela(pedidosPagos, limiteSemestral),
+        totalIngressos, totalVendido: Math.round(totalVendido * 100) / 100,
+        totalComissao: Math.round(totalComissao * 100) / 100,
+        valorMedioIngresso: totalIngressos > 0 ? Math.round((totalVendido / totalIngressos) * 100) / 100 : 0
+      };
+    }).sort((a, b) => b.totalVendido - a.totalVendido);
+
+    const totalVendidoProdutor = eventosDetalhados.reduce((s, e) => s + e.totalVendido, 0);
+    const totalComissaoProdutor = eventosDetalhados.reduce((s, e) => s + e.totalComissao, 0);
+    const totalIngressosProdutor = eventosDetalhados.reduce((s, e) => s + e.totalIngressos, 0);
+    return {
+      produtorId: produtor.id, produtorNome: produtor.nomePublico || produtor.nome, produtorEmail: produtor.email,
+      eventos: eventosDetalhados,
+      totalVendidoProdutor: Math.round(totalVendidoProdutor * 100) / 100,
+      totalComissaoProdutor: Math.round(totalComissaoProdutor * 100) / 100,
+      totalIngressosProdutor,
+      valorMedioIngressoProdutor: totalIngressosProdutor > 0 ? Math.round((totalVendidoProdutor / totalIngressosProdutor) * 100) / 100 : 0
+    };
+  }).sort((a, b) => b.totalVendidoProdutor - a.totalVendidoProdutor); // do que mais vende pro que menos vende
+
+  const totalGeralVendido = Math.round(resultado.reduce((s, p) => s + p.totalVendidoProdutor, 0) * 100) / 100;
+  const totalGeralComissao = Math.round(resultado.reduce((s, p) => s + p.totalComissaoProdutor, 0) * 100) / 100;
+
+  res.json({ produtores: resultado, totalGeralVendido, totalGeralComissao });
+});
+
 // ── EVENTOS — lista e detalhe completo (visão de administrador) ──
 app.get('/api/admin/eventos', auth, adminOnly, (req, res) => {
   const lista = EVENTOS.map(ev => {
@@ -2725,7 +2820,7 @@ app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
     return { eventoId, eventoNome: ev?.nome || '—', organizadorNome: organizador?.nomePublico || organizador?.nome || '—', ...d };
   }).sort((a, b) => b.comissao - a.comissao);
 
-  // Por mês
+  // Por mês (últimos 12 meses, incluindo meses sem venda nenhuma — pro gráfico não ter buracos)
   const porMesMap = {};
   pedidosPagos.forEach(p => {
     const mes = (p.pagoEm || p.createdAt).slice(0, 7); // YYYY-MM
@@ -2734,9 +2829,34 @@ app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
     porMesMap[mes].comissao += ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)));
     porMesMap[mes].pedidos += 1;
   });
-  const porMes = Object.entries(porMesMap).map(([mes, d]) => ({ mes, ...d })).sort((a, b) => a.mes.localeCompare(b.mes));
+  const porMesTodos = Object.entries(porMesMap).map(([mes, d]) => ({ mes, ...d })).sort((a, b) => a.mes.localeCompare(b.mes));
+  const ultimos12Meses = [];
+  const dataRef = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(dataRef.getFullYear(), dataRef.getMonth() - i, 1);
+    const chave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const encontrado = porMesMap[chave];
+    ultimos12Meses.push({ mes: chave, receita: encontrado?.receita || 0, comissao: encontrado?.comissao || 0, pedidos: encontrado?.pedidos || 0 });
+  }
 
-  res.json({ totalReceita, totalComissao, totalPedidos: pedidosPagos.length, porEvento, porMes });
+  // Por dia (últimos 30 dias, incluindo dias sem venda)
+  const porDiaMap = {};
+  pedidosPagos.forEach(p => {
+    const dia = (p.pagoEm || p.createdAt).slice(0, 10); // YYYY-MM-DD
+    if (!porDiaMap[dia]) porDiaMap[dia] = { receita: 0, comissao: 0, pedidos: 0 };
+    porDiaMap[dia].receita += p.total;
+    porDiaMap[dia].comissao += ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0)));
+    porDiaMap[dia].pedidos += 1;
+  });
+  const ultimos30Dias = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(dataRef.getTime() - i * 24 * 60 * 60 * 1000);
+    const chave = d.toISOString().slice(0, 10);
+    const encontrado = porDiaMap[chave];
+    ultimos30Dias.push({ dia: chave, receita: encontrado?.receita || 0, comissao: encontrado?.comissao || 0, pedidos: encontrado?.pedidos || 0 });
+  }
+
+  res.json({ totalReceita, totalComissao, totalPedidos: pedidosPagos.length, porEvento, porMes: porMesTodos, ultimos12Meses, ultimos30Dias });
 });
 
 app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
