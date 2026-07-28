@@ -485,12 +485,18 @@ function baixarEmailsEvento(id,slug){ baixarCsv('/api/admin/eventos/'+id+'/parti
 
 let PEDIDOS_EVENTO_ID=null;
 let PEDIDOS_CACHE=[];
+let MOSTRAR_RECUSADOS_EXPIRADOS=false;
 async function abrirPedidosEvento(eventoId,nomeEvento){
   PEDIDOS_EVENTO_ID=eventoId;
+  MOSTRAR_RECUSADOS_EXPIRADOS=false;
   document.getElementById('pedidosModalTitulo').textContent='Pedidos — '+nomeEvento;
   document.getElementById('pedidosModal').style.display='flex';
   carregarVendasPeriodoAdmin();
   await renderPedidosEvento();
+}
+function alternarFiltroRecusados(){
+  MOSTRAR_RECUSADOS_EXPIRADOS=!MOSTRAR_RECUSADOS_EXPIRADOS;
+  renderPedidosEvento();
 }
 async function carregarVendasPeriodoAdmin(){
   const el=document.getElementById('vendasPeriodoAdminEl');
@@ -510,11 +516,14 @@ async function renderPedidosEvento(){
   el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
   try{
     const d=await api('GET','/api/admin/eventos/'+PEDIDOS_EVENTO_ID);
-    const pedidos=(d.pedidos||[]).slice().reverse();
-    PEDIDOS_CACHE=pedidos;
-    if(!pedidos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido ainda.</p></div>'; return; }
+    const todos=(d.pedidos||[]).slice().reverse();
+    PEDIDOS_CACHE=todos;
+    const escondidos=todos.filter(p=>['recusado','expirado'].includes(p.status)).length;
+    const pedidos=MOSTRAR_RECUSADOS_EXPIRADOS?todos:todos.filter(p=>!['recusado','expirado'].includes(p.status));
+    const filtroHtml='<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3);margin-bottom:10px;cursor:pointer"><input type="checkbox" '+(MOSTRAR_RECUSADOS_EXPIRADOS?'checked':'')+' onchange="alternarFiltroRecusados()">Mostrar recusados/expirados também ('+escondidos+' escondido(s))</label>';
+    if(!pedidos.length){ el.innerHTML=filtroHtml+'<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido pra mostrar com esse filtro.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado']};
-    el.innerHTML='<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
+    el.innerHTML=filtroHtml+'<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
         const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
@@ -523,10 +532,21 @@ async function renderPedidosEvento(){
         const btnSync=(p.status==='pago' && p.mpPaymentId && p.mpPaymentId!=='CORTESIA' && !String(p.mpPaymentId).startsWith('SIMULADO'))?'<button class="btn bo btn-sm" onclick="sincronizarPedidoAdmin(\''+p.id+'\')">🔄 Sincronizar</button>':'';
         const btnReenviarEmail=p.status==='pago'?'<button class="btn bp btn-sm" onclick="reenviarEmailPedido(\''+p.id+'\')">📧 Reenviar</button>':'';
         const btnEditar='<button class="btn bo btn-sm" onclick="abrirEditarPedido(\''+p.id+'\')">✏️ Editar</button>';
+        const btnExcluir='<button class="btn bdng btn-sm" onclick="excluirPedidoAdmin(\''+p.id+'\',\''+p.status+'\')">🗑️ Excluir</button>';
         const statusEmail=p.status!=='pago'?'—':(p.emailEnviado?'<span class="st-on">✅ Enviado</span>':'<span class="st-off">❌ Falhou</span>');
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+btnEditar+'</td></tr>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+btnEditar+btnExcluir+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function excluirPedidoAdmin(pedidoId,status){
+  const avisoExtra=status==='pago'?' Esse pedido está PAGO — excluir aqui NÃO estorna o pagamento, só remove o registro da lista.':'';
+  if(!confirm('Tem certeza que quer excluir esse pedido permanentemente?'+avisoExtra)) return;
+  try{
+    const body=status==='pago'?{confirmarExclusaoPago:true}:{};
+    await api('DELETE','/api/admin/eventos/'+PEDIDOS_EVENTO_ID+'/pedidos/'+pedidoId,body);
+    toast('Pedido excluído.','ok');
+    renderPedidosEvento();
+  }catch(e){ toast(e.message,'err'); }
 }
 async function reembolsarPedidoAdmin(pedidoId){
   if(!confirm('Reembolsar este pedido? Se for um pagamento real, o valor será devolvido ao comprador e os ingressos serão invalidados. Esta ação não pode ser desfeita.')) return;
