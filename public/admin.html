@@ -109,6 +109,7 @@ a{color:inherit;}
 .toast.ok{background:var(--green);color:#fff;}
 .toast.err{background:var(--red);color:#fff;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -125,6 +126,7 @@ a{color:inherit;}
     <div class="ni" onclick="gp('financeiro',this)">💰 Financeiro</div>
     <div class="ni" onclick="gp('config',this)">⚙️ Comissão</div>
     <div class="ni" onclick="gp('mensagens',this)">✉️ Mensagens</div>
+    <div class="ni" onclick="gp('dicas',this)">🎓 Dicas p/ Produtores</div>
     <div class="ni" onclick="gp('seguranca',this)">🔐 Segurança</div>
   </div>
   <div class="sb-bot">
@@ -199,6 +201,23 @@ a{color:inherit;}
   <!-- MENSAGENS DE CONTATO -->
   <div class="page" id="page-mensagens">
     <div id="mensagensContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
+  <!-- DICAS PARA PRODUTORES -->
+  <div class="page" id="page-dicas">
+    <div class="card" style="max-width:560px">
+      <div class="ct">Dicas para Produtores</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:16px">Esse conteúdo aparece direto no painel de todo produtor — use pra ensinar boas práticas, novidades da plataforma ou dicas de divulgação.</p>
+      <div class="fg"><label>Título</label><input class="fi" id="dicaTitulo" placeholder="Ex: Como vender mais ingressos"></div>
+      <div class="fg"><label>Descrição</label><textarea class="fta" id="dicaDescricao" rows="4" placeholder="Um texto explicando o conteúdo..."></textarea></div>
+      <div class="fg"><label>Link do vídeo (YouTube)</label><input class="fi" id="dicaVideoUrl" placeholder="https://www.youtube.com/watch?v=..."></div>
+      <div class="fg">
+        <label>Arquivo PDF (opcional)</label>
+        <input type="file" id="dicaPdfInput" accept="application/pdf" class="fi" style="padding:8px">
+        <div id="dicaPdfAtual" style="font-size:12px;color:var(--text3);margin-top:6px"></div>
+      </div>
+      <button class="btn bp" style="width:100%;margin-top:10px" onclick="salvarDicas()">💾 Salvar e publicar</button>
+    </div>
   </div>
 
   <!-- SEGURANÇA -->
@@ -338,7 +357,7 @@ function toggleSb(){document.getElementById('sbNav').classList.toggle('open');do
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
-const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',adiantamentos:'Adiantamentos',financeiro:'Financeiro',config:'Comissão da Plataforma',mensagens:'Mensagens de Contato',seguranca:'Segurança'};
+const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',adiantamentos:'Adiantamentos',financeiro:'Financeiro',config:'Comissão da Plataforma',mensagens:'Mensagens de Contato',dicas:'Dicas para Produtores',seguranca:'Segurança'};
 function gp(id,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
@@ -351,6 +370,7 @@ function gp(id,el){
   if(id==='adiantamentos') carregarAdiantamentos();
   if(id==='financeiro') carregarFinanceiro();
   if(id==='mensagens') carregarMensagens();
+  if(id==='dicas') carregarDicasAdmin();
   if(id==='config'){ carregarFee(); carregarProvedor(); }
   if(id==='seguranca'){ carregarConta(); carregarSeguranca(); carregarAuditoria(); }
   closeSb();
@@ -378,28 +398,88 @@ document.addEventListener('DOMContentLoaded', () => {
 async function carregarOverview(){
   const el=document.getElementById('overviewContent');
   try{
-    const d=await api('GET','/api/admin/overview');
+    const [d,dp]=await Promise.all([api('GET','/api/admin/overview'),api('GET','/api/admin/produtores-detalhado')]);
     el.innerHTML=`
       <div class="met-g">
         <div class="met-c"><div class="met-l">Usuários Totais</div><div class="met-v">${d.totalUsuarios}</div></div>
         <div class="met-c"><div class="met-l">Produtores</div><div class="met-v" style="color:var(--p2)">${d.totalProdutores}</div></div>
         <div class="met-c"><div class="met-l">Clientes</div><div class="met-v" style="color:var(--blue)">${d.totalClientes}</div></div>
-        <div class="met-c"><div class="met-l">Produtores c/ PIX Cadastrado</div><div class="met-v">${d.produtoresComPix}</div></div>
-      </div>
-      <div class="met-g">
-        <div class="met-c"><div class="met-l">Eventos Criados</div><div class="met-v">${d.totalEventos}</div></div>
-        <div class="met-c"><div class="met-l">Eventos Publicados</div><div class="met-v" style="color:var(--green)">${d.eventosPublicados}</div></div>
-        <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidosPagos}</div></div>
         <div class="met-c"><div class="met-l">Adiantamentos Pendentes</div><div class="met-v" style="color:${d.adiantamentosPendentes>0?'var(--red)':'var(--text)'}">${d.adiantamentosPendentes}</div></div>
       </div>
-      <div class="card">
-        <div class="ct">Financeiro da Plataforma</div>
+      <div class="card" style="background:linear-gradient(135deg,var(--card) 60%,rgba(232,150,26,.06))">
+        <div class="ct">Números Gerais da Plataforma (todos os produtores somados)</div>
         <div style="display:flex;gap:30px;flex-wrap:wrap">
-          <div><div style="font-size:11px;color:var(--text3)">Volume Transacionado (bruto)</div><div style="font-size:26px;font-weight:800;color:var(--green)">R$ ${d.receitaTotal.toFixed(2)}</div></div>
-          <div><div style="font-size:11px;color:var(--text3)">Comissão da Plataforma (sua receita)</div><div style="font-size:26px;font-weight:800;color:var(--p2)">R$ ${d.comissaoTotal.toFixed(2)}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Valor Total Vendido</div><div style="font-size:28px;font-weight:800;color:var(--green)">R$ ${dp.totalGeralVendido.toFixed(2)}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Comissão Total Recebida</div><div style="font-size:28px;font-weight:800;color:var(--p2)">R$ ${dp.totalGeralComissao.toFixed(2)}</div></div>
         </div>
+      </div>
+      <div class="card">
+        <div class="ct">Produtores — do que mais vende para o que menos vende</div>
+        <div id="listaProdutoresDetalhado"></div>
       </div>`;
+    renderListaProdutoresDetalhado(dp.produtores);
+    window.OVERVIEW_PRODUTORES_CACHE=dp.produtores;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderListaProdutoresDetalhado(produtores){
+  const el=document.getElementById('listaProdutoresDetalhado');
+  if(!produtores.length){ el.innerHTML='<div class="empty" style="padding:20px"><p>Nenhum produtor com vendas ainda.</p></div>'; return; }
+  el.innerHTML=produtores.map((p,i)=>`
+    <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--bg3)" onclick="alternarProdutorDetalhado(${i})">
+        <div>
+          <div style="font-weight:700;font-size:14px">#${i+1} ${esc(p.produtorNome)}</div>
+          <div style="font-size:11px;color:var(--text3)">${esc(p.produtorEmail)} · ${p.eventos.length} evento(s)</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:800;color:var(--green);font-size:16px">R$ ${p.totalVendidoProdutor.toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--p2)">comissão: R$ ${p.totalComissaoProdutor.toFixed(2)}</div>
+        </div>
+      </div>
+      <div id="produtorDetalhe-${i}" style="display:none;padding:14px 16px;border-top:1px solid var(--border)">
+        ${p.eventos.length?p.eventos.map((ev,j)=>renderEventoDetalhado(ev,i,j)).join(''):'<p style="font-size:12px;color:var(--text3)">Nenhum evento ainda.</p>'}
+      </div>
+    </div>`).join('');
+}
+function alternarProdutorDetalhado(i){
+  const el=document.getElementById('produtorDetalhe-'+i);
+  el.style.display=el.style.display==='none'?'block':'none';
+}
+function renderEventoDetalhado(ev,i,j){
+  const idBase='ev-'+i+'-'+j;
+  return `
+    <div style="background:var(--bg2);border-radius:9px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:13px">${esc(ev.eventoNome)}</div>
+        <div style="display:flex;gap:4px" id="${idBase}-tabs">
+          <button class="btn bo btn-sm" style="padding:3px 9px;font-size:11px" onclick="mostrarPeriodoEvento('${idBase}','diario',this)">Diário</button>
+          <button class="btn bo btn-sm" style="padding:3px 9px;font-size:11px" onclick="mostrarPeriodoEvento('${idBase}','semanal',this)">Semanal</button>
+          <button class="btn bo btn-sm" style="padding:3px 9px;font-size:11px" onclick="mostrarPeriodoEvento('${idBase}','semestral',this)">Semestral</button>
+          <button class="btn bp btn-sm" style="padding:3px 9px;font-size:11px" onclick="mostrarPeriodoEvento('${idBase}','total',this)">Total</button>
+        </div>
+      </div>
+      <div id="${idBase}-dados" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px">
+        ${renderDadosPeriodoEvento(ev,'total')}
+      </div>
+    </div>`;
+}
+function renderDadosPeriodoEvento(ev,periodo){
+  const dados=periodo==='total'?{ingressos:ev.totalIngressos,valorVendido:ev.totalVendido,comissao:ev.totalComissao}:ev[periodo];
+  const valorMedio=periodo==='total'?ev.valorMedioIngresso:(dados.ingressos>0?dados.valorVendido/dados.ingressos:0);
+  return `
+    <div><div style="color:var(--text3)">Ingressos</div><div style="font-weight:700">${dados.ingressos}</div></div>
+    <div><div style="color:var(--text3)">Ticket Médio</div><div style="font-weight:700">R$ ${valorMedio.toFixed(2)}</div></div>
+    <div><div style="color:var(--text3)">Valor Vendido</div><div style="font-weight:700;color:var(--green)">R$ ${dados.valorVendido.toFixed(2)}</div></div>
+    <div><div style="color:var(--text3)">Comissão</div><div style="font-weight:700;color:var(--p2)">R$ ${dados.comissao.toFixed(2)}</div></div>`;
+}
+function mostrarPeriodoEvento(idBase,periodo,btn){
+  const produtorIdx=idBase.split('-')[1], eventoIdx=idBase.split('-')[2];
+  // Busca os dados guardados na última carga — evita nova chamada de API só pra trocar o filtro
+  const ev=window.OVERVIEW_PRODUTORES_CACHE[produtorIdx].eventos[eventoIdx];
+  document.getElementById(idBase+'-dados').innerHTML=renderDadosPeriodoEvento(ev,periodo);
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.className='btn bo btn-sm');
+  btn.className='btn bp btn-sm';
+  btn.style.padding='3px 9px'; btn.style.fontSize='11px';
 }
 
 async function carregarUsuarios(){
@@ -647,6 +727,46 @@ async function confirmarRecuperarPedido(){
 }
 function baixarTodosEmails(){ baixarCsv('/api/admin/emails-todos.csv', 'emails-todos-eventos.csv'); }
 
+async function carregarDicasAdmin(){
+  try{
+    const d=await api('GET','/api/admin/dicas');
+    document.getElementById('dicaTitulo').value=d.titulo||'';
+    document.getElementById('dicaDescricao').value=d.descricao||'';
+    document.getElementById('dicaVideoUrl').value=d.videoUrl||'';
+    document.getElementById('dicaPdfAtual').innerHTML=d.temPdf?('📄 PDF atual: <strong>'+esc(d.pdfNome)+'</strong> <button class="btn bdng btn-sm" style="margin-left:8px" onclick="removerDicaPdf()">Remover</button>'):'Nenhum PDF enviado ainda.';
+  }catch(e){ toast(e.message,'err'); }
+}
+function lerArquivoComoBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result.split(',')[1]);
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function salvarDicas(){
+  const titulo=document.getElementById('dicaTitulo').value.trim();
+  const descricao=document.getElementById('dicaDescricao').value.trim();
+  const videoUrl=document.getElementById('dicaVideoUrl').value.trim();
+  const arquivo=document.getElementById('dicaPdfInput').files[0];
+  const body={titulo,descricao,videoUrl};
+  if(arquivo){
+    if(arquivo.size>7*1024*1024){ toast('PDF grande demais — tente um arquivo de até 7MB.','err'); return; }
+    try{ body.pdfBase64=await lerArquivoComoBase64(arquivo); body.pdfNome=arquivo.name; }
+    catch(e){ toast('Erro ao ler o arquivo PDF.','err'); return; }
+  }
+  try{
+    await api('PATCH','/api/admin/dicas',body);
+    toast('Dicas atualizadas! Já aparecem pros produtores.','ok');
+    document.getElementById('dicaPdfInput').value='';
+    carregarDicasAdmin();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function removerDicaPdf(){
+  if(!confirm('Remover o PDF atual?')) return;
+  try{ await api('PATCH','/api/admin/dicas',{removerPdf:true}); toast('PDF removido.','ok'); carregarDicasAdmin(); }
+  catch(e){ toast(e.message,'err'); }
+}
 async function carregarMensagens(){
   const el=document.getElementById('mensagensContent');
   el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
@@ -671,6 +791,44 @@ async function marcarMensagem(id,respondida){
   try{ await api('PATCH','/api/admin/mensagens/'+id,{respondida}); carregarMensagens(); }
   catch(e){ toast(e.message,'err'); }
 }
+let CHART_MENSAL=null, CHART_DIARIO=null;
+function renderGraficosFinanceiro(dozeMeses,trintaDias){
+  if(CHART_MENSAL) CHART_MENSAL.destroy();
+  if(CHART_DIARIO) CHART_DIARIO.destroy();
+  const opcoesComuns={
+    responsive:true,maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    scales:{
+      x:{ticks:{color:'#A09880',maxRotation:0},grid:{color:'#2A2822'}},
+      y:{ticks:{color:'#A09880',callback:v=>'R$'+v},grid:{color:'#2A2822'}}
+    },
+    plugins:{legend:{labels:{color:'#F0EDE8'}}}
+  };
+  const mesesFormatados=dozeMeses.map(m=>{
+    const [ano,mes]=m.mes.split('-');
+    return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][parseInt(mes)-1]+'/'+ano.slice(2);
+  });
+  CHART_MENSAL=new Chart(document.getElementById('graficoMensal'),{
+    type:'bar',
+    data:{labels:mesesFormatados,datasets:[
+      {label:'Volume Vendido',data:dozeMeses.map(m=>m.receita),backgroundColor:'#E8961A99'},
+      {label:'Comissão',data:dozeMeses.map(m=>m.comissao),backgroundColor:'#4ADE8099'}
+    ]},
+    options:opcoesComuns
+  });
+  const diasFormatados=trintaDias.map(d=>{
+    const [,mes,dia]=d.dia.split('-');
+    return dia+'/'+mes;
+  });
+  CHART_DIARIO=new Chart(document.getElementById('graficoDiario'),{
+    type:'line',
+    data:{labels:diasFormatados,datasets:[
+      {label:'Volume Vendido',data:trintaDias.map(d=>d.receita),borderColor:'#E8961A',backgroundColor:'#E8961A33',fill:true,tension:0.3},
+      {label:'Comissão',data:trintaDias.map(d=>d.comissao),borderColor:'#4ADE80',backgroundColor:'#4ADE8033',fill:true,tension:0.3}
+    ]},
+    options:opcoesComuns
+  });
+}
 async function carregarFinanceiro(){
   const el=document.getElementById('financeiroContent');
   try{
@@ -680,6 +838,14 @@ async function carregarFinanceiro(){
         <div class="met-c"><div class="met-l">Volume Total Transacionado</div><div class="met-v" style="color:var(--green)">R$ ${d.totalReceita.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Comissão Recebida (sua receita)</div><div class="met-v" style="color:var(--p2)">R$ ${d.totalComissao.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidos}</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">Evolução — Últimos 12 Meses</div>
+        <div style="position:relative;height:260px"><canvas id="graficoMensal"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ct">Evolução — Últimos 30 Dias</div>
+        <div style="position:relative;height:260px"><canvas id="graficoDiario"></canvas></div>
       </div>
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -696,6 +862,7 @@ async function carregarFinanceiro(){
           +d.porMes.map(m=>'<tr><td>'+m.mes+'</td><td>'+m.pedidos+'</td><td>R$'+m.receita.toFixed(2)+'</td><td style="color:var(--p2);font-weight:700">R$'+m.comissao.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'
           :'<div class="empty" style="padding:20px"><p>Sem dados ainda.</p></div>'}</div>
       </div>`;
+    renderGraficosFinanceiro(d.ultimos12Meses,d.ultimos30Dias);
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 
