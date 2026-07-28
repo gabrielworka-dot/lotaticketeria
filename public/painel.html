@@ -163,6 +163,7 @@ a{color:inherit;}
     <div class="sb-sec">Conta</div>
     <div class="ni" id="navSaldo" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
     <div class="ni" id="navComunidade" onclick="gp('comunidade',this)">📣 Comunidade</div>
+    <div class="ni" id="navDicas" onclick="gp('dicas',this)">🎓 Dicas</div>
     <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
     <div id="navAdminSec" style="display:none">
       <div class="sb-sec">Plataforma</div>
@@ -236,6 +237,13 @@ a{color:inherit;}
       <button class="btn bp" onclick="publicarPost()">Publicar</button>
     </div>
     <div id="meusPostsList"></div>
+  </div>
+
+  <!-- DICAS -->
+  <div class="page" id="page-dicas">
+    <div class="card" style="max-width:600px">
+      <div id="dicasProdutorContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+    </div>
   </div>
 
   <!-- PERFIL -->
@@ -375,7 +383,7 @@ function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 
-const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},comunidade:{t:'Comunidade',bk:false},perfil:{t:'Meu Perfil',bk:false}};
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},comunidade:{t:'Comunidade',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false}};
 
 function gp(id,el){
   const prev=document.querySelector('.page.active');
@@ -399,6 +407,7 @@ function gp(id,el){
   if(id==='eventos') carregarEventos();
   if(id==='saldo') carregarSaldo();
   if(id==='comunidade') carregarMeusPosts();
+  if(id==='dicas') carregarDicasProdutor();
   if(id==='perfil') carregarPerfil();
   closeSb();
 }
@@ -525,6 +534,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
+      ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
     </div>
     <div id="evTabGeral"></div>
     <div id="evTabLotes" style="display:none"></div>
@@ -534,12 +544,13 @@ function renderEventoDetalhe(){
     <div id="evTabPixels" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
+    <div id="evTabBar" style="display:none"></div>
   `;
   renderTabGeral();
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -550,6 +561,7 @@ function evTab(tab,el){
   if(tab==='pixels') renderTabPixels();
   if(tab==='relatorios') renderTabRelatorios();
   if(tab==='checkin') renderTabCheckin();
+  if(tab==='bar') renderTabBar();
 }
 
 async function togglePublicar(){
@@ -883,6 +895,179 @@ async function baixarComAuth(ev,tipo){
 }
 
 // ── CHECK-IN ──
+let _barConfigTemp=null;
+async function renderTabBar(){
+  const el=document.getElementById('evTabBar');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/bar-config');
+    _barConfigTemp=JSON.parse(JSON.stringify(d.barConfig));
+    el.innerHTML=`
+      <div class="card">
+        <div class="ct">Sistema de Bar (Comanda Cashless)</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Use o QR Code do próprio ingresso como "cartão" — o comprador carrega saldo (pré-pago) e/ou consome e fecha a conta no final (pós-pago). Sem precisar de pulseira ou cartão físico.</p>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="barAtivoCheck" ${_barConfigTemp.ativo?'checked':''}>Ativar sistema de bar pra este evento</label>
+        <div class="fg"><label>Modo de operação</label>
+          <select class="fi" id="barModoSelect">
+            <option value="ambos" ${_barConfigTemp.modo==='ambos'?'selected':''}>Pré-pago e Pós-pago (ambos)</option>
+            <option value="pre-pago" ${_barConfigTemp.modo==='pre-pago'?'selected':''}>Somente Pré-pago (carrega saldo antes)</option>
+            <option value="pos-pago" ${_barConfigTemp.modo==='pos-pago'?'selected':''}>Somente Pós-pago (fecha conta no final)</option>
+          </select>
+        </div>
+        <button class="btn bp btn-sm" onclick="salvarConfigBarBasico()">💾 Salvar configuração</button>
+      </div>
+      <div class="card">
+        <div class="ct">Cardápio</div>
+        <div id="cardapioBarList"></div>
+        <button class="btn bo btn-sm" style="margin-top:10px" onclick="adicionarItemCardapio()">+ Adicionar Item</button>
+        <button class="btn bp btn-sm" style="margin-top:10px" onclick="salvarCardapioBar()">💾 Salvar Cardápio</button>
+      </div>
+      <div class="card">
+        <div class="ct">Terminal do Bar</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Digite ou escaneie o código do ingresso pra abrir a comanda.</p>
+        <div class="fg2">
+          <div class="fg"><input class="fi" id="barCodigoInput" placeholder="Código do ingresso" onkeydown="if(event.key==='Enter')abrirComandaBar()"></div>
+          <button class="btn bp" onclick="abrirComandaBar()" style="white-space:nowrap">Abrir Comanda</button>
+        </div>
+        <div id="comandaBarArea" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="ct">Relatório do Bar</div>
+        <div id="relatorioBarArea"></div>
+      </div>`;
+    renderCardapioBarList();
+    carregarRelatorioBar();
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderCardapioBarList(){
+  const el=document.getElementById('cardapioBarList');
+  if(!_barConfigTemp.produtos.length){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nenhum item no cardápio ainda.</p>'; return; }
+  el.innerHTML=_barConfigTemp.produtos.map((p,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input class="fi" style="flex:2" value="${esc(p.nome)}" onchange="_barConfigTemp.produtos[${i}].nome=this.value" placeholder="Nome do item">
+      <input class="fi" style="flex:1" type="number" step="0.01" value="${p.preco}" onchange="_barConfigTemp.produtos[${i}].preco=parseFloat(this.value)||0" placeholder="Preço">
+      <input class="fi" style="flex:1" value="${esc(p.categoria)}" onchange="_barConfigTemp.produtos[${i}].categoria=this.value" placeholder="Categoria">
+      <button class="btn bdng btn-sm" onclick="_barConfigTemp.produtos.splice(${i},1);renderCardapioBarList()">🗑️</button>
+    </div>`).join('');
+}
+function adicionarItemCardapio(){
+  _barConfigTemp.produtos.push({id:'novo-'+Date.now()+'-'+Math.random().toString(36).slice(2),nome:'',preco:0,categoria:'Bebidas',ativo:true});
+  renderCardapioBarList();
+}
+async function salvarConfigBarBasico(){
+  const ativo=document.getElementById('barAtivoCheck').checked;
+  const modo=document.getElementById('barModoSelect').value;
+  try{ await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/bar-config',{ativo,modo}); toast('Configuração salva!','ok'); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function salvarCardapioBar(){
+  try{
+    await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/bar-config',{produtos:_barConfigTemp.produtos});
+    toast('Cardápio salvo!','ok');
+    renderTabBar();
+  }catch(e){ toast(e.message,'err'); }
+}
+let COMANDA_BAR_ATUAL=null;
+async function abrirComandaBar(){
+  const codigo=document.getElementById('barCodigoInput').value.trim();
+  if(!codigo){ toast('Digite o código do ingresso.','err'); return; }
+  const areaEl=document.getElementById('comandaBarArea');
+  areaEl.innerHTML='<div class="spinner"></div>';
+  try{
+    const d=await api('GET','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(codigo));
+    COMANDA_BAR_ATUAL=codigo;
+    renderComandaBar(d);
+  }catch(e){ areaEl.innerHTML='<p style="font-size:13px;color:var(--red)">'+esc(e.message)+'</p>'; }
+}
+function renderComandaBar(d){
+  const areaEl=document.getElementById('comandaBarArea');
+  const produtosAtivos=(_barConfigTemp.produtos||[]).filter(p=>p.ativo!==false);
+  areaEl.innerHTML=`
+    <div style="background:var(--bg3);border-radius:9px;padding:12px;margin-bottom:12px">
+      <div style="font-weight:700">${esc(d.titular)} <span style="font-size:11px;color:var(--text3)">(${esc(d.loteNome)})</span></div>
+      <div style="display:flex;gap:20px;margin-top:6px">
+        <div><div style="font-size:11px;color:var(--text3)">Saldo Pré-pago</div><div style="font-weight:800;color:var(--green)">R$ ${d.saldoCashless.toFixed(2)}</div></div>
+        <div><div style="font-size:11px;color:var(--text3)">Conta em Aberto (Pós-pago)</div><div style="font-weight:800;color:${d.contaAbertaPosPago>0?'var(--red)':'var(--text)'}">R$ ${d.contaAbertaPosPago.toFixed(2)}</div></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input class="fi" id="barRecargaValor" type="number" step="0.01" placeholder="Valor da recarga" style="flex:1">
+      <select class="fi" id="barRecargaForma" style="flex:1"><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="pix">PIX</option></select>
+      <button class="btn bo btn-sm" onclick="recarregarBar()">+ Recarregar</button>
+    </div>
+    ${d.contaAbertaPosPago>0?'<button class="btn bgreen btn-sm" style="margin-bottom:12px" onclick="fecharContaBar()">✅ Fechar conta em aberto (R$ '+d.contaAbertaPosPago.toFixed(2)+')</button>':''}
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Adicionar consumo</div>
+    <div id="itensSelecaoBar" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:10px">
+      ${produtosAtivos.map(p=>'<button class="btn bo btn-sm" style="text-align:left" onclick="adicionarItemComanda(\''+p.id+'\')">'+esc(p.nome)+' — R$'+p.preco.toFixed(2)+'</button>').join('')||'<p style="font-size:12px;color:var(--text3)">Nenhum item cadastrado no cardápio.</p>'}
+    </div>
+    <div id="carrinhoBarArea"></div>`;
+  window.CARRINHO_BAR=window.CARRINHO_BAR||[];
+  window.CARRINHO_BAR=[];
+  renderCarrinhoBar();
+}
+function adicionarItemComanda(produtoId){
+  const produto=_barConfigTemp.produtos.find(p=>p.id===produtoId);
+  const existente=window.CARRINHO_BAR.find(i=>i.produtoId===produtoId);
+  if(existente) existente.qtd++;
+  else window.CARRINHO_BAR.push({produtoId,nome:produto.nome,preco:produto.preco,qtd:1});
+  renderCarrinhoBar();
+}
+function renderCarrinhoBar(){
+  const el=document.getElementById('carrinhoBarArea');
+  if(!window.CARRINHO_BAR.length){ el.innerHTML=''; return; }
+  const total=window.CARRINHO_BAR.reduce((s,i)=>s+i.preco*i.qtd,0);
+  el.innerHTML='<div style="background:var(--bg2);border-radius:8px;padding:10px;margin-top:8px">'
+    +window.CARRINHO_BAR.map(i=>'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">'+i.qtd+'x '+esc(i.nome)+'<span>R$'+(i.preco*i.qtd).toFixed(2)+'</span></div>').join('')
+    +'<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">Total<span>R$'+total.toFixed(2)+'</span></div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px">'
+    +'<button class="btn bp btn-sm" style="flex:1" onclick="confirmarConsumoBar(\'pre-pago\')">Debitar do Saldo</button>'
+    +'<button class="btn bo btn-sm" style="flex:1" onclick="confirmarConsumoBar(\'pos-pago\')">Deixar em Aberto</button>'
+    +'</div></div>';
+}
+async function confirmarConsumoBar(modo){
+  if(!window.CARRINHO_BAR.length) return;
+  const itens=window.CARRINHO_BAR.map(i=>({produtoId:i.produtoId,qtd:i.qtd}));
+  try{
+    const d=await api('POST','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL)+'/consumo',{itens,modo});
+    toast('Consumo registrado!','ok');
+    const dCompleto=await api('GET','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL));
+    renderComandaBar(dCompleto);
+  }catch(e){ toast(e.message,'err'); }
+}
+async function recarregarBar(){
+  const valor=parseFloat(document.getElementById('barRecargaValor').value);
+  const formaPagamento=document.getElementById('barRecargaForma').value;
+  if(!valor||valor<=0){ toast('Digite um valor válido.','err'); return; }
+  try{
+    await api('POST','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL)+'/recarga',{valor,formaPagamento});
+    toast('Recarga feita!','ok');
+    const d=await api('GET','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL));
+    renderComandaBar(d);
+  }catch(e){ toast(e.message,'err'); }
+}
+async function fecharContaBar(){
+  if(!confirm('Confirma que o pagamento foi recebido e a conta pode ser fechada?')) return;
+  try{
+    await api('POST','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL)+'/fechar-conta',{formaPagamento:'dinheiro'});
+    toast('Conta fechada!','ok');
+    const d=await api('GET','/api/bar/'+EV_ATUAL.id+'/ticket/'+encodeURIComponent(COMANDA_BAR_ATUAL));
+    renderComandaBar(d);
+  }catch(e){ toast(e.message,'err'); }
+}
+async function carregarRelatorioBar(){
+  const el=document.getElementById('relatorioBarArea');
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/bar-relatorio');
+    el.innerHTML=`
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
+        <div><div style="font-size:11px;color:var(--text3)">Vendido no Bar</div><div style="font-weight:800;color:var(--green)">R$ ${d.totalVendidoBar.toFixed(2)}</div></div>
+        <div><div style="font-size:11px;color:var(--text3)">Recarregado</div><div style="font-weight:800">R$ ${d.totalRecarregado.toFixed(2)}</div></div>
+        <div><div style="font-size:11px;color:var(--text3)">Em Aberto (a receber)</div><div style="font-weight:800;color:${d.totalEmAberto>0?'var(--red)':'var(--text)'}">R$ ${d.totalEmAberto.toFixed(2)}</div></div>
+      </div>
+      ${d.porProduto.length?'<table class="tbl"><thead><tr><th>Produto</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>'+d.porProduto.map(p=>'<tr><td>'+esc(p.nome)+'</td><td>'+p.qtd+'</td><td>R$'+p.valor.toFixed(2)+'</td></tr>').join('')+'</tbody></table>':'<p style="font-size:12px;color:var(--text3)">Nenhuma venda no bar ainda.</p>'}
+      ${d.porOperador&&d.porOperador.length?'<div style="margin-top:16px;font-weight:700;font-size:13px">Por Operador / Caixa</div><table class="tbl"><thead><tr><th>Operador</th><th>Consumos</th><th>Vendido</th><th>Recargas</th><th>Total Movimentado</th></tr></thead><tbody>'+d.porOperador.map(o=>'<tr><td>'+esc(o.nome)+'</td><td>'+o.consumos+'</td><td>R$'+o.valorConsumos.toFixed(2)+'</td><td>'+o.recargas+'</td><td style="font-weight:700">R$'+o.totalMovimentado.toFixed(2)+'</td></tr>').join('')+'</tbody></table>':''}`;
+  }catch(e){}
+}
 function renderTabCheckin(){
   document.getElementById('evTabCheckin').innerHTML=`<div class="card"><div class="ct">Check-in na Portaria</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1033,6 +1218,22 @@ async function publicarPost(){
     document.getElementById('postTexto').value=''; document.getElementById('postImg').value='';
     toast('Publicado!','ok'); carregarMeusPosts();
   }catch(e){ toast(e.message,'err'); }
+}
+async function carregarDicasProdutor(){
+  const el=document.getElementById('dicasProdutorContent');
+  try{
+    const d=await api('GET','/api/produtor/dicas');
+    if(!d.titulo && !d.videoYoutubeId && !d.temPdf){
+      el.innerHTML='<div class="empty"><span class="empty-ic">🎓</span><p>Nenhuma dica publicada ainda. Volte aqui de vez em quando!</p></div>';
+      return;
+    }
+    el.innerHTML=`
+      ${d.titulo?'<div class="ct">'+esc(d.titulo)+'</div>':''}
+      ${d.descricao?'<p style="font-size:13px;color:var(--text2);margin-bottom:16px;white-space:pre-wrap">'+esc(d.descricao)+'</p>':''}
+      ${d.videoYoutubeId?'<div style="border-radius:10px;overflow:hidden;aspect-ratio:16/9;margin-bottom:16px"><iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+d.videoYoutubeId+'" title="Dicas" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;height:100%;display:block"></iframe></div>':''}
+      ${d.temPdf?'<a href="/api/produtor/dicas/pdf" target="_blank" class="btn bo" style="display:block;text-align:center;text-decoration:none">📄 Abrir material em PDF</a>':''}
+      ${d.atualizadoEm?'<p style="font-size:11px;color:var(--text3);margin-top:14px">Atualizado em '+new Date(d.atualizadoEm).toLocaleDateString('pt-BR')+'</p>':''}`;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function carregarMeusPosts(){
   // Não há endpoint dedicado "meus posts" — usamos o perfil público já que sabemos o slug
