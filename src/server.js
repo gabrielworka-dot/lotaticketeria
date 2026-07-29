@@ -1,5 +1,5 @@
 /**
- * LOTA TICKETERIA — Plataforma de Ingressos e Comunidade
+ * LOTA — Plataforma de Ingressos e Comunidade
  * Inspirado em Tri.RS (marketplace) + Cheers (comunidade, promoters, cortesia)
  */
 
@@ -389,13 +389,13 @@ async function enviarEmailVerificacao(user, proto, host) {
   const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
   const link = `${proto}://${host}/verificar-email.html?token=${verifyToken}`;
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:20px;"><img src="${proto}://${host}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+    <div style="margin-bottom:20px;"><img src="${proto}://${host}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <h2 style="font-size:18px;margin-bottom:12px;">Confirme seu e-mail</h2>
     <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Clique no botão abaixo para confirmar seu cadastro. O link expira em 3 dias.</p>
     <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Confirmar e-mail →</a>
     <p style="font-size:11px;color:#605848;margin-top:24px;">Se não foi você quem se cadastrou, ignore este e-mail.</p>
     </div></div>`;
-  return enviarEmailGenerico(user.email, '✅ Confirme seu e-mail — Lota Ticketeria', html);
+  return enviarEmailGenerico(user.email, '✅ Confirme seu e-mail — Lota', html);
 }
 
 
@@ -437,7 +437,7 @@ app.post('/api/auth/2fa/verificar-login', rateLimit(60000, 10), (req, res) => {
 });
 
 app.post('/api/auth/2fa/setup', auth, (req, res) => {
-  const secret = speakeasy.generateSecret({ name: `Lota Ticketeria (${req.user.email})`, length: 20 });
+  const secret = speakeasy.generateSecret({ name: `Lota (${req.user.email})`, length: 20 });
   const user = db.users.find(u => u.id === req.user.id);
   user.twoFactorSecretPendente = secret.base32;
   saveDB(db);
@@ -646,7 +646,7 @@ const ASAAS_API_KEY = process.env.ASAAS_API_KEY || '';
 const ASAAS_SANDBOX = process.env.ASAAS_SANDBOX === 'true';
 const ASAAS_API = ASAAS_SANDBOX ? 'https://api-sandbox.asaas.com/v3' : 'https://api.asaas.com/v3';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota Ticketeria <onboarding@resend.dev>';
+const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota <onboarding@resend.dev>';
 
 async function enviarEmailGenerico(destinatario, assunto, html) {
   if (!RESEND_API_KEY || !destinatario) { console.error('Resend não configurado ou destinatário ausente ao tentar enviar:', assunto); return false; }
@@ -673,12 +673,12 @@ async function notificarSeguidoresNovoEvento(ev, organizador, baseUrl) {
     const seguidor = db.users.find(u => u.id === f.userId);
     if (!seguidor?.email) continue;
     const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
       <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeExibicao)} acabou de publicar um novo evento</p>
       <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:10px;">${esc(ev.nome)}</h2>
       ${dataStr ? `<p style="font-size:13px;color:#A09880;margin-bottom:20px;">📅 ${dataStr}${ev.cidade ? ' · ' + esc(ev.cidade) : ''}</p>` : ''}
       <a href="${linkEvento}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Ver evento e comprar →</a>
-      <p style="font-size:11px;color:#605848;margin-top:24px;">Você está recebendo esse e-mail porque segue ${esc(nomeExibicao)} na Lota Ticketeria.</p>
+      <p style="font-size:11px;color:#605848;margin-top:24px;">Você está recebendo esse e-mail porque segue ${esc(nomeExibicao)} na Lota.</p>
       </div></div>`;
     await enviarEmailGenerico(seguidor.email, `${nomeExibicao} publicou: ${ev.nome}`, html);
   }
@@ -697,13 +697,13 @@ app.post('/api/auth/esqueci-senha', rateLimit(60000, 5), async (req, res) => {
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const link = `${proto}://${host}/redefinir-senha.html?token=${token}`;
     const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
       <h2 style="font-size:18px;margin-bottom:12px;">Redefinir sua senha</h2>
       <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Clique no botão abaixo para criar uma nova senha. Este link expira em 30 minutos.</p>
       <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Redefinir senha →</a>
       <p style="font-size:11px;color:#605848;margin-top:24px;">Se você não pediu isso, pode ignorar este e-mail com segurança.</p>
       </div></div>`;
-    await enviarEmailGenerico(user.email, '🔑 Redefinir sua senha — Lota Ticketeria', html);
+    await enviarEmailGenerico(user.email, '🔑 Redefinir sua senha — Lota', html);
   }
   res.json({ ok: true, message: 'Se o e-mail existir, você receberá um link de redefinição.' });
 });
@@ -1314,7 +1314,7 @@ async function gerarPdfBordero(ev, pedidos) {
     const logoPath = path.join(PUBLIC_DIR, 'logo.png');
     if (fs.existsSync(logoPath)) doc.image(logoPath, MARGIN, 14, { height: 36 });
   } catch (e) { console.error('Erro ao carregar logo no PDF:', e.message); }
-  doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN + 44, 24);
+  doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA', MARGIN + 44, 24);
   doc.fontSize(11).font('Helvetica').text('Borderô de Vendas', MARGIN + 44, 50);
 
   let y = 100;
@@ -2203,7 +2203,7 @@ async function gerarPdfIngressos(pedido, ev) {
       const logoPath = path.join(PUBLIC_DIR, 'logo.png');
       if (fs.existsSync(logoPath)) doc.image(logoPath, MARGIN, 20, { height: 40 });
     } catch (e) { console.error('Erro ao carregar logo no PDF:', e.message); }
-    doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA TICKETERIA', MARGIN + 48, 32);
+    doc.fillColor('#FFFFFF').fontSize(19).font('Helvetica-Bold').text('LOTA', MARGIN + 48, 32);
 
     // ── Nome do evento e dados ──
     let y = 105;
@@ -2265,7 +2265,7 @@ async function gerarPdfIngressos(pedido, ev) {
     // ── Rodapé ──
     const footY = cardY + cardH + 30;
     doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica').text('Este ingresso é pessoal e intransferível. Apresente o QR Code (impresso ou no celular) na entrada do evento.', MARGIN, footY, { width: CONTENT_W });
-    doc.fillColor(CINZA_CLARO).fontSize(9).text('Vendido com Lota Ticketeria — lotaticketeria.com.br', MARGIN, footY + 16);
+    doc.fillColor(CINZA_CLARO).fontSize(9).text('Vendido com Lota — lotaticketeria.com.br', MARGIN, footY + 16);
   }
   doc.end();
   return done;
@@ -2283,7 +2283,7 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
       <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · Assento '+esc(t.assento):''}</div></div>
     </div>`).join('');
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:4px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+    <div style="margin-bottom:4px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <p style="font-size:14px;color:#A09880;margin-bottom:24px;">Confirmação de compra</p>
     <h2 style="font-size:18px;margin-bottom:6px;">Seu ingresso para</h2>
     <p style="font-size:20px;font-weight:800;color:#fff;margin-bottom:20px;">${esc(nomeEvento)}</p>
@@ -2369,16 +2369,16 @@ async function concederCreditoIndicacao(compradorUserId, baseUrl) {
   saveDB(db);
   console.log(`Crédito de indicação concedido: ${comprador.email} e ${indicador.email} ganharam R$${CREDITO_INDICACAO_VALOR} cada.`);
   const htmlComprador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <p style="font-size:14px;">Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito por ter usado um código de indicação na sua primeira compra!</p>
-    <p style="font-size:12px;color:#A09880;margin-top:10px;">Use esse crédito na sua próxima compra na Lota Ticketeria.</p>
+    <p style="font-size:12px;color:#A09880;margin-top:10px;">Use esse crédito na sua próxima compra na Lota.</p>
     </div></div>`;
   const htmlIndicador = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+    <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <p style="font-size:14px;">${esc(comprador.nome)}, que você indicou, fez a primeira compra! Você ganhou <strong style="color:#4ADE80">R$ ${CREDITO_INDICACAO_VALOR.toFixed(2)}</strong> de crédito.</p>
     <p style="font-size:12px;color:#A09880;margin-top:10px;">Continue indicando amigos pra ganhar mais créditos.</p>
     </div></div>`;
-  await enviarEmailGenerico(comprador.email, 'Você ganhou crédito na Lota Ticketeria! 🎉', htmlComprador);
+  await enviarEmailGenerico(comprador.email, 'Você ganhou crédito na Lota! 🎉', htmlComprador);
   await enviarEmailGenerico(indicador.email, 'Sua indicação rendeu crédito! 🎉', htmlIndicador);
 }
 
@@ -2596,7 +2596,7 @@ app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(600
       const linkPdf = `${baseUrl}/api/public/pedido/${pedido.id}/pdf`;
       // Avisa quem recebeu o ingresso
       const htmlNovo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-        <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+        <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
         <p style="font-size:13px;color:#A09880;margin-bottom:6px;">${esc(nomeAntigo)} transferiu um ingresso pra você</p>
         <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:16px;">${esc(ev.nome)}</h2>
         <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:16px;background:#161410;">
@@ -2610,7 +2610,7 @@ app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(600
       // Avisa quem transferiu, confirmando
       if (emailAntigo) {
         const htmlAntigo = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-          <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota Ticketeria" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota Ticketeria</span></div>
+          <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
           <p style="font-size:14px;color:#F0EDE8;">O ingresso <strong style="color:#E8961A">${ticket.codigo}</strong> pra <strong>${esc(ev.nome)}</strong> foi transferido pra ${esc(nomeLimpo)} (${esc(emailLimpo)}) com sucesso.</p>
           <p style="font-size:11px;color:#605848;margin-top:16px;">Se você não fez essa transferência, entre em contato com o suporte imediatamente.</p>
           </div></div>`;
@@ -2658,12 +2658,12 @@ app.get('/e/:slug', (req, res) => {
     <meta property="og:description" content="${esc(descricaoLimpa)}">
     <meta property="og:image" content="${imageUrl}">
     <meta property="og:url" content="${pageUrl}">
-    <meta property="og:site_name" content="Lota Ticketeria">
+    <meta property="og:site_name" content="Lota">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${esc(tituloOg)}">
     <meta name="twitter:description" content="${esc(descricaoLimpa)}">
     <meta name="twitter:image" content="${imageUrl}">
-    <title>${esc(ev.nome)} — Lota Ticketeria</title>
+    <title>${esc(ev.nome)} — Lota</title>
     <script type="application/ld+json">${JSON.stringify(schemaEvento)}</script>`;
       // Substitui o <title> estático da página pelas tags dinâmicas (incluindo um novo <title>)
       html = html.replace(/<title>.*?<\/title>/i, metaTags);
@@ -2696,19 +2696,19 @@ app.get('/o/:slug', (req, res) => {
       const baseUrl = `${proto}://${req.get('host')}`;
       const nomeExibicao = user.nomePublico || user.nome;
       const imageUrl = (user.bannerUrl || user.avatarUrl) ? `${baseUrl}/api/public/organizadores/${user.organizadorSlug}/imagem` : `${baseUrl}/favicon.png`;
-      const bioLimpa = sanitize(user.bio || `Confira os eventos de ${nomeExibicao} na Lota Ticketeria`, 200).replace(/\n/g, ' ');
+      const bioLimpa = sanitize(user.bio || `Confira os eventos de ${nomeExibicao} na Lota`, 200).replace(/\n/g, ' ');
       const metaTags = `
     <meta property="og:type" content="profile">
     <meta property="og:title" content="${esc(nomeExibicao)}">
     <meta property="og:description" content="${esc(bioLimpa)}">
     <meta property="og:image" content="${imageUrl}">
     <meta property="og:url" content="${baseUrl}/o/${user.organizadorSlug}">
-    <meta property="og:site_name" content="Lota Ticketeria">
+    <meta property="og:site_name" content="Lota">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${esc(nomeExibicao)}">
     <meta name="twitter:description" content="${esc(bioLimpa)}">
     <meta name="twitter:image" content="${imageUrl}">
-    <title>${esc(nomeExibicao)} — Lota Ticketeria</title>`;
+    <title>${esc(nomeExibicao)} — Lota</title>`;
       html = html.replace(/<title>.*?<\/title>/i, metaTags);
     }
     res.send(html);
@@ -2725,16 +2725,16 @@ function renderPaginaFiltrada(req, res, tipo, nomeReal, valorParaUrl) {
   const baseUrl = `${proto}://${req.get('host')}`;
   const tituloOg = tipo === 'cidade' ? `Eventos em ${nomeReal}` : `Eventos de ${nomeReal}`;
   const descricaoOg = tipo === 'cidade'
-    ? `Confira os próximos eventos, shows e ingressos em ${nomeReal}. Compre com segurança pela Lota Ticketeria.`
-    : `Encontre eventos de ${nomeReal.toLowerCase()} com ingressos disponíveis. Compre com segurança pela Lota Ticketeria.`;
+    ? `Confira os próximos eventos, shows e ingressos em ${nomeReal}. Compre com segurança pela Lota.`
+    : `Encontre eventos de ${nomeReal.toLowerCase()} com ingressos disponíveis. Compre com segurança pela Lota.`;
   let html = fs.readFileSync(p, 'utf8');
   const metaTags = `
     <meta property="og:type" content="website">
     <meta property="og:title" content="${esc(tituloOg)}">
     <meta property="og:description" content="${esc(descricaoOg)}">
     <meta property="og:url" content="${baseUrl}${req.originalUrl}">
-    <meta property="og:site_name" content="Lota Ticketeria">
-    <title>${esc(tituloOg)} — Lota Ticketeria</title>`;
+    <meta property="og:site_name" content="Lota">
+    <title>${esc(tituloOg)} — Lota</title>`;
   html = html.replace(/<title>.*?<\/title>/i, metaTags);
   // Em vez de redirecionar via JS (o que causaria um recarregamento visível), injetamos o valor
   // direto numa variável global — o script da home já lê isso na inicialização, sem piscar a tela.
@@ -3121,7 +3121,7 @@ app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
   const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago');
   const feePercent = db.marketplaceFeePercent || 10;
   const linhas = [
-    ['RELATÓRIO FINANCEIRO — LOTA TICKETERIA'],
+    ['RELATÓRIO FINANCEIRO — LOTA'],
     ['Data de emissão', new Date().toLocaleString('pt-BR')],
     ['Comissão configurada', feePercent + '%'],
     [''],
@@ -3147,7 +3147,7 @@ app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
 // ════════════════════════════════════════════════════════
 app.get('/health', (req, res) => {
   res.json({
-    status: 'ok', app: 'Lota Ticketeria', users: db.users.length, eventos: EVENTOS.length,
+    status: 'ok', app: 'Lota', users: db.users.length, eventos: EVENTOS.length,
     provedor_pagamento_ativo: db.provedorPagamento,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
@@ -3256,7 +3256,7 @@ async function enviarBackupPorEmail(pastaBackup, arquivosBackup, timestamp) {
     attachments.push({ filename: arquivo, content: fs.readFileSync(caminho).toString('base64') });
   }
   if (!attachments.length) return;
-  const html = `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Backup automático — Lota Ticketeria</h3><p>Cópia de segurança gerada em ${timestamp}.</p>${algumArquivoGrandeDemais ? '<p style="color:#c00"><strong>Atenção:</strong> um ou mais arquivos ficaram grandes demais pra anexar por e-mail e não estão incluídos aqui. Considere configurar um backup em nuvem dedicado (ex: S3) além deste.</p>' : ''}<p style="font-size:12px;color:#666">Guarde este e-mail em um local seguro — ele contém dados sensíveis da plataforma.</p></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Backup automático — Lota</h3><p>Cópia de segurança gerada em ${timestamp}.</p>${algumArquivoGrandeDemais ? '<p style="color:#c00"><strong>Atenção:</strong> um ou mais arquivos ficaram grandes demais pra anexar por e-mail e não estão incluídos aqui. Considere configurar um backup em nuvem dedicado (ex: S3) além deste.</p>' : ''}<p style="font-size:12px;color:#666">Guarde este e-mail em um local seguro — ele contém dados sensíveis da plataforma.</p></div>`;
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
@@ -3361,7 +3361,7 @@ setInterval(async () => {
 }, 5 * 60000);
 
 app.listen(PORT, () => {
-  console.log(`\n🎟️  LOTA TICKETERIA rodando na porta ${PORT}`);
+  console.log(`\n🎟️  LOTA rodando na porta ${PORT}`);
   console.log(`   Mercado Pago: ${MP_PLATFORM_TOKEN ? '✅' : '❌'}`);
   console.log(`   Resend: ${RESEND_API_KEY ? '✅' : '❌'}\n`);
 });
@@ -3398,7 +3398,7 @@ setInterval(async () => {
           conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
           enviarEmailGenerico(conta.email,
             `Saldo do bar devolvido — ${ev.nome}`,
-            `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota Ticketeria — é só usar na sua próxima compra de ingresso.</p></div>`
+            `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
           ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
         }
         // Zera o saldo (registrando como estorno) — independente de existir conta vinculada, já que o
