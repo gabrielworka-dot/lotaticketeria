@@ -6,7 +6,7 @@
 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Painel — Lota Ticketeria</title>
+<title>Painel — Lota</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -148,14 +148,14 @@ a{color:inherit;}
   <button class="ham" id="mobHam" onclick="toggleSb()">☰</button>
   <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;justify-content:center">
     <button class="mob-back-btn" id="mobBtnBack" onclick="goBack()">← Voltar</button>
-    <span id="mobTitle" style="font-weight:800;color:#E8961A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px"><img src="/logo-header.png" alt="Lota Ticketeria" style="height:18px;vertical-align:middle;margin-right:5px">Lota</span>
+    <span id="mobTitle" style="font-weight:800;color:#E8961A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px"><img src="/logo-header.png" alt="Lota" style="height:18px;vertical-align:middle;margin-right:5px">Lota</span>
   </div>
   <div style="width:44px"></div>
 </div>
 <div class="mob-over" id="mobOver" onclick="closeSb()"></div>
 
 <nav class="sb" id="sbNav">
-  <div class="sb-logo"><img src="/logo-header.png" alt="Lota Ticketeria" style="height:26px;vertical-align:middle;margin-right:7px">Lota Ticketeria</div>
+  <div class="sb-logo"><img src="/logo-header.png" alt="Lota" style="height:26px;vertical-align:middle;margin-right:7px">Lota</div>
   <div class="sb-nav">
     <div class="sb-sec">Eventos</div>
     <div class="ni active" onclick="gp('eventos',this)">📋 Meus Eventos</div>
@@ -269,7 +269,7 @@ a{color:inherit;}
         <div><a href="/termos.html" style="color:var(--text3);text-decoration:none">Termos de Uso</a></div>
       </div>
     </div>
-    <div>© 2025 Lota Ticketeria</div>
+    <div>© 2025 Lota</div>
   </footer>
 
 </div>
@@ -447,7 +447,7 @@ let SOMENTE_LEITURA=false;
         <div style="max-width:400px;width:100%;background:#161410;border:1px solid #2A2822;border-radius:16px;padding:28px;text-align:center">
           <div style="font-size:36px;margin-bottom:10px">🎪</div>
           <h2 style="margin-bottom:8px">Área exclusiva de produtores</h2>
-          <p style="font-size:13px;color:#A09880;margin-bottom:20px">Sua conta é de cliente. Quer também criar eventos e vender ingressos pela Lota Ticketeria?</p>
+          <p style="font-size:13px;color:#A09880;margin-bottom:20px">Sua conta é de cliente. Quer também criar eventos e vender ingressos pela Lota?</p>
           <label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px;text-align:left">Nome público (nome da sua produtora/marca)</label>
           <input id="opNome" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:16px" placeholder="Ex: Atlética XYZ">
           <button onclick="tornarOrganizador()" style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer;margin-bottom:10px">Quero vender ingressos também →</button>
@@ -1352,7 +1352,7 @@ function carregarPerfil(){
     ${CU.isOrganizador?`
     <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:16px">
       <div class="ct">Equipe (acesso somente de visualização)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Adicione pessoas de confiança que possam ver seus eventos, relatórios e vendas — sem poder editar nada. A pessoa precisa já ter uma conta na Lota Ticketeria.</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Adicione pessoas de confiança que possam ver seus eventos, relatórios e vendas — sem poder editar nada. A pessoa precisa já ter uma conta na Lota.</p>
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <input class="fi" id="colabEmail" type="email" placeholder="e-mail da pessoa">
         <button class="btn bp btn-sm" onclick="adicionarColaborador()">+ Adicionar</button>
