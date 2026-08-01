@@ -3293,18 +3293,24 @@ async function pedidoFoiPagoDeVerdade(pedido) {
 // sem esperar, esse job garante que o pedido seja reconhecido como pago em poucos minutos mesmo assim,
 // sem depender de ninguém estar olhando a tela na hora.
 setInterval(async () => {
-  const agora = Date.now();
-  let recuperados = 0;
-  // Só confere pedidos com pelo menos 2 minutos de vida — dá tempo do webhook normal chegar primeiro,
-  // evitando checagens desnecessárias em pedidos criados há poucos segundos.
-  const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.mpPaymentId && (agora - new Date(p.createdAt).getTime()) > 2 * 60000);
-  for (const pedido of candidatos) {
-    if (await pedidoFoiPagoDeVerdade(pedido)) {
-      await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
-      recuperados++;
+  try {
+    const agora = Date.now();
+    let recuperados = 0;
+    // Só confere pedidos com pelo menos 2 minutos de vida — dá tempo do webhook normal chegar primeiro,
+    // evitando checagens desnecessárias em pedidos criados há poucos segundos.
+    const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.mpPaymentId && (agora - new Date(p.createdAt).getTime()) > 2 * 60000);
+    for (const pedido of candidatos) {
+      // Try/catch em CADA pedido individualmente — um erro num pedido específico não pode derrubar
+      // a verificação dos outros, nem (mais importante ainda) travar o processo inteiro do servidor.
+      try {
+        if (await pedidoFoiPagoDeVerdade(pedido)) {
+          await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
+          recuperados++;
+        }
+      } catch (e) { console.error(`[Verificação proativa] Erro ao verificar pedido ${pedido.id}:`, e.message); }
     }
-  }
-  if (recuperados > 0) { persistPedidos(); console.log(`[Verificação proativa] ${recuperados} pedido(s) confirmado(s) que ainda não tinham sido reconhecidos automaticamente.`); }
+    if (recuperados > 0) { persistPedidos(); console.log(`[Verificação proativa] ${recuperados} pedido(s) confirmado(s) que ainda não tinham sido reconhecidos automaticamente.`); }
+  } catch (e) { console.error('[Verificação proativa] Erro geral na rotina:', e.message); }
 }, 3 * 60000);
 
 // Mesma ideia acima, mas pras recargas de saldo do bar — evita que uma recarga fique "pendente"
@@ -3338,27 +3344,43 @@ setInterval(async () => {
 // um PIX confirmado poucos minutos depois do prazo, ou um webhook que atrasou). Só libera a reserva
 // de vaga de verdade se a checagem confirmar que não foi pago.
 setInterval(async () => {
-  const agora = Date.now();
-  let liberados = 0, recuperados = 0;
-  const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.expiraEm && new Date(p.expiraEm).getTime() < agora);
-  for (const pedido of candidatos) {
-    const ev = EVENTOS.find(e => e.id === pedido.eventoId);
-    const foiPago = await pedidoFoiPagoDeVerdade(pedido);
+  try {
+    const agora = Date.now();
+    let liberados = 0, recuperados = 0;
+    const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.expiraEm && new Date(p.expiraEm).getTime() < agora);
+    for (const pedido of candidatos) {
+      try {
+        const ev = EVENTOS.find(e => e.id === pedido.eventoId);
+        const foiPago = await pedidoFoiPagoDeVerdade(pedido);
 
-    if (foiPago) {
-      await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
-      recuperados++;
-    } else {
-      pedido.status = 'expirado';
-      if (ev) liberarReservaPedido(pedido, ev);
-      liberados++;
+        if (foiPago) {
+          await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
+          recuperados++;
+        } else {
+          pedido.status = 'expirado';
+          if (ev) liberarReservaPedido(pedido, ev);
+          liberados++;
+        }
+      } catch (e) { console.error(`[Limpeza] Erro ao processar pedido ${pedido.id}:`, e.message); }
     }
-  }
-  if (liberados > 0 || recuperados > 0) {
-    persistPedidos();
-    console.log(`[Limpeza] ${liberados} reserva(s) expirada(s) liberada(s), ${recuperados} pedido(s) recuperado(s) numa última checagem antes de expirar.`);
-  }
+    if (liberados > 0 || recuperados > 0) {
+      persistPedidos();
+      console.log(`[Limpeza] ${liberados} reserva(s) expirada(s) liberada(s), ${recuperados} pedido(s) recuperado(s) numa última checagem antes de expirar.`);
+    }
+  } catch (e) { console.error('[Limpeza] Erro geral na rotina:', e.message); }
 }, 5 * 60000);
+
+// ── PROTEÇÃO GLOBAL CONTRA QUEDAS INESPERADAS ──
+// Por padrão, o Node.js derruba o processo inteiro se algum erro não for capturado em algum lugar
+// (por exemplo, dentro de uma rotina automática). Isso registra o erro no log em vez de deixar o
+// servidor inteiro cair e reiniciar — o que explicava tanto pagamentos perdidos no meio do processo
+// quanto instabilidade geral (incluindo envio de e-mail) sempre que algo desse errado.
+process.on('unhandledRejection', (motivo) => {
+  console.error('⚠️ Erro não tratado (unhandledRejection) — servidor continua rodando normalmente:', motivo);
+});
+process.on('uncaughtException', (erro) => {
+  console.error('⚠️ Exceção não capturada (uncaughtException) — servidor continua rodando normalmente:', erro);
+});
 
 app.listen(PORT, () => {
   console.log(`\n🎟️  LOTA rodando na porta ${PORT}`);
@@ -3373,49 +3395,55 @@ app.listen(PORT, () => {
 // compra. Isso evita ter que estornar pagamento por pagamento direto no Mercado Pago/Asaas (que seria
 // bem mais complexo, já que uma pessoa pode ter feito várias recargas diferentes ao longo do evento).
 setInterval(async () => {
-  const agora = Date.now();
-  const margemHoras = 24 * 60 * 60 * 1000;
-  let eventosProcessados = 0, pessoasReembolsadas = 0, valorTotalReembolsado = 0;
+  try {
+    const agora = Date.now();
+    const margemHoras = 24 * 60 * 60 * 1000;
+    let eventosProcessados = 0, pessoasReembolsadas = 0, valorTotalReembolsado = 0;
 
-  for (const ev of EVENTOS) {
-    if (!ev.barConfig?.ativo || ev.barSaldosReembolsados) continue;
-    if (!ev.dataEvento) continue;
-    const dataHoraEvento = new Date(`${ev.dataEvento}T${ev.horaEvento || '23:59'}:00`).getTime();
-    if (isNaN(dataHoraEvento) || (agora - dataHoraEvento) < margemHoras) continue;
+    for (const ev of EVENTOS) {
+      try {
+        if (!ev.barConfig?.ativo || ev.barSaldosReembolsados) continue;
+        if (!ev.dataEvento) continue;
+        const dataHoraEvento = new Date(`${ev.dataEvento}T${ev.horaEvento || '23:59'}:00`).getTime();
+        if (isNaN(dataHoraEvento) || (agora - dataHoraEvento) < margemHoras) continue;
 
-    const pedidosDoEvento = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
-    const codigosProcessados = new Set();
-    for (const pedido of pedidosDoEvento) {
-      for (const ticket of (pedido.tickets || [])) {
-        if (ticket.cancelado || codigosProcessados.has(ticket.codigo)) continue;
-        codigosProcessados.add(ticket.codigo);
-        const { saldoCashless } = calcularContaBar(ev.id, ticket.codigo);
-        if (saldoCashless <= 0) continue;
+        const pedidosDoEvento = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+        const codigosProcessados = new Set();
+        for (const pedido of pedidosDoEvento) {
+          for (const ticket of (pedido.tickets || [])) {
+            try {
+              if (ticket.cancelado || codigosProcessados.has(ticket.codigo)) continue;
+              codigosProcessados.add(ticket.codigo);
+              const { saldoCashless } = calcularContaBar(ev.id, ticket.codigo);
+              if (saldoCashless <= 0) continue;
 
-        const emailTitular = (ticket.titularEmail || pedido.comprador?.email || '').toLowerCase();
-        const conta = db.users.find(u => u.email.toLowerCase() === emailTitular);
-        if (conta) {
-          conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
-          enviarEmailGenerico(conta.email,
-            `Saldo do bar devolvido — ${ev.nome}`,
-            `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
-          ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
+              const emailTitular = (ticket.titularEmail || pedido.comprador?.email || '').toLowerCase();
+              // Bug corrigido: se algum usuário tivesse o e-mail ausente/nulo no banco, "u.email"
+              // seria undefined e ".toLowerCase()" quebrava a rotina inteira sem proteção nenhuma.
+              const conta = emailTitular ? db.users.find(u => (u.email || '').toLowerCase() === emailTitular) : null;
+              if (conta) {
+                conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
+                enviarEmailGenerico(conta.email,
+                  `Saldo do bar devolvido — ${ev.nome}`,
+                  `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
+                ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
+              }
+              CONSUMOS_BAR.push({
+                id: uuidv4(), eventoId: ev.id, ticketCodigo: ticket.codigo, tipo: 'consumo', modo: 'pre-pago',
+                status: 'pago', valor: saldoCashless, itens: [{ produtoId: 'reembolso-automatico', nome: 'Reembolso automático (saldo não usado)', qtd: 1, precoUnit: saldoCashless }],
+                operadorNome: 'Sistema (automático)', createdAt: new Date().toISOString()
+              });
+              pessoasReembolsadas++; valorTotalReembolsado += saldoCashless;
+            } catch (e) { console.error(`[Reembolso Bar] Erro ao processar ingresso ${ticket.codigo}:`, e.message); }
+          }
         }
-        // Zera o saldo (registrando como estorno) — independente de existir conta vinculada, já que o
-        // valor não fica "esquecido" gerando saldo fantasma em consultas futuras dessa comanda.
-        CONSUMOS_BAR.push({
-          id: uuidv4(), eventoId: ev.id, ticketCodigo: ticket.codigo, tipo: 'consumo', modo: 'pre-pago',
-          status: 'pago', valor: saldoCashless, itens: [{ produtoId: 'reembolso-automatico', nome: 'Reembolso automático (saldo não usado)', qtd: 1, precoUnit: saldoCashless }],
-          operadorNome: 'Sistema (automático)', createdAt: new Date().toISOString()
-        });
-        pessoasReembolsadas++; valorTotalReembolsado += saldoCashless;
-      }
+        ev.barSaldosReembolsados = true;
+        eventosProcessados++;
+      } catch (e) { console.error(`[Reembolso Bar] Erro ao processar evento ${ev.id}:`, e.message); }
     }
-    ev.barSaldosReembolsados = true;
-    eventosProcessados++;
-  }
-  if (eventosProcessados > 0) {
-    persistConsumosBar(); persistEventos(); saveDB(db);
-    console.log(`[Reembolso Bar] ${eventosProcessados} evento(s) processado(s), ${pessoasReembolsadas} pessoa(s) reembolsada(s), total R$ ${valorTotalReembolsado.toFixed(2)}.`);
-  }
+    if (eventosProcessados > 0) {
+      persistConsumosBar(); persistEventos(); saveDB(db);
+      console.log(`[Reembolso Bar] ${eventosProcessados} evento(s) processado(s), ${pessoasReembolsadas} pessoa(s) reembolsada(s), total R$ ${valorTotalReembolsado.toFixed(2)}.`);
+    }
+  } catch (e) { console.error('[Reembolso Bar] Erro geral na rotina:', e.message); }
 }, 6 * 60 * 60 * 1000);
