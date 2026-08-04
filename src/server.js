@@ -228,6 +228,16 @@ function loadColecao(nome) {
   return [];
 }
 function saveColecao(nome, arr) { fs.writeFile(path.join(DATA_DIR, nome + '.json'), JSON.stringify(arr), (err) => { if (err) console.error(`Erro ao salvar ${nome}.json:`, err.message); }); }
+// Versão síncrona — usada só no momento mais crítico (criação de um pedido novo), garantindo que o
+// registro esteja de verdade gravado em disco ANTES de responder ao comprador e ele ser redirecionado
+// pro provedor de pagamento. Sem isso, existia uma janela pequena (mas real) onde, se o servidor
+// reiniciasse bem nesse intervalo, o pedido podia se perder mesmo com o pagamento sendo concluído
+// normalmente do lado do Asaas/Mercado Pago — explicando pedidos que "sumiam" sem nenhum rastro.
+function saveColecaoSync(nome, arr) {
+  try { fs.writeFileSync(path.join(DATA_DIR, nome + '.json'), JSON.stringify(arr)); return true; }
+  catch (e) { console.error(`Erro ao salvar ${nome}.json (síncrono):`, e.message); return false; }
+}
+function persistPedidosSync() { return saveColecaoSync('pedidos', cifrarCpfPedidos(PEDIDOS)); }
 let EVENTOS  = loadColecao('eventos');
 let PEDIDOS  = decifrarCpfPedidos(loadColecao('pedidos'));
 let MENSAGENS = loadColecao('mensagens');
@@ -2029,7 +2039,11 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
         if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
         pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID do checkout do Asaas nesse mesmo campo
-        PEDIDOS.push(pedidoBase); persistPedidos();
+        PEDIDOS.push(pedidoBase);
+        // Gravação SÍNCRONA aqui — garante que o pedido já está de verdade em disco antes do
+        // comprador ser redirecionado pro Asaas, fechando a janela de corrida que podia perder o
+        // pedido em caso de reinício do servidor bem nesse instante.
+        persistPedidosSync();
         return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.link });
       } catch (e) { return res.status(500).json({ error: e.message }); }
     }
@@ -2049,7 +2063,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         return res.status(400).json({ error: detalhe || 'Erro ao gerar PIX.' });
       }
       pedidoBase.mpPaymentId = String(pixData.id);
-      PEDIDOS.push(pedidoBase); persistPedidos();
+      PEDIDOS.push(pedidoBase); persistPedidosSync();
       const td = pixData.point_of_interaction?.transaction_data || {};
       return res.json({ ok: true, pedidoId, metodo: 'pix', qrCode: td.qr_code || '', qrCodeBase64: td.qr_code_base64 || '', testMode: isTestToken(MP_PLATFORM_TOKEN) });
     }
@@ -2093,7 +2107,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     }
 
     pedidoBase.mpPaymentId = String(cardData.id);
-    PEDIDOS.push(pedidoBase); persistPedidos();
+    PEDIDOS.push(pedidoBase); persistPedidosSync();
     const pedidoSalvo = PEDIDOS.find(p => p.id === pedidoId);
 
     if (cardData.status === 'pending' && cardData.status_detail === 'pending_challenge' && cardData.three_ds_info) {
@@ -2409,7 +2423,7 @@ app.post('/api/mp/webhook', async (req, res) => {
 
     // Se o pedidoId não veio na URL (por algum motivo), localizamos pelo external_reference do próprio pagamento
     const pedido = PEDIDOS.find(p => p.id === (pedidoId || payment.external_reference));
-    if (!pedido) return res.sendStatus(200);
+    if (!pedido) { console.error(`[Webhook MP] ⚠️ Pagamento ${paymentId} (status: ${payment.status}) não corresponde a nenhum pedido conhecido (ped=${pedidoId||'ausente'}, external_reference=${payment.external_reference||'ausente'}).`); return res.sendStatus(200); }
 
     if (payment.status === 'approved' && pedido.status !== 'pago') {
       const hostW = req.get('host'); const protoW = req.get('x-forwarded-proto') || 'https';
@@ -2456,6 +2470,8 @@ app.post('/api/asaas/webhook', async (req, res) => {
         if (recarga && recarga.status === 'pendente' && evento === 'CHECKOUT_PAID') {
           recarga.status = 'pago';
           persistConsumosBar();
+        } else if (!recarga) {
+          console.error(`[Webhook Asaas] Recarga "${recargaId}" não encontrada (evento: ${evento}).`);
         }
         return res.sendStatus(200);
       }
@@ -2464,17 +2480,23 @@ app.post('/api/asaas/webhook', async (req, res) => {
         if (evento === 'CHECKOUT_PAID' && pedido.status !== 'pago') {
           const proto = req.get('x-forwarded-proto') || 'https';
           await processarPagamentoAprovado(pedido, checkout.id, `${proto}://${req.get('host')}`);
+          console.log(`[Webhook Asaas] Pedido ${pedido.id} confirmado como pago via CHECKOUT_PAID.`);
         } else if (['CHECKOUT_CANCELED', 'CHECKOUT_EXPIRED'].includes(evento) && pedido.status === 'pendente') {
           pedido.status = 'recusado';
           const evR = EVENTOS.find(e => e.id === pedido.eventoId);
           if (evR) liberarReservaPedido(pedido, evR);
           persistPedidos();
         }
+      } else {
+        // Isso NUNCA deveria acontecer se o pedido foi gravado corretamente antes do comprador ser
+        // redirecionado — se aparecer no log, é sinal de que o pedido se perdeu antes do webhook
+        // chegar (por isso a gravação da criação do pedido virou síncrona).
+        console.error(`[Webhook Asaas] ⚠️ Checkout "${checkout.externalReference}" (evento: ${evento}) não corresponde a nenhum pedido conhecido — pedido pode ter se perdido antes da confirmação.`);
       }
       return res.sendStatus(200);
     }
 
-    if (!payment || !payment.externalReference) return res.sendStatus(200);
+    if (!payment || !payment.externalReference) { console.log('[Webhook Asaas] Evento recebido sem payment/externalReference (evento:', evento, ') — ignorado.'); return res.sendStatus(200); }
     if (payment.externalReference.startsWith('recarga:')) {
       const recargaId = payment.externalReference.slice('recarga:'.length);
       const recarga = CONSUMOS_BAR.find(c => c.id === recargaId && c.tipo === 'recarga');
@@ -2485,7 +2507,7 @@ app.post('/api/asaas/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
     const pedido = PEDIDOS.find(p => p.id === payment.externalReference);
-    if (!pedido) return res.sendStatus(200);
+    if (!pedido) { console.error(`[Webhook Asaas] ⚠️ Payment "${payment.externalReference}" (evento: ${evento}) não corresponde a nenhum pedido conhecido.`); return res.sendStatus(200); }
 
     if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento) && pedido.status !== 'pago') {
       const proto = req.get('x-forwarded-proto') || 'https';
