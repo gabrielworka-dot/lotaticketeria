@@ -440,7 +440,17 @@ let SOMENTE_LEITURA=false;
   try{
     const d=await api('GET','/api/auth/me');
     CU=d.user;
-    if(!CU.isOrganizador && !CU.colaboradorDe){
+    // Bug corrigido: antes, só CU.colaboradorDe (sistema antigo, acesso a todos os eventos de um
+    // produtor) liberava a entrada aqui — quem foi adicionado a um evento específico (sistema novo)
+    // era bloqueado nessa checagem antes mesmo de conseguir ver o próprio evento. Agora perguntamos
+    // direto pra API (que já sabe checar os dois sistemas corretamente) se essa pessoa tem acesso a
+    // pelo menos um evento, em vez de confiar só num campo estático da conta.
+    let temAcessoAAlgumEvento=CU.isOrganizador;
+    if(!temAcessoAAlgumEvento){
+      try{ await api('GET','/api/meus-eventos'); temAcessoAAlgumEvento=true; }
+      catch(e){ temAcessoAAlgumEvento=false; }
+    }
+    if(!temAcessoAAlgumEvento){
       if(CU.isAdmin){ location.href='/admin.html'; return; }
       // Cliente tentando acessar o painel de produtor — pede confirmação explícita, não promove sozinho
       document.body.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px">
@@ -456,7 +466,7 @@ let SOMENTE_LEITURA=false;
       </div>`;
       return;
     }
-    SOMENTE_LEITURA=!CU.isOrganizador && !!CU.colaboradorDe;
+    SOMENTE_LEITURA=!CU.isOrganizador;
     if(SOMENTE_LEITURA){
       document.body.classList.add('modo-leitura');
       ['navNovo','navSaldo','navComunidade'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
