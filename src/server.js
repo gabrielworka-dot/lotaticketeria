@@ -283,7 +283,13 @@ function organizadorOnly(req, res, next) {
   next();
 }
 function organizadorOuColaborador(req, res, next) {
-  if (!req.user.isOrganizador && !req.user.colaboradorDe) return res.status(403).json({ error: 'Acesso restrito a produtores e sua equipe.' });
+  // Bug corrigido: essa checagem só reconhecia o sistema antigo (colaboradorDe, vínculo com TODOS
+  // os eventos de um produtor) — quem foi adicionado só a um evento específico (sistema novo) nunca
+  // passava daqui, e a plataforma aparecia vazia mesmo com o acesso concedido corretamente.
+  const ehColaboradorDeAlgumEvento = EVENTOS.some(e => (e.colaboradoresIds || []).includes(req.user.id));
+  if (!req.user.isOrganizador && !req.user.colaboradorDe && !ehColaboradorDeAlgumEvento) {
+    return res.status(403).json({ error: 'Acesso restrito a produtores e sua equipe.' });
+  }
   next();
 }
 function adminOnly(req, res, next) {
