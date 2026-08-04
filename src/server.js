@@ -296,13 +296,16 @@ function eventoDoUsuario(eventoId, userId) {
   if (!ev || ev.organizadorId !== userId) return null;
   return ev;
 }
-// Usado só em rotas de LEITURA — permite dono do evento OU colaborador com acesso de visualização
+// Usado só em rotas de LEITURA — permite dono do evento, colaborador adicionado NESSE evento
+// específico, ou (compatibilidade com quem já foi adicionado do jeito antigo) colaborador geral
+// do produtor.
 function eventoVisivelPara(eventoId, user) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev) return null;
   if (user.isAdmin) return ev;
   if (ev.organizadorId === user.id) return ev;
-  if (user.colaboradorDe && ev.organizadorId === user.colaboradorDe) return ev;
+  if ((ev.colaboradoresIds || []).includes(user.id)) return ev;
+  if (user.colaboradorDe && ev.organizadorId === user.colaboradorDe) return ev; // compatibilidade
   return null;
 }
 
@@ -649,6 +652,38 @@ app.delete('/api/produtor/colaboradores/:userId', auth, organizadorOnly, (req, r
   res.json({ ok: true });
 });
 
+// ── Colaboradores POR EVENTO — cada pessoa só acompanha as vendas do evento em que foi
+// adicionada, não de todos os eventos do produtor de uma vez.
+app.get('/api/eventos/:id/colaboradores', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const membros = (ev.colaboradoresIds || []).map(id => db.users.find(u => u.id === id)).filter(Boolean).map(u => ({ id: u.id, nome: u.nome, email: u.email }));
+  res.json({ colaboradores: membros });
+});
+app.post('/api/eventos/:id/colaboradores', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const email = sanitize(req.body.email || '', 150).toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
+  const pessoa = db.users.find(u => u.email === email);
+  if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
+  if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
+  if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
+  if (!ev.colaboradoresIds) ev.colaboradoresIds = [];
+  if (ev.colaboradoresIds.includes(pessoa.id)) return res.status(400).json({ error: 'Essa pessoa já é colaboradora deste evento.' });
+  ev.colaboradoresIds.push(pessoa.id);
+  persistEventos();
+  res.status(201).json({ ok: true, colaborador: { id: pessoa.id, nome: pessoa.nome, email: pessoa.email } });
+});
+app.delete('/api/eventos/:id/colaboradores/:userId', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  if (!ev.colaboradoresIds || !ev.colaboradoresIds.includes(req.params.userId)) return res.status(404).json({ error: 'Colaborador não encontrado neste evento.' });
+  ev.colaboradoresIds = ev.colaboradoresIds.filter(id => id !== req.params.userId);
+  persistEventos();
+  res.json({ ok: true });
+});
+
 
 // (MP_CLIENT_ID/MP_CLIENT_SECRET não são mais necessários — pagamento único via MP_ACCESS_TOKEN)
 const MP_API = 'https://api.mercadopago.com';
@@ -763,8 +798,15 @@ function isTestToken(token) { return /^TEST-/i.test(token || ''); }
 // EVENTOS (organizador)
 // ════════════════════════════════════════════════════════
 app.get('/api/meus-eventos', auth, organizadorOuColaborador, (req, res) => {
-  const idAlvo = req.user.colaboradorDe || req.user.id;
-  res.json({ eventos: EVENTOS.filter(e => e.organizadorId === idAlvo), modoVisualizacao: !!req.user.colaboradorDe });
+  let eventos;
+  if (req.user.isOrganizador) {
+    eventos = EVENTOS.filter(e => e.organizadorId === req.user.id);
+  } else {
+    // Colaborador puro: vê só os eventos em que foi adicionado especificamente, mais os eventos do
+    // produtor a quem ainda está vinculado pelo jeito antigo (compatibilidade com quem já usava isso).
+    eventos = EVENTOS.filter(e => (e.colaboradoresIds || []).includes(req.user.id) || (req.user.colaboradorDe && e.organizadorId === req.user.colaboradorDe));
+  }
+  res.json({ eventos, modoVisualizacao: !req.user.isOrganizador });
 });
 
 app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
