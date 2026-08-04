@@ -1182,8 +1182,19 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
         }
         return res.json({ ok: true, atualizado: false, statusMercadoPago: consultaPagamento.data.status, statusAtual: pedido.status });
       }
-      // Pedido ainda pendente — mpPaymentId aqui é o ID do CHECKOUT. Procuramos o pagamento real
-      // gerado por essa sessão (sinal mais direto que o status do checkout em si).
+      // Pedido ainda pendente — mpPaymentId aqui é o ID do CHECKOUT. O status do próprio Checkout é
+      // o sinal mais confiável (descobrimos que o filtro "checkoutSession" às vezes não retorna
+      // resultado mesmo com o pagamento já confirmado do lado do Asaas).
+      const consultaCheckout = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
+      if (consultaCheckout.ok && consultaCheckout.data.status === 'PAID') {
+        const proto = req.get('x-forwarded-proto') || 'https';
+        await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${proto}://${req.get('host')}`);
+        return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
+      }
+      if (consultaCheckout.ok && ['CANCELED', 'EXPIRED'].includes(consultaCheckout.data.status)) {
+        return res.json({ ok: true, atualizado: false, statusMercadoPago: consultaCheckout.data.status, statusAtual: pedido.status });
+      }
+      // Reforço: tenta também pelo filtro antigo, caso o Checkout já não exista mais como registro ativo
       const buscaPagamento = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
       const pagamentoReal = (buscaPagamento.ok && buscaPagamento.data.data && buscaPagamento.data.data[0]) || null;
       if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) {
@@ -1191,13 +1202,7 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
         await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${proto}://${req.get('host')}`);
         return res.json({ ok: true, atualizado: true, novoStatus: 'pago' });
       }
-      if (!pagamentoReal) {
-        const consultaCheckout = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
-        if (consultaCheckout.ok && ['CANCELED', 'EXPIRED'].includes(consultaCheckout.data.status)) {
-          return res.json({ ok: true, atualizado: false, statusMercadoPago: consultaCheckout.data.status, statusAtual: pedido.status });
-        }
-      }
-      return res.json({ ok: true, atualizado: false, statusMercadoPago: pagamentoReal?.status || 'sem pagamento ainda', statusAtual: pedido.status });
+      return res.json({ ok: true, atualizado: false, statusMercadoPago: pagamentoReal?.status || consultaCheckout.data?.status || 'sem pagamento ainda', statusAtual: pedido.status });
     }
 
     if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
@@ -2536,21 +2541,25 @@ app.get('/api/public/pedido/:pedidoId', rateLimit(60000, 60), async (req, res) =
   // pra confirmar), consultamos ativamente o pagamento pelo ID que já guardamos.
   if (['pendente','expirado'].includes(pedido.status) && pedido.mpPaymentId && pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY) {
     try {
-      // Prioridade 1: procura o pagamento de verdade gerado por essa sessão de checkout (sinal mais
-      // direto de que o dinheiro entrou). Só usamos o status do Checkout em si como reserva, pra
-      // detectar sessão cancelada/expirada quando ainda não existe nenhum pagamento associado.
-      const buscaPagamento = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
-      const pagamentoReal = (buscaPagamento.ok && buscaPagamento.data.data && buscaPagamento.data.data[0]) || null;
-      if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) {
+      // Prioridade 1: o status do próprio Checkout — sinal mais confiável (descobrimos que o filtro
+      // "checkoutSession" às vezes não retorna resultado mesmo com o pagamento já confirmado do lado
+      // do Asaas, mesmo aparecendo como "Pago" no painel deles).
+      const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
+      if (consulta.ok && consulta.data.status === 'PAID') {
         const protoF = req.get('x-forwarded-proto') || 'https';
         await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${protoF}://${req.get('host')}`);
-      } else if (!pagamentoReal) {
-        const consulta = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
-        if (consulta.ok && ['CANCELED','EXPIRED'].includes(consulta.data.status)) {
-          pedido.status = 'recusado';
-          const evR = EVENTOS.find(e => e.id === pedido.eventoId);
-          if (evR) liberarReservaPedido(pedido, evR);
-          persistPedidos();
+      } else if (consulta.ok && ['CANCELED','EXPIRED'].includes(consulta.data.status)) {
+        pedido.status = 'recusado';
+        const evR = EVENTOS.find(e => e.id === pedido.eventoId);
+        if (evR) liberarReservaPedido(pedido, evR);
+        persistPedidos();
+      } else {
+        // Reforço: tenta também pelo filtro antigo, caso o Checkout já não exista mais como registro ativo
+        const buscaPagamento = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
+        const pagamentoReal = (buscaPagamento.ok && buscaPagamento.data.data && buscaPagamento.data.data[0]) || null;
+        if (pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status)) {
+          const protoF = req.get('x-forwarded-proto') || 'https';
+          await processarPagamentoAprovado(pedido, pedido.mpPaymentId, `${protoF}://${req.get('host')}`);
         }
       }
     } catch(e) { console.error('Erro ao verificar pagamento (Asaas):', e.message); }
@@ -3299,6 +3308,14 @@ setTimeout(fazerBackup, 60000); // primeiro backup 1 minuto após o servidor sub
 async function pedidoFoiPagoDeVerdade(pedido) {
   try {
     if (pedido.provedorPagamento === 'asaas' && ASAAS_API_KEY && pedido.mpPaymentId) {
+      // Consulta o Checkout diretamente pelo status dele — sinal mais direto e confiável. Descobrimos
+      // em produção que o filtro por "checkoutSession" (usado antes) às vezes não retorna resultado
+      // mesmo com o pagamento já confirmado do lado do Asaas — por isso agora usamos o status do
+      // próprio Checkout como fonte principal da verdade.
+      const consultaCheckout = await asaasFetch(`/checkouts/${pedido.mpPaymentId}`);
+      if (consultaCheckout.ok && consultaCheckout.data.status === 'PAID') return true;
+      // Reforço: também tenta pelo filtro antigo, caso o Checkout já não exista mais como registro
+      // ativo mas o pagamento gerado por ele ainda esteja rastreável dessa forma.
       const busca = await asaasFetch(`/payments?checkoutSession=${pedido.mpPaymentId}`);
       const pagamentoReal = (busca.ok && busca.data.data && busca.data.data[0]) || null;
       return !!(pagamentoReal && ['CONFIRMED', 'RECEIVED'].includes(pagamentoReal.status));
