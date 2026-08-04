@@ -2044,6 +2044,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         // comprador ser redirecionado pro Asaas, fechando a janela de corrida que podia perder o
         // pedido em caso de reinício do servidor bem nesse instante.
         persistPedidosSync();
+        console.log(`[Checkout Asaas] Pedido ${pedidoId} criado com sucesso — checkout id: ${criacao.data.id}, comprador: ${comprador.email}, valor: R$${valorCobranca}`);
         return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.link });
       } catch (e) { return res.status(500).json({ error: e.message }); }
     }
@@ -2064,6 +2065,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       }
       pedidoBase.mpPaymentId = String(pixData.id);
       PEDIDOS.push(pedidoBase); persistPedidosSync();
+      console.log(`[Checkout MP/PIX] Pedido ${pedidoId} criado com sucesso — payment id: ${pixData.id}, comprador: ${comprador.email}, valor: R$${valorCobranca}`);
       const td = pixData.point_of_interaction?.transaction_data || {};
       return res.json({ ok: true, pedidoId, metodo: 'pix', qrCode: td.qr_code || '', qrCodeBase64: td.qr_code_base64 || '', testMode: isTestToken(MP_PLATFORM_TOKEN) });
     }
@@ -2108,6 +2110,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
 
     pedidoBase.mpPaymentId = String(cardData.id);
     PEDIDOS.push(pedidoBase); persistPedidosSync();
+    console.log(`[Checkout MP/Cartão] Pedido ${pedidoId} criado — payment id: ${cardData.id}, status inicial: ${cardData.status}, comprador: ${comprador.email}, valor: R$${valorCobranca}`);
     const pedidoSalvo = PEDIDOS.find(p => p.id === pedidoId);
 
     if (cardData.status === 'pending' && cardData.status_detail === 'pending_challenge' && cardData.three_ds_info) {
@@ -3321,13 +3324,18 @@ setInterval(async () => {
     // Só confere pedidos com pelo menos 2 minutos de vida — dá tempo do webhook normal chegar primeiro,
     // evitando checagens desnecessárias em pedidos criados há poucos segundos.
     const candidatos = PEDIDOS.filter(p => p.status === 'pendente' && p.mpPaymentId && (agora - new Date(p.createdAt).getTime()) > 2 * 60000);
+    if (candidatos.length > 0) console.log(`[Verificação proativa] Conferindo ${candidatos.length} pedido(s) pendente(s): ${candidatos.map(p => p.id).join(', ')}`);
     for (const pedido of candidatos) {
       // Try/catch em CADA pedido individualmente — um erro num pedido específico não pode derrubar
       // a verificação dos outros, nem (mais importante ainda) travar o processo inteiro do servidor.
       try {
-        if (await pedidoFoiPagoDeVerdade(pedido)) {
+        const pago = await pedidoFoiPagoDeVerdade(pedido);
+        if (pago) {
           await processarPagamentoAprovado(pedido, pedido.mpPaymentId, PUBLIC_BASE_URL);
           recuperados++;
+          console.log(`[Verificação proativa] Pedido ${pedido.id} confirmado como pago.`);
+        } else {
+          console.log(`[Verificação proativa] Pedido ${pedido.id} (provedor: ${pedido.provedorPagamento}, id externo: ${pedido.mpPaymentId}) ainda não confirmado.`);
         }
       } catch (e) { console.error(`[Verificação proativa] Erro ao verificar pedido ${pedido.id}:`, e.message); }
     }
