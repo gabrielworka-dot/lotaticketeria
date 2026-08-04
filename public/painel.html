@@ -535,6 +535,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
+      ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'equipe\',this)">👥 Equipe</div>'}
     </div>
     <div id="evTabGeral"></div>
     <div id="evTabLotes" style="display:none"></div>
@@ -545,12 +546,13 @@ function renderEventoDetalhe(){
     <div id="evTabRelatorios" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
     <div id="evTabBar" style="display:none"></div>
+    <div id="evTabEquipe" style="display:none"></div>
   `;
   renderTabGeral();
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar','Equipe'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -562,6 +564,7 @@ function evTab(tab,el){
   if(tab==='relatorios') renderTabRelatorios();
   if(tab==='checkin') renderTabCheckin();
   if(tab==='bar') renderTabBar();
+  if(tab==='equipe') renderTabEquipe();
 }
 
 async function togglePublicar(){
@@ -896,6 +899,42 @@ async function baixarComAuth(ev,tipo){
 
 // ── CHECK-IN ──
 let _barConfigTemp=null;
+async function renderTabEquipe(){
+  const el=document.getElementById('evTabEquipe');
+  el.innerHTML=`
+    <div class="card" style="max-width:520px">
+      <div class="ct">Equipe deste evento</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Adicione pessoas de confiança que possam acompanhar as vendas, relatórios e pedidos <strong>só deste evento</strong> — sem poder editar nada, e sem ver seus outros eventos. A pessoa precisa já ter uma conta na Lota.</p>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="fi" id="colabEventoEmail" type="email" placeholder="e-mail da pessoa">
+        <button class="btn bp btn-sm" onclick="adicionarColaboradorEvento()">+ Adicionar</button>
+      </div>
+      <div id="listaColaboradoresEvento"></div>
+    </div>`;
+  carregarColaboradoresEvento();
+}
+async function carregarColaboradoresEvento(){
+  const el=document.getElementById('listaColaboradoresEvento');
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/colaboradores');
+    el.innerHTML=d.colaboradores.length?d.colaboradores.map(c=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(c.nome)+' <span style="color:var(--text3)">('+esc(c.email)+')</span></span><button class="btn bdng btn-sm" onclick="removerColaboradorEvento(\''+c.id+'\')">Remover</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Ninguém adicionado ainda.</p>';
+  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">'+esc(e.message)+'</p>'; }
+}
+async function adicionarColaboradorEvento(){
+  const email=document.getElementById('colabEventoEmail').value.trim();
+  if(!email){ toast('Digite o e-mail.','err'); return; }
+  try{
+    await api('POST','/api/eventos/'+EV_ATUAL.id+'/colaboradores',{email});
+    document.getElementById('colabEventoEmail').value='';
+    toast('Adicionado à equipe deste evento!','ok');
+    carregarColaboradoresEvento();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function removerColaboradorEvento(id){
+  if(!confirm('Remover o acesso dessa pessoa a este evento?')) return;
+  try{ await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/colaboradores/'+id); toast('Removido.','ok'); carregarColaboradoresEvento(); }
+  catch(e){ toast(e.message,'err'); }
+}
 async function renderTabBar(){
   const el=document.getElementById('evTabBar');
   el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
@@ -1351,39 +1390,10 @@ function carregarPerfil(){
 
     ${CU.isOrganizador?`
     <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:16px">
-      <div class="ct">Equipe (acesso somente de visualização)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Adicione pessoas de confiança que possam ver seus eventos, relatórios e vendas — sem poder editar nada. A pessoa precisa já ter uma conta na Lota.</p>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input class="fi" id="colabEmail" type="email" placeholder="e-mail da pessoa">
-        <button class="btn bp btn-sm" onclick="adicionarColaborador()">+ Adicionar</button>
-      </div>
-      <div id="listaColaboradores"></div>
+      <div class="ct">Equipe</div>
+      <p style="font-size:12px;color:var(--text2)">Adicionar colaboradores agora é feito dentro de cada evento — assim cada pessoa só acompanha as vendas do evento certo. Abre o evento e procura a aba "👥 Equipe".</p>
     </div>` : ''}
   `;
-  if(CU.isOrganizador) carregarColaboradores();
-}
-async function carregarColaboradores(){
-  const el=document.getElementById('listaColaboradores');
-  if(!el) return;
-  try{
-    const d=await api('GET','/api/produtor/colaboradores');
-    el.innerHTML=d.colaboradores.length?d.colaboradores.map(c=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(c.nome)+' <span style="color:var(--text3)">('+esc(c.email)+')</span></span><button class="btn bdng btn-sm" onclick="removerColaborador(\''+c.id+'\')">Remover</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Nenhum colaborador ainda.</p>';
-  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">'+esc(e.message)+'</p>'; }
-}
-async function adicionarColaborador(){
-  const email=document.getElementById('colabEmail').value.trim();
-  if(!email){ toast('Digite o e-mail.','err'); return; }
-  try{
-    await api('POST','/api/produtor/colaboradores',{email});
-    document.getElementById('colabEmail').value='';
-    toast('Colaborador adicionado!','ok');
-    carregarColaboradores();
-  }catch(e){ toast(e.message,'err'); }
-}
-async function removerColaborador(id){
-  if(!confirm('Remover o acesso dessa pessoa?')) return;
-  try{ await api('DELETE','/api/produtor/colaboradores/'+id); toast('Removido.','ok'); carregarColaboradores(); }
-  catch(e){ toast(e.message,'err'); }
 }
 function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
 async function salvarPerfil(){
