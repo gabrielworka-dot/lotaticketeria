@@ -1742,6 +1742,26 @@ app.get('/api/produtor/dicas/pdf', auth, organizadorOnly, (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${dicas.pdfNome || 'dicas.pdf'}"`);
   res.send(Buffer.from(dicas.pdfBase64, 'base64'));
 });
+// ── Gestão do webhook do Asaas direto pela nossa API — evita depender de encontrar o botão certo
+// no painel deles, que pode variar ou ser difícil de localizar quando a fila é pausada.
+app.get('/api/admin/asaas-webhooks', auth, adminOnly, async (req, res) => {
+  if (!ASAAS_API_KEY) return res.status(400).json({ error: 'Asaas não está configurado.' });
+  try {
+    const resposta = await asaasFetch('/webhooks');
+    if (!resposta.ok) return res.status(400).json({ error: 'Erro ao consultar webhooks no Asaas.', detalhes: resposta.data });
+    res.json({ webhooks: resposta.data.data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/asaas-webhooks/:id/reativar', auth, adminOnly, async (req, res) => {
+  if (!ASAAS_API_KEY) return res.status(400).json({ error: 'Asaas não está configurado.' });
+  try {
+    const resposta = await asaasFetch(`/webhooks/${req.params.id}`, { method: 'PUT', body: JSON.stringify({ interrupted: false }) });
+    if (!resposta.ok) return res.status(400).json({ error: resposta.data?.errors?.[0]?.description || 'Erro ao reativar o webhook.', detalhes: resposta.data });
+    registrarAuditoria(req.user, 'reativou_webhook_asaas', { webhookId: req.params.id });
+    res.json({ ok: true, webhook: resposta.data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/dicas', auth, adminOnly, (req, res) => {
   const dicas = db.dicasProdutores || {};
   res.json({ titulo: dicas.titulo || '', descricao: dicas.descricao || '', videoUrl: dicas.videoUrl || '', pdfNome: dicas.pdfNome || '', temPdf: !!dicas.pdfBase64, atualizadoEm: dicas.atualizadoEm || null });
