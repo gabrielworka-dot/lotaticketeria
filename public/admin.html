@@ -196,6 +196,12 @@ a{color:inherit;}
         <button class="btn bp btn-sm" onclick="salvarProvedor()">Salvar</button>
       </div>
     </div>
+    <div class="card" style="max-width:420px">
+      <div class="ct">Webhooks do Asaas</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Se a fila de webhooks do Asaas for pausada (após muitas falhas de entrega seguidas), pagamentos deixam de refletir automaticamente na plataforma. Reative por aqui, sem precisar procurar no painel deles.</p>
+      <div id="asaasWebhooksList"><div class="empty" style="padding:10px"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+      <button class="btn bo btn-sm" style="margin-top:10px" onclick="carregarAsaasWebhooks()">🔄 Atualizar status</button>
+    </div>
   </div>
 
   <!-- MENSAGENS DE CONTATO -->
@@ -371,7 +377,7 @@ function gp(id,el){
   if(id==='financeiro') carregarFinanceiro();
   if(id==='mensagens') carregarMensagens();
   if(id==='dicas') carregarDicasAdmin();
-  if(id==='config'){ carregarFee(); carregarProvedor(); }
+  if(id==='config'){ carregarFee(); carregarProvedor(); carregarAsaasWebhooks(); }
   if(id==='seguranca'){ carregarConta(); carregarSeguranca(); carregarAuditoria(); }
   closeSb();
 }
@@ -874,6 +880,30 @@ async function salvarFee(){
   if(isNaN(v)||v<0||v>50){ toast('Valor inválido (0-50%).','err'); return; }
   try{ await api('PATCH','/api/admin/marketplace-fee',{feePercent:v}); toast('Comissão atualizada!','ok'); }
   catch(e){ toast(e.message,'err'); }
+}
+async function carregarAsaasWebhooks(){
+  const el=document.getElementById('asaasWebhooksList');
+  el.innerHTML='<div class="empty" style="padding:10px"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/admin/asaas-webhooks');
+    if(!d.webhooks.length){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nenhum webhook configurado no Asaas ainda.</p>'; return; }
+    el.innerHTML=d.webhooks.map(w=>{
+      const pausado=w.interrupted===true;
+      return '<div style="background:var(--bg3);border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        +'<div style="font-size:12px;font-weight:700">'+esc(w.name||w.url)+'</div>'
+        +'<div style="font-size:11px;color:var(--text3);margin:4px 0">'+esc(w.url)+'</div>'
+        +'<div style="font-size:12px;font-weight:700;color:'+(pausado?'var(--red)':'var(--green)')+'">'+(pausado?'⏸️ Fila pausada':'✅ Ativo')+'</div>'
+        +(pausado?'<button class="btn bp btn-sm" style="margin-top:8px" onclick="reativarAsaasWebhook(\''+w.id+'\')">▶️ Reabilitar fila</button>':'')
+        +'</div>';
+    }).join('');
+  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--red)">'+esc(e.message)+'</p>'; }
+}
+async function reativarAsaasWebhook(id){
+  try{
+    await api('POST','/api/admin/asaas-webhooks/'+id+'/reativar',{});
+    toast('Fila de webhooks reabilitada! Eventos pendentes serão reenviados automaticamente.','ok');
+    carregarAsaasWebhooks();
+  }catch(e){ toast(e.message,'err'); }
 }
 async function carregarProvedor(){
   try{
