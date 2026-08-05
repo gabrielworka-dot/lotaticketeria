@@ -1345,11 +1345,15 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   // administrativa que é cobrada à parte do comprador e fica com a plataforma.
   const totalReceita = pedidos.reduce((s,p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
   const totalIngressos = pedidos.reduce((s,p) => s + (p.tickets||[]).length, 0);
+  // Bug corrigido: antes, a quantidade vinha de "lote.vendidos" (contagem acumulada DESDE SEMPRE,
+  // nunca filtrada), enquanto a receita já vinha corretamente filtrada pelo período escolhido —
+  // por isso o valor batia mas a quantidade não, exceto quando o filtro era "Geral". Agora as duas
+  // vêm da MESMA fonte (os pedidos já filtrados pelo período).
   const porLote = {};
-  ev.lotes.forEach(l => { porLote[l.nome] = { vendidos: l.vendidos, receita: 0 }; });
+  ev.lotes.forEach(l => { porLote[l.nome] = { vendidos: 0, receita: 0 }; });
   pedidos.forEach(p => (p.itens||[]).forEach(it => {
     const lote = ev.lotes.find(l => l.id === it.loteId);
-    if (lote && porLote[lote.nome]) porLote[lote.nome].receita += (it.precoUnit || 0) * (it.qtd || 0);
+    if (lote && porLote[lote.nome]) { porLote[lote.nome].receita += (it.precoUnit || 0) * (it.qtd || 0); porLote[lote.nome].vendidos += (it.qtd || 0); }
   }));
   const porPromoter = ev.promoters.map(pr => ({ nome: pr.nome, vendas: pr.vendas || 0, receita: pr.receita || 0 }));
   const porCupom = ev.cupons.map(c => ({ codigo: c.codigo, usos: c.usosAtuais }));
@@ -1358,10 +1362,14 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   const ticketMedioIngresso = totalIngressos > 0 ? totalReceita / totalIngressos : 0;
   const ticketMedioPedido = pedidos.length > 0 ? totalReceita / pedidos.length : 0;
 
-  // Ingressos vendidos vs limite do evento
+  // Ingressos vendidos vs limite do evento — aqui conta TUDO (pago + cortesia), já que capacidade
+  // é sobre lugares ocupados, não sobre receita.
   const capacidadeMaxima = ev.capacidadeMaxima || 0;
   const totalVendidoGeral = ev.lotes.reduce((s, l) => s + (l.vendidos || 0), 0);
   const capacidade = { vendidos: totalVendidoGeral, limite: capacidadeMaxima, percentual: capacidadeMaxima > 0 ? Math.round((totalVendidoGeral / capacidadeMaxima) * 1000) / 10 : null };
+  // Só ingressos PAGOS (sem cortesia) — usado na tendência/média de VENDAS especificamente, pra não
+  // inflar a média com ingressos que não geraram receita nenhuma.
+  const totalVendidoPago = ev.lotes.filter(l => !l.cortesia).reduce((s, l) => s + (l.vendidos || 0), 0);
 
   // Online vs física vs cortesia — hoje a Lota só vende online, então "física" fica sempre 0%
   // (mantido aqui já preparado pra quando/se um dia existir venda presencial).
@@ -1409,20 +1417,31 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
 
   const porDiaMap = {};
   todosPedidosPagos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDiaMap[d]) porDiaMap[d] = { qtd: 0, receita: 0 }; porDiaMap[d].qtd += (p.tickets||[]).length; porDiaMap[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
+  const NOMES_DIA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
   const diasOrdenados = Object.keys(porDiaMap).sort();
-  let acumulado = 0;
-  const porDia = diasOrdenados.map(dia => { acumulado += porDiaMap[dia].receita; return { dia, qtd: porDiaMap[dia].qtd, receita: Math.round(porDiaMap[dia].receita * 100) / 100, receitaAcumulada: Math.round(acumulado * 100) / 100 }; });
+  const porDia = diasOrdenados.map(dia => ({ dia, diaSemana: NOMES_DIA_SEMANA[new Date(dia + 'T12:00:00').getDay()], qtd: porDiaMap[dia].qtd, receita: Math.round(porDiaMap[dia].receita * 100) / 100 }));
 
-  // Tendência simples — projeção linear baseada na média diária de vendas até agora e nos dias que
-  // faltam pro evento. NÃO é um modelo preditivo sofisticado (não considera sazonalidade, picos de
-  // divulgação, etc), é só uma estimativa direta: "se continuar vendendo nesse ritmo até o evento".
+  // Percentual de vendas por dia da semana (agregando TODOS os dias do mesmo tipo — ex: soma de
+  // todas as segundas-feiras) — ajuda a ver quais dias da semana vendem mais, não dia a dia.
+  const porDiaSemanaMap = { dom: 0, seg: 0, ter: 0, qua: 0, qui: 0, sex: 0, sáb: 0 };
+  todosPedidosPagos.forEach(p => {
+    const dataP = new Date((p.pagoEm || p.createdAt).slice(0, 10) + 'T12:00:00');
+    porDiaSemanaMap[NOMES_DIA_SEMANA[dataP.getDay()]] += (p.tickets || []).length;
+  });
+  const totalPorDiaSemana = Object.values(porDiaSemanaMap).reduce((s, v) => s + v, 0);
+  const porDiaSemana = ['seg','ter','qua','qui','sex','sáb','dom'].map(dia => ({ dia, qtd: porDiaSemanaMap[dia], percentual: totalPorDiaSemana > 0 ? Math.round((porDiaSemanaMap[dia] / totalPorDiaSemana) * 1000) / 10 : 0 }));
+
+  // Tendência simples — projeção linear baseada na média diária de VENDAS PAGAS (sem contar
+  // cortesias, senão a média fica inflada com ingressos que não geraram receita) até agora, e nos
+  // dias que faltam pro evento. NÃO é um modelo preditivo sofisticado (não considera sazonalidade,
+  // picos de divulgação, etc), é só uma estimativa direta: "se continuar vendendo nesse ritmo".
   let tendencia = null;
   if (ev.dataEvento && diasOrdenados.length >= 2) {
     const dataEventoObj = new Date(ev.dataEvento + 'T23:59:59');
     const diasRestantes = Math.max(0, Math.ceil((dataEventoObj - agora) / (24 * 60 * 60 * 1000)));
     const primeiroDia = new Date(diasOrdenados[0]);
     const diasDeVendaDecorridos = Math.max(1, Math.ceil((agora - primeiroDia) / (24 * 60 * 60 * 1000)));
-    const mediaIngressosDia = totalVendidoGeral / diasDeVendaDecorridos;
+    const mediaIngressosDia = totalVendidoPago / diasDeVendaDecorridos;
     const projecaoIngressos = Math.round(totalVendidoGeral + mediaIngressosDia * diasRestantes);
     tendencia = {
       mediaIngressosPorDia: Math.round(mediaIngressosDia * 10) / 10, diasRestantes,
@@ -1440,7 +1459,7 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
     periodo, totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo,
     ticketMedioIngresso: Math.round(ticketMedioIngresso * 100) / 100, ticketMedioPedido: Math.round(ticketMedioPedido * 100) / 100,
     capacidade, origemVendas, porTipoIngresso, tendencia,
-    visualizacoes, taxaConversao
+    visualizacoes, taxaConversao, porDiaSemana
   });
 });
 
