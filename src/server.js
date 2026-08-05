@@ -84,13 +84,16 @@ app.use((req, res, next) => {
     // Inclui os domínios de script dos pixels de rastreamento (Meta, Google Analytics/Ads, TikTok)
     // e do jsQR — sem isso, o CSP bloqueia silenciosamente esses scripts de carregar, mesmo que o
     // resto do código esteja certo (foi exatamente isso que quebrou os pixels antes).
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://accounts.google.com https://cdnjs.cloudflare.com https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com https://www.googleadservices.com https://googleads.g.doubleclick.net",
-    "style-src 'self' 'unsafe-inline'",
+    // O Card Payment Brick do Mercado Pago carrega recursos de VÁRIOS domínios além do sdk principal
+    // (mlstatic.com pros arquivos do formulário, mercadolibre.com pra proteção antifraude) — faltando
+    // qualquer um deles, o Brick falha silenciosamente ao montar.
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://www.mercadopago.com https://http2.mlstatic.com https://www.mercadolibre.com https://accounts.google.com https://cdnjs.cloudflare.com https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com https://www.googleadservices.com https://googleads.g.doubleclick.net",
+    "style-src 'self' 'unsafe-inline' https://http2.mlstatic.com https://www.mercadopago.com",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://api.mercadopago.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://analytics.tiktok.com",
-    // Inclui o YouTube — sem isso, o vídeo do evento (usando <iframe>) fica bloqueado pelo navegador
-    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com https://www.youtube.com https://www.youtube-nocookie.com",
-    "font-src 'self' data:",
+    "connect-src 'self' https://api.mercadopago.com https://www.mercadopago.com https://http2.mlstatic.com https://www.mercadolibre.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://analytics.tiktok.com",
+    // Inclui o YouTube e o mercadolibre.com (usado pelo Brick pra verificação antifraude via iframe)
+    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com https://www.mercadolibre.com https://www.youtube.com https://www.youtube-nocookie.com",
+    "font-src 'self' data: https://http2.mlstatic.com",
   ].join('; '));
   next();
 });
