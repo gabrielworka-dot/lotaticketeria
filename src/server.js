@@ -1365,11 +1365,15 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   // Ingressos vendidos vs limite do evento — aqui conta TUDO (pago + cortesia), já que capacidade
   // é sobre lugares ocupados, não sobre receita.
   const capacidadeMaxima = ev.capacidadeMaxima || 0;
-  const totalVendidoGeral = ev.lotes.reduce((s, l) => s + (l.vendidos || 0), 0);
+  // Contamos os ingressos de verdade (direto dos pedidos pagos), em vez de confiar no contador
+  // "lote.vendidos" — esse contador é atualizado em vários pontos diferentes do sistema (reserva,
+  // liberação, recuperação manual, bar) e pode ter ficado dessincronizado da realidade ao longo do
+  // tempo. Contar direto dos ingressos gerados é a fonte da verdade mais confiável.
+  const totalVendidoGeral = todosPedidosPagos.reduce((s, p) => s + (p.tickets || []).length, 0);
   const capacidade = { vendidos: totalVendidoGeral, limite: capacidadeMaxima, percentual: capacidadeMaxima > 0 ? Math.round((totalVendidoGeral / capacidadeMaxima) * 1000) / 10 : null };
   // Só ingressos PAGOS (sem cortesia) — usado na tendência/média de VENDAS especificamente, pra não
   // inflar a média com ingressos que não geraram receita nenhuma.
-  const totalVendidoPago = ev.lotes.filter(l => !l.cortesia).reduce((s, l) => s + (l.vendidos || 0), 0);
+  const totalVendidoPago = todosPedidosPagos.reduce((s, p) => s + (p.itens || []).filter(it => !ev.lotes.find(l => l.id === it.loteId)?.cortesia).reduce((s2, it) => s2 + (it.qtd || 0), 0), 0);
 
   // Online vs física vs cortesia — hoje a Lota só vende online, então "física" fica sempre 0%
   // (mantido aqui já preparado pra quando/se um dia existir venda presencial).
@@ -1453,7 +1457,9 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   // Visualizações da página e taxa de conversão (visualização → pedido pago) — não temos rastreio
   // de visitante único, então essa taxa é sobre o total de visualizações, não pessoas distintas.
   const visualizacoes = ev.visualizacoes || 0;
-  const taxaConversao = visualizacoes > 0 ? Math.round((todosPedidosPagos.length / visualizacoes) * 1000) / 10 : 0;
+  // Taxa de conversão: visualizações da página ÷ ingressos vendidos — mostra quantas visualizações
+  // em média "custam" um ingresso vendido (quanto menor, melhor a conversão).
+  const taxaConversao = totalVendidoGeral > 0 ? Math.round((visualizacoes / totalVendidoGeral) * 10) / 10 : null;
 
   res.json({
     periodo, totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo,
@@ -2741,8 +2747,12 @@ app.post('/api/asaas/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    if (!payment || !payment.externalReference) { console.log('[Webhook Asaas] Evento recebido sem payment/externalReference (evento:', evento, ') — ignorado.'); return res.sendStatus(200); }
-    if (payment.externalReference.startsWith('recarga:')) {
+    if (!payment) { console.log('[Webhook Asaas] Evento recebido sem payment (evento:', evento, ') — ignorado.'); return res.sendStatus(200); }
+    // Em alguns casos o Asaas manda o pagamento com "externalReference" nulo (mesmo vindo de um
+    // Checkout que tinha isso preenchido) — quando isso acontece, usamos o "checkoutSession" como
+    // identificador alternativo, já que é o ID do checkout que guardamos em pedido.mpPaymentId
+    // enquanto o pedido ainda está pendente.
+    if (payment.externalReference && payment.externalReference.startsWith('recarga:')) {
       const recargaId = payment.externalReference.slice('recarga:'.length);
       const recarga = CONSUMOS_BAR.find(c => c.id === recargaId && c.tipo === 'recarga');
       if (recarga && recarga.status === 'pendente' && ['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento)) {
@@ -2751,8 +2761,9 @@ app.post('/api/asaas/webhook', async (req, res) => {
       }
       return res.sendStatus(200);
     }
-    const pedido = PEDIDOS.find(p => p.id === payment.externalReference);
-    if (!pedido) { console.error(`[Webhook Asaas] ⚠️ Payment "${payment.externalReference}" (evento: ${evento}) não corresponde a nenhum pedido conhecido.`); return res.sendStatus(200); }
+    let pedido = payment.externalReference ? PEDIDOS.find(p => p.id === payment.externalReference) : null;
+    if (!pedido && payment.checkoutSession) pedido = PEDIDOS.find(p => p.mpPaymentId === payment.checkoutSession);
+    if (!pedido) { console.error(`[Webhook Asaas] ⚠️ Payment "${payment.id}" (externalReference: ${payment.externalReference}, checkoutSession: ${payment.checkoutSession}, evento: ${evento}) não corresponde a nenhum pedido conhecido.`); return res.sendStatus(200); }
 
     if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento) && pedido.status !== 'pago') {
       const proto = req.get('x-forwarded-proto') || 'https';
