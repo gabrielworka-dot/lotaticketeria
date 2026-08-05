@@ -3302,6 +3302,7 @@ app.get('/health', (req, res) => {
     status: 'ok', app: 'Lota', users: db.users.length, eventos: EVENTOS.length,
     provedor_pagamento_ativo: db.provedorPagamento,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
+    mercadopago_chave_publica: MP_PUBLIC_KEY ? '✅' : '❌ (configure MP_PUBLIC_KEY — sem isso, o formulário de cartão não aparece no checkout)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
     asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
     criptografia_cpf: ENCRYPTION_KEY ? '✅ ativa' : '⚠️ não configurada (recomendado configurar ENCRYPTION_KEY)',
