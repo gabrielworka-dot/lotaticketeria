@@ -2539,7 +2539,14 @@ app.post('/api/mp/webhook', async (req, res) => {
 
     if (payment.status === 'approved' && pedido.status !== 'pago') {
       const hostW = req.get('host'); const protoW = req.get('x-forwarded-proto') || 'https';
-      await processarPagamentoAprovado(pedido, paymentId, `${protoW}://${hostW}`);
+      // IMPORTANTE: não usamos "await" aqui de propósito. Descobrimos que gerar o PDF e enviar o
+      // e-mail (dentro dessa função) pode demorar alguns segundos — tempo suficiente pro Mercado
+      // Pago considerar a entrega do webhook como "falhou" por demora, mesmo o pagamento sendo
+      // processado corretamente. Por isso respondemos com sucesso imediatamente, e deixamos a
+      // geração do ingresso e o envio do e-mail continuarem rodando em segundo plano.
+      processarPagamentoAprovado(pedido, paymentId, `${protoW}://${hostW}`)
+        .then(() => console.log(`[Webhook MP] Pedido ${pedido.id} processado com sucesso em segundo plano.`))
+        .catch(e => console.error(`[Webhook MP] Erro ao processar pedido ${pedido.id} em segundo plano:`, e.message));
     } else if (['rejected','cancelled'].includes(payment.status) && pedido.status === 'pendente') {
       pedido.mpPaymentId = String(paymentId);
       pedido.status = 'recusado';
@@ -2591,7 +2598,12 @@ app.post('/api/asaas/webhook', async (req, res) => {
       if (pedido) {
         if (evento === 'CHECKOUT_PAID' && pedido.status !== 'pago') {
           const proto = req.get('x-forwarded-proto') || 'https';
-          await processarPagamentoAprovado(pedido, checkout.id, `${proto}://${req.get('host')}`);
+          // Sem "await" de propósito — ver explicação detalhada no webhook do Mercado Pago, mesma
+          // causa: gerar PDF + enviar e-mail demorava o suficiente pro Asaas considerar a entrega
+          // como falha, mesmo o pagamento sendo reconhecido corretamente do nosso lado.
+          processarPagamentoAprovado(pedido, checkout.id, `${proto}://${req.get('host')}`)
+            .then(() => console.log(`[Webhook Asaas] Pedido ${pedido.id} processado com sucesso em segundo plano (via CHECKOUT_PAID).`))
+            .catch(e => console.error(`[Webhook Asaas] Erro ao processar pedido ${pedido.id} em segundo plano:`, e.message));
           console.log(`[Webhook Asaas] Pedido ${pedido.id} confirmado como pago via CHECKOUT_PAID.`);
         } else if (['CHECKOUT_CANCELED', 'CHECKOUT_EXPIRED'].includes(evento) && pedido.status === 'pendente') {
           pedido.status = 'recusado';
@@ -2623,7 +2635,9 @@ app.post('/api/asaas/webhook', async (req, res) => {
 
     if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento) && pedido.status !== 'pago') {
       const proto = req.get('x-forwarded-proto') || 'https';
-      await processarPagamentoAprovado(pedido, payment.id, `${proto}://${req.get('host')}`);
+      processarPagamentoAprovado(pedido, payment.id, `${proto}://${req.get('host')}`)
+        .then(() => console.log(`[Webhook Asaas] Pedido ${pedido.id} processado com sucesso em segundo plano (via ${evento}).`))
+        .catch(e => console.error(`[Webhook Asaas] Erro ao processar pedido ${pedido.id} em segundo plano:`, e.message));
     } else if (['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'PAYMENT_DELETED'].includes(evento) && pedido.status === 'pendente') {
       pedido.mpPaymentId = String(payment.id);
       pedido.status = 'recusado';
