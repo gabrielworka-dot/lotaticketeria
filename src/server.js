@@ -523,6 +523,42 @@ app.post('/api/auth/excluir-conta', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Exclusão de conta específica pra PRODUTORES — com proteções extras que a exclusão genérica não
+// tem, já que aqui existe evento, dinheiro de comprador e obrigações financeiras envolvidas.
+app.get('/api/produtor/posso-excluir-conta', auth, organizadorOnly, (req, res) => {
+  const agora = new Date().toISOString().slice(0, 10);
+  const eventosFuturos = EVENTOS.filter(e => e.organizadorId === req.user.id && e.status === 'publicado' && e.dataEvento >= agora);
+  const saldo = calcularSaldoProdutor(req.user.id);
+  const bloqueios = [];
+  if (eventosFuturos.length > 0) bloqueios.push(`Você tem ${eventosFuturos.length} evento(s) publicado(s) que ainda não aconteceu(ram). Cancele ou espere eles passarem antes de excluir a conta.`);
+  if (saldo.saldoDisponivel > 0) bloqueios.push(`Você tem R$ ${saldo.saldoDisponivel.toFixed(2)} de saldo disponível ainda não recebido. Solicite o adiantamento desse valor antes de excluir a conta.`);
+  res.json({ podeExcluir: bloqueios.length === 0, bloqueios, eventosFuturos: eventosFuturos.length, saldoDisponivel: saldo.saldoDisponivel });
+});
+app.post('/api/produtor/excluir-conta', auth, organizadorOnly, async (req, res) => {
+  const { senha } = req.body;
+  if (!senha || !bcrypt.compareSync(senha, req.user.senha)) return res.status(401).json({ error: 'Senha incorreta.' });
+  const agora = new Date().toISOString().slice(0, 10);
+  const eventosFuturos = EVENTOS.filter(e => e.organizadorId === req.user.id && e.status === 'publicado' && e.dataEvento >= agora);
+  if (eventosFuturos.length > 0) return res.status(400).json({ error: 'Você ainda tem eventos publicados que não aconteceram. Cancele-os ou espere a data passar antes de excluir a conta.' });
+  const saldo = calcularSaldoProdutor(req.user.id);
+  if (saldo.saldoDisponivel > 0) return res.status(400).json({ error: `Você ainda tem R$ ${saldo.saldoDisponivel.toFixed(2)} de saldo disponível. Solicite o adiantamento antes de excluir a conta.` });
+  // Não apagamos os eventos nem os pedidos — quem já comprou ingresso continua com acesso normal.
+  // Só anonimizamos os dados pessoais do produtor, igual fazemos com contas de cliente.
+  const anonimo = `produtor-removido-${req.user.id.slice(0, 8)}@removido.local`;
+  req.user.nome = 'Produtor removido';
+  req.user.nomePublico = 'Produtor removido';
+  req.user.email = anonimo;
+  req.user.senha = bcrypt.hashSync(uuidv4(), 12);
+  req.user.ativo = false;
+  req.user.cpfCnpj = '';
+  req.user.bio = ''; req.user.avatarUrl = ''; req.user.bannerUrl = ''; req.user.redesSociais = {};
+  req.user.pagamentoInfo = { chavePix: '', tipoChavePix: '', nomeTitular: '', nomeBanco: '', numeroAgencia: '', tipoConta: '' };
+  req.user.twoFactorAtivo = false; req.user.twoFactorSecret = undefined;
+  saveDB(db);
+  registrarAuditoria(req.user, 'produtor_excluiu_propria_conta', { userId: req.user.id });
+  res.json({ ok: true });
+});
+
 // ════════════════════════════════════════════════════════
 // RECUPERAÇÃO DE EMERGÊNCIA DO ADMIN — não depende de e-mail.
 // Só funciona se ADMIN_RECOVERY_SECRET estiver configurado no Railway,
