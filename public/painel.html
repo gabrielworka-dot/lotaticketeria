@@ -315,6 +315,28 @@ a{color:inherit;}
   </div>
 </div>
 
+<div class="mo" id="excluirContaProdutorModal" onclick="if(event.target===this)cm('excluirContaProdutorModal')">
+  <div class="modal" style="max-width:420px">
+    <h2 style="color:#F87171">Excluir minha conta</h2>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Seus dados pessoais (nome, e-mail, dados bancários) serão apagados permanentemente. Seus eventos e pedidos já feitos continuam existindo — quem comprou ingresso não é afetado. Essa ação não pode ser desfeita.</p>
+    <div class="err" id="excluirContaProdutorErr" style="display:none"></div>
+    <div class="fg"><label>Confirme sua senha</label><input class="fi" id="excluirContaProdutorSenha" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')confirmarExcluirContaProdutor()"></div>
+    <div class="ma">
+      <button class="btn bo" onclick="cm('excluirContaProdutorModal')">Cancelar</button>
+      <button class="btn bdng" onclick="confirmarExcluirContaProdutor()">Excluir permanentemente</button>
+    </div>
+  </div>
+</div>
+
+<div class="mo" id="excluirContaBloqueadaModal" onclick="if(event.target===this)cm('excluirContaBloqueadaModal')">
+  <div class="modal" style="max-width:420px">
+    <h2>Ainda não é possível excluir</h2>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Resolva o(s) ponto(s) abaixo antes de excluir sua conta:</p>
+    <ul id="excluirContaBloqueadaMsg" style="font-size:13px;color:var(--text);padding-left:18px;line-height:1.6"></ul>
+    <div class="ma"><button class="btn bp" onclick="cm('excluirContaBloqueadaModal')">Entendi</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1402,8 +1424,38 @@ function carregarPerfil(){
     <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:16px">
       <div class="ct">Equipe</div>
       <p style="font-size:12px;color:var(--text2)">Adicionar colaboradores agora é feito dentro de cada evento — assim cada pessoa só acompanha as vendas do evento certo. Abre o evento e procura a aba "👥 Equipe".</p>
+    </div>
+    <div style="border-top:1px solid var(--border);margin-top:24px;padding-top:16px">
+      <div class="ct" style="color:#F87171">Excluir minha conta</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Remove seus dados pessoais da plataforma permanentemente. Seus eventos e pedidos já feitos são mantidos (quem comprou ingresso continua com acesso normal), só os seus dados de contato e login são apagados. Essa ação não pode ser desfeita.</p>
+      <button class="btn bo btn-sm" style="color:#F87171;border-color:rgba(239,68,68,.4)" onclick="abrirExcluirContaProdutor()">🗑️ Excluir minha conta</button>
     </div>` : ''}
   `;
+}
+async function abrirExcluirContaProdutor(){
+  try{
+    const check=await api('GET','/api/produtor/posso-excluir-conta');
+    if(!check.podeExcluir){
+      document.getElementById('excluirContaBloqueadaMsg').innerHTML=check.bloqueios.map(b=>'<li>'+esc(b)+'</li>').join('');
+      document.getElementById('excluirContaBloqueadaModal').classList.add('show');
+      return;
+    }
+    document.getElementById('excluirContaProdutorSenha').value='';
+    document.getElementById('excluirContaProdutorErr').style.display='none';
+    document.getElementById('excluirContaProdutorModal').classList.add('show');
+  }catch(e){ toast(e.message,'err'); }
+}
+async function confirmarExcluirContaProdutor(){
+  const senha=document.getElementById('excluirContaProdutorSenha').value;
+  const errEl=document.getElementById('excluirContaProdutorErr');
+  errEl.style.display='none';
+  if(!senha){ errEl.textContent='Digite sua senha pra confirmar.'; errEl.style.display='block'; return; }
+  if(!confirm('Tem certeza? Isso remove seus dados pessoais permanentemente e não pode ser desfeito.')) return;
+  try{
+    await api('POST','/api/produtor/excluir-conta',{senha});
+    toast('Conta excluída. Até logo!','ok');
+    setTimeout(()=>{ AT=null; localStorage.removeItem('role_token'); location.href='/'; }, 1500);
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
 function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
 async function salvarPerfil(){
