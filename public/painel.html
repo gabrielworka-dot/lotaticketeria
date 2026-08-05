@@ -884,11 +884,11 @@ async function renderTabRelatorios(periodo){
         ${RELATORIO_PERIODO_ATUAL==='personalizado'?'<div style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="date" class="fi" id="relDataInicio" style="max-width:160px"><span style="color:var(--text3);font-size:12px">até</span><input type="date" class="fi" id="relDataFim" style="max-width:160px"><button class="btn bp btn-sm" onclick="renderTabRelatorios(\'personalizado\')">Aplicar</button></div>':''}
       </div>
       <div class="met-g">
-        <div class="met-c"><div class="met-l">Receita (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Receita (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${(r.totalReceita||0).toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Ingressos Vendidos</div><div class="met-v">${r.totalIngressos}</div></div>
         <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
-        <div class="met-c"><div class="met-l">Ticket Médio / Ingresso</div><div class="met-v">R$${r.ticketMedioIngresso.toFixed(2)}</div></div>
-        <div class="met-c"><div class="met-l">Ticket Médio / Pedido</div><div class="met-v">R$${r.ticketMedioPedido.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Ticket Médio / Ingresso</div><div class="met-v">R$${(r.ticketMedioIngresso||0).toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Ticket Médio / Pedido</div><div class="met-v">R$${(r.ticketMedioPedido||0).toFixed(2)}</div></div>
       </div>
       ${r.capacidade.limite>0?`
       <div class="card">
@@ -906,9 +906,9 @@ async function renderTabRelatorios(periodo){
       </div>
       <div class="card"><div class="ct">Vendas por Período</div>
         <div class="met-g">
-          <div class="met-c"><div class="met-l">Hoje</div><div class="met-v">${r.vendasPorPeriodo.hoje.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.hoje.receita.toFixed(2)}</div></div>
-          <div class="met-c"><div class="met-l">Últimos 7 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos7dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.ultimos7dias.receita.toFixed(2)}</div></div>
-          <div class="met-c"><div class="met-l">Últimos 30 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos30dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.ultimos30dias.receita.toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Hoje</div><div class="met-v">${r.vendasPorPeriodo.hoje.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.hoje.receita||0).toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Últimos 7 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos7dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.ultimos7dias.receita||0).toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Últimos 30 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos30dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.ultimos30dias.receita||0).toFixed(2)}</div></div>
         </div>
       </div>
       <div class="card">
@@ -934,8 +934,8 @@ async function renderTabRelatorios(periodo){
         <div class="ct">Ingressos por Tipo</div>
         <div style="position:relative;height:220px;max-width:320px;margin:0 auto"><canvas id="graficoTipoIngresso"></canvas></div>
       </div>`:''}
-      <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+d.receita.toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
-      <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
+      <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+(d.receita||0).toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
+      <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+(p.receita||0).toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
       <div class="card"><div class="ct">Exportar</div><div class="br">
         <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'participantes.csv')">📥 Lista de Participantes</a>
         <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'bordero.csv')">📥 Borderô (CSV)</a>
