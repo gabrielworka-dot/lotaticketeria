@@ -1316,7 +1316,31 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/sincronizar', auth, async (req, res
 app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   const ev = eventoVisivelPara(req.params.id, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
-  const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+  const todosPedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+
+  // ── Filtro de período (Geral / Últimos 30 dias / Hoje / Ontem / Personalizado) — afeta só os
+  // números-resumo abaixo. O bloco "Vendas por Período" (hoje/7d/30d) e o gráfico diário continuam
+  // sempre olhando pra tudo, sem esse filtro — como foi pedido pra manter aquele bloco congelado.
+  const periodo = req.query.periodo || 'geral';
+  const agora = new Date();
+  let inicioFiltro = null, fimFiltro = null;
+  if (periodo === '30dias') { inicioFiltro = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000); }
+  else if (periodo === 'hoje') { inicioFiltro = new Date(agora); inicioFiltro.setHours(0, 0, 0, 0); }
+  else if (periodo === 'ontem') {
+    inicioFiltro = new Date(agora); inicioFiltro.setDate(inicioFiltro.getDate() - 1); inicioFiltro.setHours(0, 0, 0, 0);
+    fimFiltro = new Date(agora); fimFiltro.setHours(0, 0, 0, 0);
+  }
+  if (periodo === 'personalizado') {
+    if (req.query.dataInicio) inicioFiltro = new Date(req.query.dataInicio + 'T00:00:00');
+    if (req.query.dataFim) fimFiltro = new Date(req.query.dataFim + 'T23:59:59');
+  }
+  const pedidos = todosPedidosPagos.filter(p => {
+    const dataP = new Date(p.pagoEm || p.createdAt);
+    if (inicioFiltro && dataP < inicioFiltro) return false;
+    if (fimFiltro && dataP >= fimFiltro) return false;
+    return true;
+  });
+
   // Usamos valorIngressos (não total) — é o valor líquido que o produtor recebe, sem a taxa
   // administrativa que é cobrada à parte do comprador e fica com a plataforma.
   const totalReceita = pedidos.reduce((s,p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
@@ -1327,24 +1351,97 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
     const lote = ev.lotes.find(l => l.id === it.loteId);
     if (lote && porLote[lote.nome]) porLote[lote.nome].receita += (it.precoUnit || 0) * (it.qtd || 0);
   }));
-  const porDia = {};
-  pedidos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDia[d]) porDia[d] = { qtd: 0, receita: 0 }; porDia[d].qtd += (p.tickets||[]).length; porDia[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
-  const porPromoter = ev.promoters.map(pr => ({ nome: pr.nome, vendas: pr.vendas, receita: pr.receita }));
+  const porPromoter = ev.promoters.map(pr => ({ nome: pr.nome, vendas: pr.vendas || 0, receita: pr.receita || 0 }));
   const porCupom = ev.cupons.map(c => ({ codigo: c.codigo, usos: c.usosAtuais }));
 
-  // Vendas por período — usado no filtro "hoje / últimos 7 dias / últimos 30 dias" do painel.
-  const agora = Date.now();
+  // Ticket médio — por ingresso individual, e por pedido (que pode ter vários ingressos)
+  const ticketMedioIngresso = totalIngressos > 0 ? totalReceita / totalIngressos : 0;
+  const ticketMedioPedido = pedidos.length > 0 ? totalReceita / pedidos.length : 0;
+
+  // Ingressos vendidos vs limite do evento
+  const capacidadeMaxima = ev.capacidadeMaxima || 0;
+  const totalVendidoGeral = ev.lotes.reduce((s, l) => s + (l.vendidos || 0), 0);
+  const capacidade = { vendidos: totalVendidoGeral, limite: capacidadeMaxima, percentual: capacidadeMaxima > 0 ? Math.round((totalVendidoGeral / capacidadeMaxima) * 1000) / 10 : null };
+
+  // Online vs física vs cortesia — hoje a Lota só vende online, então "física" fica sempre 0%
+  // (mantido aqui já preparado pra quando/se um dia existir venda presencial).
+  let ingressosCortesia = 0, ingressosPagos = 0;
+  pedidos.forEach(p => (p.itens || []).forEach(it => {
+    const lote = ev.lotes.find(l => l.id === it.loteId);
+    if (lote?.cortesia) ingressosCortesia += it.qtd; else ingressosPagos += it.qtd;
+  }));
+  const totalParaPercentual = ingressosCortesia + ingressosPagos;
+  const origemVendas = {
+    online: totalParaPercentual > 0 ? Math.round((ingressosPagos / totalParaPercentual) * 1000) / 10 : 0,
+    fisica: 0,
+    cortesia: totalParaPercentual > 0 ? Math.round((ingressosCortesia / totalParaPercentual) * 1000) / 10 : 0
+  };
+
+  // Por tipo de ingresso — categoriza pelo nome do lote (não temos um campo estruturado de tipo,
+  // então usamos palavras-chave comuns; o que não bater com nenhuma vai pra "Outro").
+  const categorias = [
+    { chave: 'meia', termos: ['meia'] }, { chave: 'inteira', termos: ['inteira', 'inteiro'] },
+    { chave: 'solidaria', termos: ['solidári', 'solidari'] }, { chave: 'duplo', termos: ['duplo', 'dupla'] },
+    { chave: 'quadruplo', termos: ['quádruplo', 'quadruplo', 'quadrupla'] }
+  ];
+  const porTipoMap = {};
+  pedidos.forEach(p => (p.itens || []).forEach(it => {
+    const lote = ev.lotes.find(l => l.id === it.loteId);
+    const nomeL = (lote?.nome || '').toLowerCase();
+    const cat = categorias.find(c => c.termos.some(t => nomeL.includes(t)));
+    const chave = cat ? cat.chave : 'outro';
+    porTipoMap[chave] = (porTipoMap[chave] || 0) + it.qtd;
+  }));
+  const totalTipo = Object.values(porTipoMap).reduce((s, v) => s + v, 0);
+  const porTipoIngresso = Object.entries(porTipoMap).map(([tipo, qtd]) => ({ tipo, qtd, percentual: totalTipo > 0 ? Math.round((qtd / totalTipo) * 1000) / 10 : 0 })).sort((a, b) => b.qtd - a.qtd);
+
+  // ── Bloco congelado: vendas por período (hoje/7d/30d) e vendas por dia — sempre olhando pra
+  // TODOS os pedidos pagos, sem aplicar o filtro de período escolhido acima.
   const inicioHoje = new Date(); inicioHoje.setHours(0,0,0,0);
-  const limite7dias = agora - 7 * 24 * 60 * 60 * 1000;
-  const limite30dias = agora - 30 * 24 * 60 * 60 * 1000;
-  const janela = (limiteMs) => pedidos.reduce((acc, p) => {
+  const limite7dias = agora.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const limite30dias = agora.getTime() - 30 * 24 * 60 * 60 * 1000;
+  const janela = (limiteMs) => todosPedidosPagos.reduce((acc, p) => {
     const dataPedido = new Date(p.pagoEm || p.createdAt).getTime();
     if (dataPedido >= limiteMs) { acc.ingressos += (p.tickets || []).length; acc.receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); }
     return acc;
   }, { ingressos: 0, receita: 0 });
   const vendasPorPeriodo = { hoje: janela(inicioHoje.getTime()), ultimos7dias: janela(limite7dias), ultimos30dias: janela(limite30dias) };
 
-  res.json({ totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo });
+  const porDiaMap = {};
+  todosPedidosPagos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDiaMap[d]) porDiaMap[d] = { qtd: 0, receita: 0 }; porDiaMap[d].qtd += (p.tickets||[]).length; porDiaMap[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
+  const diasOrdenados = Object.keys(porDiaMap).sort();
+  let acumulado = 0;
+  const porDia = diasOrdenados.map(dia => { acumulado += porDiaMap[dia].receita; return { dia, qtd: porDiaMap[dia].qtd, receita: Math.round(porDiaMap[dia].receita * 100) / 100, receitaAcumulada: Math.round(acumulado * 100) / 100 }; });
+
+  // Tendência simples — projeção linear baseada na média diária de vendas até agora e nos dias que
+  // faltam pro evento. NÃO é um modelo preditivo sofisticado (não considera sazonalidade, picos de
+  // divulgação, etc), é só uma estimativa direta: "se continuar vendendo nesse ritmo até o evento".
+  let tendencia = null;
+  if (ev.dataEvento && diasOrdenados.length >= 2) {
+    const dataEventoObj = new Date(ev.dataEvento + 'T23:59:59');
+    const diasRestantes = Math.max(0, Math.ceil((dataEventoObj - agora) / (24 * 60 * 60 * 1000)));
+    const primeiroDia = new Date(diasOrdenados[0]);
+    const diasDeVendaDecorridos = Math.max(1, Math.ceil((agora - primeiroDia) / (24 * 60 * 60 * 1000)));
+    const mediaIngressosDia = totalVendidoGeral / diasDeVendaDecorridos;
+    const projecaoIngressos = Math.round(totalVendidoGeral + mediaIngressosDia * diasRestantes);
+    tendencia = {
+      mediaIngressosPorDia: Math.round(mediaIngressosDia * 10) / 10, diasRestantes,
+      projecaoIngressosNoEvento: capacidadeMaxima > 0 ? Math.min(projecaoIngressos, capacidadeMaxima) : projecaoIngressos,
+      atingeCapacidade: capacidadeMaxima > 0 && projecaoIngressos >= capacidadeMaxima
+    };
+  }
+
+  // Visualizações da página e taxa de conversão (visualização → pedido pago) — não temos rastreio
+  // de visitante único, então essa taxa é sobre o total de visualizações, não pessoas distintas.
+  const visualizacoes = ev.visualizacoes || 0;
+  const taxaConversao = visualizacoes > 0 ? Math.round((todosPedidosPagos.length / visualizacoes) * 1000) / 10 : 0;
+
+  res.json({
+    periodo, totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo,
+    ticketMedioIngresso: Math.round(ticketMedioIngresso * 100) / 100, ticketMedioPedido: Math.round(ticketMedioPedido * 100) / 100,
+    capacidade, origemVendas, porTipoIngresso, tendencia,
+    visualizacoes, taxaConversao
+  });
 });
 
 app.get('/api/eventos/:id/participantes.csv', auth, (req, res) => {
