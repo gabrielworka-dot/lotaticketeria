@@ -141,6 +141,7 @@ a{color:inherit;}
   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -610,36 +611,30 @@ async function togglePublicar(){
 }
 
 function renderTabGeral(){
+  const ro=SOMENTE_LEITURA; // atalho — abaixo, cada campo/botão sensível já nasce bloqueado nesse modo
   document.getElementById('evTabGeral').innerHTML=`
-    <div class="card" style="display:flex;align-items:center;gap:12px">
-      <div style="font-size:28px">👁️</div>
-      <div><div style="font-size:22px;font-weight:800">${(EV_ATUAL.visualizacoes||0).toLocaleString('pt-BR')}</div><div style="font-size:12px;color:var(--text3)">visualizações da página deste evento</div></div>
-    </div>
     <div class="card">
       <div class="ct">Informações do Evento</div>
-      <div class="fg"><label>Nome</label><input class="fi" id="edNome" value="${esc(EV_ATUAL.nome)}"></div>
-      <div class="fg"><label>Descrição</label><textarea class="fta" id="edDesc">${esc(EV_ATUAL.descricao)}</textarea></div>
-      <div class="fg2"><div class="fg"><label>Data</label><input class="fi" type="date" id="edData" value="${EV_ATUAL.dataEvento}"></div><div class="fg"><label>Hora</label><input class="fi" type="time" id="edHora" value="${EV_ATUAL.horaEvento||''}"></div></div>
-      <div class="fg2"><div class="fg"><label>Cidade</label><input class="fi" id="edCidade" value="${esc(EV_ATUAL.cidade)}"></div><div class="fg"><label>Local</label><input class="fi" id="edLocal" value="${esc(EV_ATUAL.local)}"></div></div>
-      <div class="fg"><label>Número máximo de ingressos (opcional)</label><input class="fi" type="number" min="0" id="edCapacidade" value="${EV_ATUAL.capacidadeMaxima||''}" placeholder="Deixe em branco pra não limitar"></div>
+      <div class="fg"><label>Nome</label><input class="fi" id="edNome" value="${esc(EV_ATUAL.nome)}" ${ro?'disabled':''}></div>
+      <div class="fg"><label>Descrição</label><textarea class="fta" id="edDesc" ${ro?'disabled':''}>${esc(EV_ATUAL.descricao)}</textarea></div>
+      <div class="fg2"><div class="fg"><label>Data</label><input class="fi" type="date" id="edData" value="${EV_ATUAL.dataEvento}" ${ro?'disabled':''}></div><div class="fg"><label>Hora</label><input class="fi" type="time" id="edHora" value="${EV_ATUAL.horaEvento||''}" ${ro?'disabled':''}></div></div>
+      <div class="fg2"><div class="fg"><label>Cidade</label><input class="fi" id="edCidade" value="${esc(EV_ATUAL.cidade)}" ${ro?'disabled':''}></div><div class="fg"><label>Local</label><input class="fi" id="edLocal" value="${esc(EV_ATUAL.local)}" ${ro?'disabled':''}></div></div>
+      <div class="fg"><label>Número máximo de ingressos (opcional)</label><input class="fi" type="number" min="0" id="edCapacidade" value="${EV_ATUAL.capacidadeMaxima||''}" placeholder="Deixe em branco pra não limitar" ${ro?'disabled':''}></div>
       <div class="fg"><label>Imagem de capa</label>
         <div style="display:flex;gap:10px;align-items:center">
           <div id="edImgPreview" style="width:64px;height:64px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden">${EV_ATUAL.imagemCapa?'<img src="'+esc(EV_ATUAL.imagemCapa)+'" style="width:100%;height:100%;object-fit:cover">':'🎪'}</div>
-          <div style="flex:1">
-            <input type="file" accept="image/*" id="edImgFile" style="display:none" onchange="handleImageUpload(this,'edImg','edImgPreview')">
-            <button type="button" class="btn bo btn-sm" onclick="document.getElementById('edImgFile').click()">📷 Trocar imagem</button>
-          </div>
+          ${ro?'':'<div style="flex:1"><input type="file" accept="image/*" id="edImgFile" style="display:none" onchange="handleImageUpload(this,\'edImg\',\'edImgPreview\')"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'edImgFile\').click()">📷 Trocar imagem</button></div>'}
         </div>
         <input type="hidden" id="edImg" value="${esc(EV_ATUAL.imagemCapa)}">
       </div>
-      <div class="fg"><label>Vídeo do YouTube (opcional)</label><input class="fi" id="edVideo" value="${esc(EV_ATUAL.videoUrl||'')}" placeholder="https://youtube.com/watch?v=..."></div>
+      <div class="fg"><label>Vídeo do YouTube (opcional)</label><input class="fi" id="edVideo" value="${esc(EV_ATUAL.videoUrl||'')}" placeholder="https://youtube.com/watch?v=..." ${ro?'disabled':''}></div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Cole o link do vídeo (trailer, apresentação do espetáculo, etc). Ele aparece na página pública do evento.</div>
-      <button class="btn bp" onclick="salvarGeral()">💾 Salvar Alterações</button>
+      ${ro?'':'<button class="btn bp" onclick="salvarGeral()">💾 Salvar Alterações</button>'}
     </div>
-    <div class="card" style="border-color:var(--rbg)">
+    ${ro?'':`<div class="card" style="border-color:var(--rbg)">
       <div class="ct" style="color:var(--red)">Zona de Risco</div>
       <button class="btn bdng" onclick="excluirEvento()">🗑️ Excluir Evento</button>
-    </div>
+    </div>`}
   `;
 }
 async function salvarGeral(){
@@ -662,7 +657,8 @@ function renderTabLotes(){
   _lotesTemp=JSON.parse(JSON.stringify(EV_ATUAL.lotes||[]));
   const el=document.getElementById('evTabLotes');
   const avisoCapacidade=EV_ATUAL.capacidadeMaxima>0?'<p style="font-size:12px;color:var(--text3);margin:-6px 0 12px">Limite deste evento: <strong id="capacidadeUsadaEl"></strong> de '+EV_ATUAL.capacidadeMaxima+' ingressos</p>':'';
-  el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div>'+avisoCapacidade+'<div id="lotesListEl"></div><div class="br"><button class="btn bo btn-sm" onclick="abrirNovoLote()">+ Adicionar Lote</button><button class="btn bp" onclick="salvarLotes()">💾 Salvar</button></div></div>';
+  const botoes=SOMENTE_LEITURA?'':'<div class="br"><button class="btn bo btn-sm" onclick="abrirNovoLote()">+ Adicionar Lote</button><button class="btn bp" onclick="salvarLotes()">💾 Salvar</button></div>';
+  el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div>'+avisoCapacidade+'<div id="lotesListEl"></div>'+botoes+'</div>';
   renderLotesLista();
 }
 function renderLotesLista(){
@@ -670,7 +666,8 @@ function renderLotesLista(){
   const capEl=document.getElementById('capacidadeUsadaEl');
   if(capEl) capEl.textContent=_lotesTemp.reduce((s,l)=>s+(parseInt(l.qtdTotal)||0),0);
   if(!_lotesTemp.length){ el.innerHTML='<div class="empty" style="padding:16px"><p>Nenhum lote ainda.</p></div>'; return; }
-  el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row"><div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div><button class="btn bo btn-sm" onclick="abrirEditarLote('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_lotesTemp.splice('+i+',1);renderLotesLista()">✕</button></div>').join('');
+  const botoesLinha=(i)=>SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" onclick="abrirEditarLote('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_lotesTemp.splice('+i+',1);renderLotesLista()">✕</button>';
+  el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row"><div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div>'+botoesLinha(i)+'</div>').join('');
 }
 function abrirNovoLote(){
   document.getElementById('loteId').value='';
@@ -717,17 +714,18 @@ function renderTabAssentos(){
   _setoresTemp=JSON.parse(JSON.stringify(ma.setores||[]));
   const lotesDisponiveis=EV_ATUAL.lotes||[];
   const el=document.getElementById('evTabAssentos');
+  const ro=SOMENTE_LEITURA;
   el.innerHTML=`
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div class="ct" style="margin-bottom:0">Mapa de Assentos Marcados</div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2)"><input type="checkbox" id="assentosAtivo" ${ma.ativo?'checked':''}> Ativar lugares marcados</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2)"><input type="checkbox" id="assentosAtivo" ${ma.ativo?'checked':''} ${ro?'disabled':''}> Ativar lugares marcados</label>
       </div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Quando ativo, o comprador escolhe o assento específico em vez de apenas a quantidade. Cada setor abaixo é vinculado a um lote (preço).</p>
       ${lotesDisponiveis.length?'':'<div class="empty" style="padding:16px"><p>Crie ao menos um lote na aba "Lotes" antes de configurar o mapa.</p></div>'}
-      <div class="fg"><label>Nome do palco/frente</label><input class="fi" id="assentosPalco" value="${esc(ma.palco||'PALCO')}" style="max-width:240px"></div>
+      <div class="fg"><label>Nome do palco/frente</label><input class="fi" id="assentosPalco" value="${esc(ma.palco||'PALCO')}" style="max-width:240px" ${ro?'disabled':''}></div>
       <div id="setoresListEl"></div>
-      <div class="br"><button class="btn bo btn-sm" onclick="addSetorTemp()" ${!lotesDisponiveis.length?'disabled':''}>+ Adicionar Setor</button><button class="btn bp" onclick="salvarMapaAssentos()">💾 Salvar Mapa</button></div>
+      ${ro?'':'<div class="br"><button class="btn bo btn-sm" onclick="addSetorTemp()" '+(!lotesDisponiveis.length?'disabled':'')+'>+ Adicionar Setor</button><button class="btn bp" onclick="salvarMapaAssentos()">💾 Salvar Mapa</button></div>'}
     </div>
     <div class="card" id="previewMapaCard" style="display:none">
       <div class="ct">Pré-visualização</div>
@@ -738,16 +736,18 @@ function renderTabAssentos(){
 function renderSetoresLista(){
   const el=document.getElementById('setoresListEl');
   const lotesDisponiveis=EV_ATUAL.lotes||[];
+  const ro=SOMENTE_LEITURA;
   if(!_setoresTemp.length){ el.innerHTML='<div class="empty" style="padding:14px"><p>Nenhum setor configurado.</p></div>'; document.getElementById('previewMapaCard').style.display='none'; return; }
   el.innerHTML=_setoresTemp.map((s,i)=>{
     const loteNome=lotesDisponiveis.find(l=>l.id===s.loteId)?.nome||'—';
+    const dis=ro?'disabled':'';
     return '<div class="promoter-row" style="flex-wrap:wrap;gap:10px">'
-      +'<input type="text" class="fi" style="max-width:140px" value="'+esc(s.nome)+'" placeholder="Nome do setor" onchange="_setoresTemp['+i+'].nome=this.value">'
-      +'<select class="fs" style="max-width:160px" onchange="_setoresTemp['+i+'].loteId=this.value">'+lotesDisponiveis.map(l=>'<option value="'+l.id+'" '+(l.id===s.loteId?'selected':'')+'>'+esc(l.nome)+' (R$'+l.preco.toFixed(2)+')</option>').join('')+'</select>'
-      +'<input type="number" class="fi" style="max-width:90px" value="'+s.linhas+'" min="1" max="30" placeholder="Linhas" onchange="_setoresTemp['+i+'].linhas=parseInt(this.value)||1">'
-      +'<input type="number" class="fi" style="max-width:110px" value="'+s.assentosPorLinha+'" min="1" max="40" placeholder="Assentos/linha" onchange="_setoresTemp['+i+'].assentosPorLinha=parseInt(this.value)||1">'
-      +'<input type="color" value="'+(s.cor||'#C47B14')+'" style="width:40px;height:38px;border-radius:8px;border:1px solid var(--border);background:none;cursor:pointer" onchange="_setoresTemp['+i+'].cor=this.value">'
-      +'<button class="btn bdng btn-sm" onclick="_setoresTemp.splice('+i+',1);renderSetoresLista()">✕</button>'
+      +'<input type="text" class="fi" style="max-width:140px" value="'+esc(s.nome)+'" placeholder="Nome do setor" onchange="_setoresTemp['+i+'].nome=this.value" '+dis+'>'
+      +'<select class="fs" style="max-width:160px" onchange="_setoresTemp['+i+'].loteId=this.value" '+dis+'>'+lotesDisponiveis.map(l=>'<option value="'+l.id+'" '+(l.id===s.loteId?'selected':'')+'>'+esc(l.nome)+' (R$'+l.preco.toFixed(2)+')</option>').join('')+'</select>'
+      +'<input type="number" class="fi" style="max-width:90px" value="'+s.linhas+'" min="1" max="30" placeholder="Linhas" onchange="_setoresTemp['+i+'].linhas=parseInt(this.value)||1" '+dis+'>'
+      +'<input type="number" class="fi" style="max-width:110px" value="'+s.assentosPorLinha+'" min="1" max="40" placeholder="Assentos/linha" onchange="_setoresTemp['+i+'].assentosPorLinha=parseInt(this.value)||1" '+dis+'>'
+      +'<input type="color" value="'+(s.cor||'#C47B14')+'" style="width:40px;height:38px;border-radius:8px;border:1px solid var(--border);background:none;cursor:pointer" onchange="_setoresTemp['+i+'].cor=this.value" '+dis+'>'
+      +(ro?'':'<button class="btn bdng btn-sm" onclick="_setoresTemp.splice('+i+',1);renderSetoresLista()">✕</button>')
       +'<div style="font-size:11px;color:var(--text3);width:100%">'+s.linhas+' linhas × '+s.assentosPorLinha+' assentos = '+(s.linhas*s.assentosPorLinha)+' lugares · vinculado a '+esc(loteNome)+'</div>'
       +'</div>';
   }).join('');
@@ -794,9 +794,10 @@ async function salvarMapaAssentos(){
 function renderTabCupons(){
   const el=document.getElementById('evTabCupons');
   const cupons=EV_ATUAL.cupons||[];
+  const ro=SOMENTE_LEITURA;
   el.innerHTML='<div class="card"><div class="ct">Cupons de Desconto</div>'
-    +(cupons.length?cupons.map(c=>'<div class="cupom-row"><div style="flex:1"><strong>'+esc(c.codigo)+'</strong> — '+(c.tipo==='fixo'?'R$'+c.valor.toFixed(2):c.valor+'%')+'<div style="font-size:11px;color:var(--text3)">'+c.usosAtuais+' usado(s)'+(c.usosMax?' / '+c.usosMax+' máx':' · ilimitado')+'</div></div><button class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" onclick="toggleCupom(\''+c.id+'\','+!c.ativo+')">'+(c.ativo?'Ativo':'Inativo')+'</button><button class="btn bdng btn-sm" onclick="deletarCupom(\''+c.id+'\')">✕</button></div>').join(''):'<div class="empty" style="padding:16px"><p>Nenhum cupom ainda.</p></div>')
-    +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'cupomModal\').classList.add(\'show\')">+ Novo Cupom</button></div></div>';
+    +(cupons.length?cupons.map(c=>'<div class="cupom-row"><div style="flex:1"><strong>'+esc(c.codigo)+'</strong> — '+(c.tipo==='fixo'?'R$'+c.valor.toFixed(2):c.valor+'%')+'<div style="font-size:11px;color:var(--text3)">'+c.usosAtuais+' usado(s)'+(c.usosMax?' / '+c.usosMax+' máx':' · ilimitado')+'</div></div>'+(ro?'<span class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" style="opacity:.7">'+(c.ativo?'Ativo':'Inativo')+'</span>':'<button class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" onclick="toggleCupom(\''+c.id+'\','+!c.ativo+')">'+(c.ativo?'Ativo':'Inativo')+'</button><button class="btn bdng btn-sm" onclick="deletarCupom(\''+c.id+'\')">✕</button>')+'</div>').join(''):'<div class="empty" style="padding:16px"><p>Nenhum cupom ainda.</p></div>')
+    +(ro?'':'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'cupomModal\').classList.add(\'show\')">+ Novo Cupom</button></div>')+'</div>';
 }
 async function salvarCupom(){
   if(bloqueiaSomenteLeitura())return;
@@ -820,11 +821,12 @@ function renderTabPromoters(){
   const el=document.getElementById('evTabPromoters');
   const proms=EV_ATUAL.promoters||[];
   const linkBase=location.origin+'/e/'+EV_ATUAL.slug+'?ref=';
+  const ro=SOMENTE_LEITURA;
   el.innerHTML='<div class="card"><div class="ct">Promoters</div>'
-    +(proms.length?'<div class="tw"><table class="tbl"><thead><tr><th>Nome</th><th>Comissão</th><th>Vendas</th><th>Receita</th><th>Link</th><th></th></tr></thead><tbody>'
-      +proms.map(p=>'<tr><td>'+esc(p.nome)+'</td><td>'+p.comissaoPercentual+'%</td><td>'+p.vendas+'</td><td>R$'+p.receita.toFixed(2)+'</td><td><button class="btn bo btn-sm" onclick="navigator.clipboard.writeText(\''+linkBase+p.codigoRef+'\').then(()=>toast(\'Link copiado!\',\'ok\'))">Copiar link</button></td><td><button class="btn bdng btn-sm" onclick="deletarPromoter(\''+p.id+'\')">✕</button></td></tr>').join('')+'</tbody></table></div>'
+    +(proms.length?'<div class="tw"><table class="tbl"><thead><tr><th>Nome</th><th>Comissão</th><th>Vendas</th><th>Receita</th><th>Link</th>'+(ro?'':'<th></th>')+'</tr></thead><tbody>'
+      +proms.map(p=>'<tr><td>'+esc(p.nome)+'</td><td>'+p.comissaoPercentual+'%</td><td>'+p.vendas+'</td><td>R$'+p.receita.toFixed(2)+'</td><td><button class="btn bo btn-sm" onclick="navigator.clipboard.writeText(\''+linkBase+p.codigoRef+'\').then(()=>toast(\'Link copiado!\',\'ok\'))">Copiar link</button></td>'+(ro?'':'<td><button class="btn bdng btn-sm" onclick="deletarPromoter(\''+p.id+'\')">✕</button></td>')+'</tr>').join('')+'</tbody></table></div>'
       :'<div class="empty" style="padding:16px"><p>Nenhum promoter ainda.</p></div>')
-    +'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'promoterModal\').classList.add(\'show\')">+ Adicionar Promoter</button></div></div>';
+    +(ro?'':'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'promoterModal\').classList.add(\'show\')">+ Adicionar Promoter</button></div>')+'</div>';
 }
 async function salvarPromoter(){
   if(bloqueiaSomenteLeitura())return;
@@ -842,12 +844,13 @@ async function deletarPromoter(id){
 // ── PIXELS ──
 function renderTabPixels(){
   const px=EV_ATUAL.pixels||{};
+  const ro=SOMENTE_LEITURA;
   document.getElementById('evTabPixels').innerHTML=`<div class="card"><div class="ct">Pixels e Analytics — rastreie suas campanhas</div>
-    <div class="fg"><label>Meta Pixel ID (Facebook/Instagram Ads)</label><input class="fi" id="pxMeta" value="${esc(px.metaPixelId||'')}" placeholder="Ex: 123456789012345"></div>
-    <div class="fg"><label>TikTok Pixel ID</label><input class="fi" id="pxTiktok" value="${esc(px.tiktokPixelId||'')}" placeholder="Ex: ABCDEFG123"></div>
-    <div class="fg"><label>Google Analytics — Measurement ID</label><input class="fi" id="pxGa" value="${esc(px.gaMeasurementId||'')}" placeholder="Ex: G-XXXXXXXXXX"></div>
-    <div class="fg2"><div class="fg"><label>Google Ads — Conversion ID</label><input class="fi" id="pxGadsId" value="${esc(px.googleAdsConversionId||'')}" placeholder="Ex: AW-123456789"></div><div class="fg"><label>Conversion Label</label><input class="fi" id="pxGadsLabel" value="${esc(px.googleAdsConversionLabel||'')}" placeholder="Ex: AbCdEfGh"></div></div>
-    <button class="btn bp" onclick="salvarPixels()">💾 Salvar</button></div>`;
+    <div class="fg"><label>Meta Pixel ID (Facebook/Instagram Ads)</label><input class="fi" id="pxMeta" value="${esc(px.metaPixelId||'')}" placeholder="Ex: 123456789012345" ${ro?'disabled':''}></div>
+    <div class="fg"><label>TikTok Pixel ID</label><input class="fi" id="pxTiktok" value="${esc(px.tiktokPixelId||'')}" placeholder="Ex: ABCDEFG123" ${ro?'disabled':''}></div>
+    <div class="fg"><label>Google Analytics — Measurement ID</label><input class="fi" id="pxGa" value="${esc(px.gaMeasurementId||'')}" placeholder="Ex: G-XXXXXXXXXX" ${ro?'disabled':''}></div>
+    <div class="fg2"><div class="fg"><label>Google Ads — Conversion ID</label><input class="fi" id="pxGadsId" value="${esc(px.googleAdsConversionId||'')}" placeholder="Ex: AW-123456789" ${ro?'disabled':''}></div><div class="fg"><label>Conversion Label</label><input class="fi" id="pxGadsLabel" value="${esc(px.googleAdsConversionLabel||'')}" placeholder="Ex: AbCdEfGh" ${ro?'disabled':''}></div></div>
+    ${ro?'':'<button class="btn bp" onclick="salvarPixels()">💾 Salvar</button>'}</div>`;
 }
 async function salvarPixels(){
   if(bloqueiaSomenteLeitura())return;
@@ -858,17 +861,48 @@ async function salvarPixels(){
 }
 
 // ── RELATÓRIOS ──
-async function renderTabRelatorios(){
+let RELATORIO_PERIODO_ATUAL='geral';
+let CHART_VENDAS_DIARIAS=null, CHART_TIPO_INGRESSO=null;
+async function renderTabRelatorios(periodo){
+  if(periodo) RELATORIO_PERIODO_ATUAL=periodo;
   const el=document.getElementById('evTabRelatorios');
   el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
   try{
-    const r=await api('GET','/api/eventos/'+EV_ATUAL.id+'/relatorio');
+    let query='periodo='+RELATORIO_PERIODO_ATUAL;
+    if(RELATORIO_PERIODO_ATUAL==='personalizado'){
+      const di=document.getElementById('relDataInicio')?.value, df=document.getElementById('relDataFim')?.value;
+      if(di) query+='&dataInicio='+di;
+      if(df) query+='&dataFim='+df;
+    }
+    const r=await api('GET','/api/eventos/'+EV_ATUAL.id+'/relatorio?'+query);
+    const filtros=[['geral','Geral'],['30dias','Últimos 30 dias'],['hoje','Hoje'],['ontem','Ontem'],['personalizado','Personalizado']];
     el.innerHTML=`
+      <div class="card" style="padding:12px 14px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${filtros.map(([v,l])=>'<button class="btn '+(RELATORIO_PERIODO_ATUAL===v?'bp':'bo')+' btn-sm" onclick="renderTabRelatorios(\''+v+'\')">'+l+'</button>').join('')}
+        </div>
+        ${RELATORIO_PERIODO_ATUAL==='personalizado'?'<div style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="date" class="fi" id="relDataInicio" style="max-width:160px"><span style="color:var(--text3);font-size:12px">até</span><input type="date" class="fi" id="relDataFim" style="max-width:160px"><button class="btn bp btn-sm" onclick="renderTabRelatorios(\'personalizado\')">Aplicar</button></div>':''}
+      </div>
       <div class="met-g">
-        <div class="met-c"><div class="met-l">Receita Total (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Receita (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${r.totalReceita.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Ingressos Vendidos</div><div class="met-v">${r.totalIngressos}</div></div>
         <div class="met-c"><div class="met-l">Pedidos</div><div class="met-v">${r.totalPedidos}</div></div>
-        <div class="met-c"><div class="met-l">Ticket Médio</div><div class="met-v">${r.totalIngressos>0?'R$'+(r.totalReceita/r.totalIngressos).toFixed(2):'—'}</div></div>
+        <div class="met-c"><div class="met-l">Ticket Médio / Ingresso</div><div class="met-v">R$${r.ticketMedioIngresso.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Ticket Médio / Pedido</div><div class="met-v">R$${r.ticketMedioPedido.toFixed(2)}</div></div>
+      </div>
+      ${r.capacidade.limite>0?`
+      <div class="card">
+        <div class="ct">Ingressos Vendidos vs Limite do Evento</div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span>${r.capacidade.vendidos} de ${r.capacidade.limite} ingressos</span><strong>${r.capacidade.percentual}%</strong></div>
+        <div style="background:var(--bg3);border-radius:20px;height:14px;overflow:hidden"><div style="width:${Math.min(100,r.capacidade.percentual)}%;height:100%;background:linear-gradient(90deg,var(--p2),var(--green));border-radius:20px"></div></div>
+      </div>`:''}
+      <div class="card">
+        <div class="ct">Origem das Vendas</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div><div style="font-size:11px;color:var(--text3)">Online</div><div style="font-size:20px;font-weight:800">${r.origemVendas.online}%</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Física</div><div style="font-size:20px;font-weight:800;color:var(--text3)">${r.origemVendas.fisica}%</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Cortesia</div><div style="font-size:20px;font-weight:800;color:var(--p2)">${r.origemVendas.cortesia}%</div></div>
+        </div>
       </div>
       <div class="card"><div class="ct">Vendas por Período</div>
         <div class="met-g">
@@ -877,7 +911,29 @@ async function renderTabRelatorios(){
           <div class="met-c"><div class="met-l">Últimos 30 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos30dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${r.vendasPorPeriodo.ultimos30dias.receita.toFixed(2)}</div></div>
         </div>
       </div>
-      <div class="card"><div class="ct">Vendas por Dia</div><div id="graficoVendas"></div></div>
+      <div class="card">
+        <div class="ct">Vendas por Dia</div>
+        <div style="position:relative;height:240px"><canvas id="graficoVendasDiarias"></canvas></div>
+      </div>
+      ${r.tendencia?`
+      <div class="card">
+        <div class="ct">Tendência de Vendas</div>
+        <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Estimativa simples com base no ritmo médio de vendas até agora — não considera picos de divulgação nem sazonalidade, é só uma projeção direta.</p>
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div><div style="font-size:11px;color:var(--text3)">Média por dia</div><div style="font-size:18px;font-weight:800">${r.tendencia.mediaIngressosPorDia} ing.</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Dias até o evento</div><div style="font-size:18px;font-weight:800">${r.tendencia.diasRestantes}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Projeção no dia do evento</div><div style="font-size:18px;font-weight:800;color:${r.tendencia.atingeCapacidade?'var(--green)':'var(--p2)'}">${r.tendencia.projecaoIngressosNoEvento} ing.${r.tendencia.atingeCapacidade?' 🎉':''}</div></div>
+        </div>
+      </div>`:''}
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Visualizações da Página</div><div class="met-v">${r.visualizacoes.toLocaleString('pt-BR')}</div></div>
+        <div class="met-c"><div class="met-l">Taxa de Conversão</div><div class="met-v">${r.taxaConversao}%</div></div>
+      </div>
+      ${r.porTipoIngresso.length?`
+      <div class="card">
+        <div class="ct">Ingressos por Tipo</div>
+        <div style="position:relative;height:220px;max-width:320px;margin:0 auto"><canvas id="graficoTipoIngresso"></canvas></div>
+      </div>`:''}
       <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+d.receita.toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
       <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+p.receita.toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
       <div class="card"><div class="ct">Exportar</div><div class="br">
@@ -886,26 +942,45 @@ async function renderTabRelatorios(){
         <a href="#" class="btn bp btn-sm" onclick="return baixarComAuth(event,'bordero.pdf')">📄 Borderô (PDF)</a>
       </div></div>
     `;
-    renderGraficoVendas(r.porDia);
+    renderGraficoVendasDiarias(r.porDia);
+    if(r.porTipoIngresso.length) renderGraficoTipoIngresso(r.porTipoIngresso);
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
-function renderGraficoVendas(porDia){
-  const el=document.getElementById('graficoVendas');
-  const dias=Object.keys(porDia).sort();
-  if(!dias.length){ el.innerHTML='<p style="color:var(--text3);font-size:13px">Sem vendas registradas ainda.</p>'; return; }
-  const W=Math.max(320,dias.length*46), H=160, padBottom=30, padTop=14;
-  const maxReceita=Math.max(...dias.map(d=>porDia[d].receita),1);
-  const barW=Math.min(34,(W/dias.length)-10);
-  let bars='', labels='';
-  dias.forEach((d,i)=>{
-    const x=i*(W/dias.length)+((W/dias.length)-barW)/2;
-    const h=Math.max(3,((porDia[d].receita/maxReceita)*(H-padBottom-padTop)));
-    const y=H-padBottom-h;
-    const dataLabel=new Date(d+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
-    bars+='<rect x="'+x+'" y="'+y+'" width="'+barW+'" height="'+h+'" rx="4" fill="var(--p2,#E8961A)"><title>'+dataLabel+': R$'+porDia[d].receita.toFixed(2)+' ('+porDia[d].qtd+' ingressos)</title></rect>';
-    labels+='<text x="'+(x+barW/2)+'" y="'+(H-10)+'" font-size="9" fill="#605848" text-anchor="middle">'+dataLabel+'</text>';
+const NOMES_TIPO_INGRESSO={meia:'Meia',inteira:'Inteira',solidaria:'Solidária',duplo:'Duplo',quadruplo:'Quádruplo',outro:'Outro'};
+function renderGraficoVendasDiarias(porDia){
+  if(CHART_VENDAS_DIARIAS) CHART_VENDAS_DIARIAS.destroy();
+  if(!porDia.length){ document.getElementById('graficoVendasDiarias').closest('.card').innerHTML='<div class="ct">Vendas por Dia</div><p style="color:var(--text3);font-size:13px">Sem vendas registradas ainda.</p>'; return; }
+  const labels=porDia.map(d=>new Date(d.dia+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}));
+  CHART_VENDAS_DIARIAS=new Chart(document.getElementById('graficoVendasDiarias'),{
+    data:{
+      labels,
+      datasets:[
+        {type:'bar',label:'Ingressos vendidos',data:porDia.map(d=>d.qtd),backgroundColor:'#E8961A99',yAxisID:'y'},
+        {type:'line',label:'Receita acumulada (R$)',data:porDia.map(d=>d.receitaAcumulada),borderColor:'#4ADE80',backgroundColor:'#4ADE8033',tension:0.3,yAxisID:'y1'}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{ticks:{color:'#A09880',maxRotation:0},grid:{color:'#2A2822'}},
+        y:{position:'left',ticks:{color:'#A09880'},grid:{color:'#2A2822'},title:{display:true,text:'Ingressos',color:'#A09880'}},
+        y1:{position:'right',ticks:{color:'#A09880'},grid:{display:false},title:{display:true,text:'R$ acumulado',color:'#A09880'}}
+      },
+      plugins:{legend:{labels:{color:'#F0EDE8'}}}
+    }
   });
-  el.innerHTML='<div style="overflow-x:auto"><svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block;min-width:100%">'+bars+labels+'</svg></div>';
+}
+function renderGraficoTipoIngresso(porTipo){
+  if(CHART_TIPO_INGRESSO) CHART_TIPO_INGRESSO.destroy();
+  CHART_TIPO_INGRESSO=new Chart(document.getElementById('graficoTipoIngresso'),{
+    type:'doughnut',
+    data:{
+      labels:porTipo.map(t=>NOMES_TIPO_INGRESSO[t.tipo]||t.tipo),
+      datasets:[{data:porTipo.map(t=>t.qtd),backgroundColor:['#E8961A','#4ADE80','#60A5FA','#F87171','#C084FC','#94A3B8']}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#F0EDE8',boxWidth:12,font:{size:11}}}}}
+  });
 }
 async function baixarComAuth(ev,tipo){
   ev.preventDefault();
