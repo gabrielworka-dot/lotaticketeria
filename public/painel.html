@@ -927,7 +927,7 @@ async function renderTabRelatorios(periodo){
       </div>`:''}
       <div class="met-g">
         <div class="met-c"><div class="met-l">Visualizações da Página</div><div class="met-v">${r.visualizacoes.toLocaleString('pt-BR')}</div></div>
-        <div class="met-c"><div class="met-l">Taxa de Conversão</div><div class="met-v">${r.taxaConversao}%</div></div>
+        <div class="met-c"><div class="met-l">Visualizações por Ingresso Vendido</div><div class="met-v">${r.taxaConversao!==null?r.taxaConversao:'—'}</div>${r.taxaConversao!==null?'<div style="font-size:11px;color:var(--text3);margin-top:2px">quanto menor, melhor</div>':''}</div>
       </div>
       ${r.porTipoIngresso.length?`
       <div class="card">
