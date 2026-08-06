@@ -873,6 +873,7 @@ app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
     cores: { primaria: '#C47B14', fundo: '#18160F' },
     // Limite total de ingressos do evento (soma de todos os lotes) — 0 ou vazio significa sem limite.
     capacidadeMaxima: Math.max(0, parseInt(capacidadeMaxima) || 0),
+    destaque: false,
     lotes: [], cupons: [], promoters: [],
     pixels: { metaPixelId: '', tiktokPixelId: '', gaMeasurementId: '', googleAdsConversionId: '', googleAdsConversionLabel: '' },
     politicaCancelamento: 'sem-cancelamento',
@@ -2010,6 +2011,20 @@ app.patch('/api/admin/mensagens/:id', auth, adminOnly, (req, res) => {
 app.get('/api/public/cidades', rateLimit(60000, 60), (req, res) => {
   const cidades = [...new Set(EVENTOS.filter(e => e.status === 'publicado' && e.cidade).map(e => e.cidade))].sort();
   res.json({ cidades });
+});
+
+// Dados organizados pra home: carrossel de mais vistos, destaques escolhidos pelo admin, e a lista
+// de categorias que têm pelo menos um evento publicado (pras abas por formato).
+app.get('/api/public/home', rateLimit(60000, 60), (req, res) => {
+  const publicados = EVENTOS.filter(e => e.status === 'publicado' && parseDataLocal(e.dataEvento) >= new Date(Date.now() - 86400000));
+  const mapear = (e) => {
+    const precos = e.lotes.filter(l => l.ativo && !l.cortesia).map(l => l.preco);
+    return { slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, horaEvento: e.horaEvento, cidade: e.cidade, local: e.local, categoria: e.categoria, imagemCapa: e.imagemCapa, precoMin: precos.length ? Math.min(...precos) : 0 };
+  };
+  const maisVistos = publicados.slice().sort((a, b) => (b.visualizacoes || 0) - (a.visualizacoes || 0)).slice(0, 8).map(mapear);
+  const destaques = publicados.filter(e => e.destaque).sort((a,b) => parseDataLocal(a.dataEvento) - parseDataLocal(b.dataEvento)).map(mapear);
+  const categorias = [...new Set(publicados.map(e => e.categoria).filter(Boolean))];
+  res.json({ maisVistos, destaques, categorias });
 });
 
 app.get('/api/public/eventos', rateLimit(60000, 60), (req, res) => {
@@ -3173,10 +3188,20 @@ app.get('/api/admin/eventos', auth, adminOnly, (req, res) => {
       cidade: ev.cidade, categoria: ev.categoria,
       organizadorNome: organizador?.nomePublico || organizador?.nome || '—',
       organizadorEmail: organizador?.email || '—',
-      receita, comissao, ingressos, totalPedidos: pedidosPagos.length, createdAt: ev.createdAt
+      receita, comissao, ingressos, totalPedidos: pedidosPagos.length, createdAt: ev.createdAt, destaque: !!ev.destaque
     };
   }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json({ eventos: lista });
+});
+
+// Marca/desmarca um evento como "destaque" — aparece na seção de destaques da home, escolhida
+// manualmente pelo admin (diferente da seção "mais vistos", que é automática).
+app.patch('/api/admin/eventos/:id/destaque', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  ev.destaque = !!req.body.destaque;
+  persistEventos();
+  res.json({ ok: true, destaque: ev.destaque });
 });
 
 app.get('/api/admin/eventos/:id', auth, adminOnly, (req, res) => {
