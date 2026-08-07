@@ -82,6 +82,21 @@ a{color:inherit;text-decoration:none;}
 .event-name{font-size:14px;font-weight:700;line-height:1.3;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px;}
 .event-meta{font-size:11px;color:var(--text3);}
 .event-price{margin-top:8px;font-size:13px;font-weight:800;color:var(--p2);}
+.carrossel-wrap{position:relative;border-radius:18px;overflow:hidden;aspect-ratio:16/6;min-height:200px;background:var(--card);margin-bottom:8px;}
+.carrossel-slide{position:absolute;inset:0;opacity:0;transition:opacity .6s ease;cursor:pointer;}
+.carrossel-slide.active{opacity:1;}
+.carrossel-slide img{width:100%;height:100%;object-fit:cover;}
+.carrossel-slide .carrossel-overlay{position:absolute;left:0;right:0;bottom:0;padding:20px 24px;background:linear-gradient(0deg,rgba(0,0,0,.85),transparent);}
+.carrossel-slide .carrossel-nome{font-size:clamp(16px,3vw,26px);font-weight:800;color:#fff;}
+.carrossel-slide .carrossel-meta{font-size:13px;color:#e8e2d6;margin-top:4px;}
+.carrossel-dots{position:absolute;bottom:12px;right:16px;display:flex;gap:6px;z-index:2;}
+.carrossel-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.4);cursor:pointer;transition:all .2s;}
+.carrossel-dot.active{background:#fff;width:20px;border-radius:5px;}
+.cat-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;scrollbar-width:none;}
+.cat-tabs::-webkit-scrollbar{display:none;}
+.cat-tab{padding:9px 18px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .2s;flex-shrink:0;}
+.cat-tab:hover{border-color:var(--p2);color:var(--text);}
+.cat-tab.active{background:var(--p2);border-color:var(--p2);color:#18160F;}
 
 .empty{text-align:center;padding:60px 20px;color:var(--text3);}
 .empty-ic{font-size:40px;display:block;margin-bottom:12px;opacity:.4;}
@@ -161,12 +176,6 @@ a{color:inherit;text-decoration:none;}
   <select id="cidadeSelect" onchange="filtrarCidade(this.value)" style="padding:8px 14px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
     <option value="">📍 Cidade</option>
   </select>
-  <div class="filter-chip active" onclick="filtrarCategoria('',this)">Todos os gêneros</div>
-  <div class="filter-chip" onclick="filtrarCategoria('Festas e shows',this)">Festas e shows</div>
-  <div class="filter-chip" onclick="filtrarCategoria('Espetáculos',this)">Espetáculos</div>
-  <div class="filter-chip" onclick="filtrarCategoria('Stand-up',this)">Stand-up</div>
-  <div class="filter-chip" onclick="filtrarCategoria('Universitário',this)">Universitário</div>
-  <div class="filter-chip" onclick="filtrarCategoria('Esportes',this)">Esportes</div>
 </div>
 
 <div class="wrap">
@@ -174,7 +183,18 @@ a{color:inherit;text-decoration:none;}
     <div class="section-title">Seu feed</div>
     <div id="feedList"></div>
   </div>
-  <div class="section-title">Eventos em destaque</div>
+
+  <div id="carrosselSection" style="display:none">
+    <div class="carrossel-wrap" id="carrosselWrap"></div>
+  </div>
+
+  <div id="destaquesSection" style="display:none">
+    <div class="section-title">Eventos em Destaque</div>
+    <div class="event-grid" id="destaquesGrid"></div>
+  </div>
+
+  <div class="section-title" id="categoriaTitulo">Todos os eventos</div>
+  <div class="cat-tabs" id="catTabs"></div>
   <div class="event-grid" id="eventGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando eventos...</p></div></div>
 </div>
 
@@ -183,7 +203,7 @@ a{color:inherit;text-decoration:none;}
     <div>
       <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
       <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
-      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@lotaticketeria.com.br" style="color:var(--p2);text-decoration:none">sac@lotaticketeria.com.br</a></div>
       <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
     </div>
     <div>
@@ -585,8 +605,73 @@ async function loadFeed(){
 // ─── MARKETPLACE ────────────────────────────────────────────
 let categoriaAtual='';
 let cidadeAtual='';
+let CARROSSEL_EVENTOS=[];
+let CARROSSEL_INDICE=0;
+let CARROSSEL_TIMER=null;
+
+async function carregarHome(){
+  try{
+    const d=await api('GET','/api/public/home');
+    renderCarrossel(d.maisVistos);
+    renderDestaques(d.destaques);
+    renderCatTabs(d.categorias);
+  }catch(e){}
+}
+function renderCarrossel(eventos){
+  const secao=document.getElementById('carrosselSection');
+  const wrap=document.getElementById('carrosselWrap');
+  if(!eventos.length){ secao.style.display='none'; return; }
+  secao.style.display='block';
+  CARROSSEL_EVENTOS=eventos; CARROSSEL_INDICE=0;
+  wrap.innerHTML=eventos.map((ev,i)=>{
+    const dt=parseDataLocal(ev.dataEvento);
+    const dataFmt=dt.toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','');
+    return '<div class="carrossel-slide'+(i===0?' active':'')+'" onclick="location.href=\'/e/'+ev.slug+'\'">'
+      +(ev.imagemCapa?'<img src="'+esc(ev.imagemCapa)+'">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:60px;background:var(--bg3)">🎪</div>')
+      +'<div class="carrossel-overlay"><div class="carrossel-nome">'+esc(ev.nome)+'</div><div class="carrossel-meta">📅 '+dataFmt+' · 📍 '+esc(ev.cidade||ev.local||'')+'</div></div></div>';
+  }).join('')
+  +(eventos.length>1?'<div class="carrossel-dots">'+eventos.map((_,i)=>'<div class="carrossel-dot'+(i===0?' active':'')+'" onclick="event.stopPropagation();irParaSlideCarrossel('+i+')"></div>').join('')+'</div>':'');
+  if(eventos.length>1) iniciarAutoRotacaoCarrossel();
+}
+function irParaSlideCarrossel(i){
+  CARROSSEL_INDICE=i;
+  document.querySelectorAll('.carrossel-slide').forEach((el,idx)=>el.classList.toggle('active',idx===i));
+  document.querySelectorAll('.carrossel-dot').forEach((el,idx)=>el.classList.toggle('active',idx===i));
+  iniciarAutoRotacaoCarrossel();
+}
+function iniciarAutoRotacaoCarrossel(){
+  if(CARROSSEL_TIMER) clearInterval(CARROSSEL_TIMER);
+  CARROSSEL_TIMER=setInterval(()=>{
+    irParaSlideCarrossel((CARROSSEL_INDICE+1)%CARROSSEL_EVENTOS.length);
+  },5000);
+}
+function renderDestaques(eventos){
+  const secao=document.getElementById('destaquesSection');
+  if(!eventos.length){ secao.style.display='none'; return; }
+  secao.style.display='block';
+  document.getElementById('destaquesGrid').innerHTML=eventos.map(renderEventCard).join('');
+}
+function renderCatTabs(categorias){
+  const el=document.getElementById('catTabs');
+  if(!categorias.length){ el.innerHTML=''; return; }
+  el.innerHTML='<div class="cat-tab'+(categoriaAtual===''?' active':'')+'" onclick="filtrarCategoria(\'\',this)">Todos</div>'
+    +categorias.map(c=>'<div class="cat-tab'+(categoriaAtual===c?' active':'')+'" onclick="filtrarCategoria(\''+esc(c).replace(/'/g,"\\'")+'\',this)">'+esc(c)+'</div>').join('');
+}
+function renderEventCard(ev){
+  const dt=parseDataLocal(ev.dataEvento);
+  const dia=dt.toLocaleDateString('pt-BR',{day:'2-digit'});
+  const mes=dt.toLocaleDateString('pt-BR',{month:'short'}).toUpperCase().replace('.','');
+  return '<div class="event-card" onclick="location.href=\'/e/'+ev.slug+'\'">'
+    +'<div class="event-img">'+(ev.imagemCapa?'<img src="'+esc(ev.imagemCapa)+'">':'🎪')
+    +'<div class="event-date-badge">'+dia+'<br>'+mes+'</div></div>'
+    +'<div class="event-body"><div class="event-cat">'+esc(ev.categoria)+'</div><div class="event-name">'+esc(ev.nome)+'</div>'
+    +'<div class="event-meta">📍 '+esc(ev.cidade||ev.local||'')+(ev.horaEvento?' · '+ev.horaEvento:'')+'</div>'
+    +'<div class="event-price">'+(ev.precoMin>0?'A partir de R$'+ev.precoMin.toFixed(2).replace('.',','):'Gratuito')+'</div>'
+    +(ev.precoMin>0?'<div style="font-size:9px;color:var(--text3);margin-top:2px">Pague em até 3x</div>':'')+'</div></div>';
+}
 async function carregarEventos(busca){
   const el=document.getElementById('eventGrid');
+  document.getElementById('categoriaTitulo').textContent=busca?'Resultado da busca':(categoriaAtual||'Todos os eventos');
   try{
     const params=new URLSearchParams();
     if(categoriaAtual) params.set('categoria',categoriaAtual);
@@ -594,23 +679,12 @@ async function carregarEventos(busca){
     if(busca) params.set('busca',busca);
     const d=await api('GET','/api/public/eventos?'+params.toString());
     if(!d.eventos.length){el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento encontrado.</p></div>';return;}
-    el.innerHTML=d.eventos.map(ev=>{
-      const dt=parseDataLocal(ev.dataEvento);
-      const dia=dt.toLocaleDateString('pt-BR',{day:'2-digit'});
-      const mes=dt.toLocaleDateString('pt-BR',{month:'short'}).toUpperCase().replace('.','');
-      return'<div class="event-card" onclick="location.href=\'/e/'+ev.slug+'\'">'
-        +'<div class="event-img">'+(ev.imagemCapa?'<img src="'+esc(ev.imagemCapa)+'">':'🎪')
-        +'<div class="event-date-badge">'+dia+'<br>'+mes+'</div></div>'
-        +'<div class="event-body"><div class="event-cat">'+esc(ev.categoria)+'</div><div class="event-name">'+esc(ev.nome)+'</div>'
-        +'<div class="event-meta">📍 '+esc(ev.cidade||ev.local||'')+(ev.horaEvento?' · '+ev.horaEvento:'')+'</div>'
-        +'<div class="event-price">'+(ev.precoMin>0?'A partir de R$'+ev.precoMin.toFixed(2).replace('.',','):'Gratuito')+'</div>'
-        +(ev.precoMin>0?'<div style="font-size:9px;color:var(--text3);margin-top:2px">Pague em até 12x</div>':'')+'</div></div>';
-    }).join('');
+    el.innerHTML=d.eventos.map(renderEventCard).join('');
   }catch(e){el.innerHTML='<div class="empty"><p>Erro ao carregar eventos.</p></div>';}
 }
 function filtrarCategoria(cat,el){
   categoriaAtual=cat;
-  document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
+  document.querySelectorAll('.cat-tab').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
   carregarEventos();
 }
@@ -639,18 +713,14 @@ function buscar(){ carregarEventos(document.getElementById('searchInput').value.
   const params=new URLSearchParams(location.search);
   const categoriaUrl=preset?.tipo==='categoria'?preset.valor:params.get('categoria');
   const cidadeUrl=preset?.tipo==='cidade'?preset.valor:params.get('cidade');
-  if(categoriaUrl){
-    categoriaAtual=categoriaUrl;
-    document.querySelectorAll('.filter-chip').forEach(el=>el.classList.remove('active'));
-    const chipCorrespondente=[...document.querySelectorAll('.filter-chip')].find(el=>el.getAttribute('onclick')?.includes("'"+categoriaUrl+"'"));
-    if(chipCorrespondente) chipCorrespondente.classList.add('active');
-  }
+  if(categoriaUrl) categoriaAtual=categoriaUrl; // renderCatTabs já marca a aba certa como ativa usando essa variável
   await carregarCidades();
   if(cidadeUrl){
     cidadeAtual=cidadeUrl;
     const sel=document.getElementById('cidadeSelect');
     if(sel) sel.value=cidadeUrl;
   }
+  carregarHome();
   carregarEventos();
 })();
 </script>
