@@ -547,13 +547,17 @@ async function processarAdiantamento(id,status){
   catch(e){ toast(e.message,'err'); }
 }
 
+async function toggleDestaque(id,destaque){
+  try{ await api('PATCH','/api/admin/eventos/'+id+'/destaque',{destaque}); toast(destaque?'Evento destacado!':'Destaque removido.','ok'); carregarEventos(); }
+  catch(e){ toast(e.message,'err'); }
+}
 async function carregarEventos(){
   const el=document.getElementById('eventosTable');
   try{
     const d=await api('GET','/api/admin/eventos');
     if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento criado ainda.</p></div>'; return; }
     el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th>Comissão</th><th></th></tr></thead><tbody>'
-      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn bp btn-sm" onclick="abrirPedidosEvento(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📋 Pedidos</button><button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
+      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+(e.destaque?' <span style="color:var(--p2)" title="Em destaque na home">⭐</span>':'')+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn '+(e.destaque?'bp':'bo')+' btn-sm" onclick="toggleDestaque(\''+e.id+'\','+!e.destaque+')">⭐ '+(e.destaque?'Remover destaque':'Destacar')+'</button><button class="btn bp btn-sm" onclick="abrirPedidosEvento(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📋 Pedidos</button><button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function baixarCsv(url, nomeArquivo){
