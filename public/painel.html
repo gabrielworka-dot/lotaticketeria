@@ -284,6 +284,17 @@ a{color:inherit;}
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)"><input type="checkbox" id="loteCortesia" onchange="toggleCortesia()"> Cortesia (gratuito)</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)"><input type="checkbox" id="loteExclusivo"> Exclusivo para promoters</label>
     </div>
+    <div class="fg"><label>Imagem (opcional — útil pra vender merchandising, camisetas, etc)</label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div id="loteImgPreview" style="width:56px;height:56px;border-radius:9px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;overflow:hidden">🎫</div>
+        <div style="flex:1;display:flex;gap:8px">
+          <input type="file" accept="image/*" id="loteImgFile" style="display:none" onchange="handleImageUpload(this,'loteImagem','loteImgPreview')">
+          <button type="button" class="btn bo btn-sm" onclick="document.getElementById('loteImgFile').click()">📷 Escolher imagem</button>
+          <button type="button" class="btn bdng btn-sm" id="loteImgRemoverBtn" style="display:none" onclick="removerImagemLote()">Remover</button>
+        </div>
+      </div>
+      <input type="hidden" id="loteImagem" value="">
+    </div>
     <div class="ma"><button class="btn bo" onclick="cm('loteModal')">Cancelar</button><button class="btn bp" onclick="salvarLote()">Salvar</button></div>
   </div>
 </div>
@@ -667,7 +678,7 @@ function renderLotesLista(){
   if(capEl) capEl.textContent=_lotesTemp.reduce((s,l)=>s+(parseInt(l.qtdTotal)||0),0);
   if(!_lotesTemp.length){ el.innerHTML='<div class="empty" style="padding:16px"><p>Nenhum lote ainda.</p></div>'; return; }
   const botoesLinha=(i)=>SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" onclick="abrirEditarLote('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_lotesTemp.splice('+i+',1);renderLotesLista()">✕</button>';
-  el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row"><div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div>'+botoesLinha(i)+'</div>').join('');
+  el.innerHTML=_lotesTemp.map((l,i)=>'<div class="lote-row">'+(l.imagemUrl?'<img src="'+esc(l.imagemUrl)+'" style="width:38px;height:38px;border-radius:7px;object-fit:cover;flex-shrink:0">':'')+'<div style="flex:1;min-width:150px"><strong>'+esc(l.nome)+'</strong>'+(l.cortesia?' <span style="color:var(--green);font-size:11px">🎁 Cortesia</span>':'')+(l.exclusivoPromoter?' <span style="color:var(--p2);font-size:11px">🤝 Só promoters</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+(l.cortesia?'Gratuito':'R$'+l.preco.toFixed(2))+' · '+l.vendidos+'/'+l.qtdTotal+' vendidos</div></div>'+botoesLinha(i)+'</div>').join('');
 }
 function abrirNovoLote(){
   document.getElementById('loteId').value='';
@@ -678,6 +689,9 @@ function abrirNovoLote(){
   document.getElementById('loteCortesia').checked=false;
   document.getElementById('loteExclusivo').checked=false;
   document.getElementById('lotePreco').disabled=false;
+  document.getElementById('loteImagem').value='';
+  document.getElementById('loteImgPreview').innerHTML='🎫';
+  document.getElementById('loteImgRemoverBtn').style.display='none';
   document.getElementById('loteModal').classList.add('show');
 }
 function abrirEditarLote(i){
@@ -690,13 +704,21 @@ function abrirEditarLote(i){
   document.getElementById('loteCortesia').checked=l.cortesia;
   document.getElementById('loteExclusivo').checked=l.exclusivoPromoter;
   document.getElementById('lotePreco').disabled=l.cortesia;
+  document.getElementById('loteImagem').value=l.imagemUrl||'';
+  document.getElementById('loteImgPreview').innerHTML=l.imagemUrl?'<img src="'+esc(l.imagemUrl)+'" style="width:100%;height:100%;object-fit:cover">':'🎫';
+  document.getElementById('loteImgRemoverBtn').style.display=l.imagemUrl?'inline-block':'none';
   document.getElementById('loteModal').classList.add('show');
+}
+function removerImagemLote(){
+  document.getElementById('loteImagem').value='';
+  document.getElementById('loteImgPreview').innerHTML='🎫';
+  document.getElementById('loteImgRemoverBtn').style.display='none';
 }
 function toggleCortesia(){ document.getElementById('lotePreco').disabled=document.getElementById('loteCortesia').checked; }
 function salvarLote(){
   const idx=gv('loteId');
   const cortesia=document.getElementById('loteCortesia').checked;
-  const lote={ nome:gv('loteNome')||'Lote', preco: cortesia?0:(parseFloat(gv('lotePreco'))||0), qtdTotal:parseInt(gv('loteQtd'))||0, vendidos: idx!==''?_lotesTemp[idx].vendidos:0, ativo:true, cortesia, exclusivoPromoter: document.getElementById('loteExclusivo').checked, id: idx!==''?_lotesTemp[idx].id:undefined };
+  const lote={ nome:gv('loteNome')||'Lote', preco: cortesia?0:(parseFloat(gv('lotePreco'))||0), qtdTotal:parseInt(gv('loteQtd'))||0, vendidos: idx!==''?_lotesTemp[idx].vendidos:0, ativo:true, cortesia, exclusivoPromoter: document.getElementById('loteExclusivo').checked, imagemUrl: gv('loteImagem')||'', id: idx!==''?_lotesTemp[idx].id:undefined };
   if(!lote.nome || !lote.qtdTotal){ toast('Preencha nome e quantidade.','err'); return; }
   if(idx!=='') _lotesTemp[idx]=lote; else _lotesTemp.push(lote);
   cm('loteModal'); renderLotesLista();
@@ -862,7 +884,18 @@ async function salvarPixels(){
 
 // ── RELATÓRIOS ──
 let RELATORIO_PERIODO_ATUAL='geral';
+let RELATORIO_DATA_INICIO_ATUAL=null, RELATORIO_DATA_FIM_ATUAL=null;
 let CHART_VENDAS_DIARIAS=null, CHART_TIPO_INGRESSO=null;
+// Função dedicada só pro botão "Aplicar" — captura os valores dos campos de data ANTES de
+// qualquer coisa mexer no DOM, evitando o bug antigo onde o "Carregando..." apagava os campos
+// antes do valor escolhido pelo usuário ser lido.
+function aplicarFiltroPersonalizado(){
+  const di=document.getElementById('relDataInicio')?.value||null;
+  const df=document.getElementById('relDataFim')?.value||null;
+  if(!di && !df){ toast('Escolha ao menos uma data.','err'); return; }
+  RELATORIO_DATA_INICIO_ATUAL=di; RELATORIO_DATA_FIM_ATUAL=df;
+  renderTabRelatorios('personalizado');
+}
 async function renderTabRelatorios(periodo){
   if(periodo) RELATORIO_PERIODO_ATUAL=periodo;
   const el=document.getElementById('evTabRelatorios');
@@ -870,9 +903,8 @@ async function renderTabRelatorios(periodo){
   try{
     let query='periodo='+RELATORIO_PERIODO_ATUAL;
     if(RELATORIO_PERIODO_ATUAL==='personalizado'){
-      const di=document.getElementById('relDataInicio')?.value, df=document.getElementById('relDataFim')?.value;
-      if(di) query+='&dataInicio='+di;
-      if(df) query+='&dataFim='+df;
+      if(RELATORIO_DATA_INICIO_ATUAL) query+='&dataInicio='+RELATORIO_DATA_INICIO_ATUAL;
+      if(RELATORIO_DATA_FIM_ATUAL) query+='&dataFim='+RELATORIO_DATA_FIM_ATUAL;
     }
     const r=await api('GET','/api/eventos/'+EV_ATUAL.id+'/relatorio?'+query);
     const filtros=[['geral','Geral'],['30dias','Últimos 30 dias'],['hoje','Hoje'],['ontem','Ontem'],['personalizado','Personalizado']];
@@ -881,7 +913,7 @@ async function renderTabRelatorios(periodo){
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           ${filtros.map(([v,l])=>'<button class="btn '+(RELATORIO_PERIODO_ATUAL===v?'bp':'bo')+' btn-sm" onclick="renderTabRelatorios(\''+v+'\')">'+l+'</button>').join('')}
         </div>
-        ${RELATORIO_PERIODO_ATUAL==='personalizado'?'<div style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="date" class="fi" id="relDataInicio" style="max-width:160px"><span style="color:var(--text3);font-size:12px">até</span><input type="date" class="fi" id="relDataFim" style="max-width:160px"><button class="btn bp btn-sm" onclick="renderTabRelatorios(\'personalizado\')">Aplicar</button></div>':''}
+        ${RELATORIO_PERIODO_ATUAL==='personalizado'?'<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><input type="date" class="fi" id="relDataInicio" value="'+(RELATORIO_DATA_INICIO_ATUAL||'')+'" style="max-width:160px"><span style="color:var(--text3);font-size:12px">até</span><input type="date" class="fi" id="relDataFim" value="'+(RELATORIO_DATA_FIM_ATUAL||'')+'" style="max-width:160px"><button class="btn bp btn-sm" onclick="aplicarFiltroPersonalizado()">Aplicar</button></div>':''}
       </div>
       <div class="met-g">
         <div class="met-c"><div class="met-l">Receita (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$${(r.totalReceita||0).toFixed(2)}</div></div>
