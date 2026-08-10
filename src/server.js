@@ -995,11 +995,17 @@ app.patch('/api/eventos/:id/lotes', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   if (!Array.isArray(req.body.lotes)) return res.status(400).json({ error: 'Lotes inválidos.' });
+  // Imagem opcional por lote — útil pra vender merchandising (camiseta, produto, etc) junto com o
+  // ingresso. Limite de tamanho generoso (~2MB em base64) pra não pesar demais no armazenamento.
+  for (const l of req.body.lotes) {
+    if (l.imagemUrl && l.imagemUrl.length > 2_800_000) return res.status(400).json({ error: `Imagem do lote "${l.nome || ''}" muito grande. Tente uma imagem menor.` });
+  }
   const novosLotes = req.body.lotes.map(l => ({
     id: l.id || uuidv4(), nome: sanitize(l.nome || 'Lote', 60),
     preco: l.cortesia ? 0 : Math.max(0, parseFloat(l.preco) || 0),
     qtdTotal: Math.max(0, parseInt(l.qtdTotal) || 0), vendidos: parseInt(l.vendidos) || 0,
-    ativo: l.ativo !== false, cortesia: !!l.cortesia, exclusivoPromoter: !!l.exclusivoPromoter
+    ativo: l.ativo !== false, cortesia: !!l.cortesia, exclusivoPromoter: !!l.exclusivoPromoter,
+    imagemUrl: (l.imagemUrl && l.imagemUrl.startsWith('data:image/')) ? l.imagemUrl : (l.imagemUrl || '')
   }));
   if (ev.capacidadeMaxima > 0) {
     const totalNovo = novosLotes.reduce((s, l) => s + l.qtdTotal, 0);
@@ -2064,7 +2070,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   persistEventos();
   const organizador = db.users.find(u => u.id === ev.organizadorId);
   const lotesPublicos = ev.lotes.filter(l => l.ativo && !l.exclusivoPromoter && l.vendidos < l.qtdTotal)
-    .map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos }));
+    .map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos, imagemUrl: l.imagemUrl || '' }));
   res.json({
     nome: ev.nome, descricao: ev.descricao, dataEvento: ev.dataEvento, horaEvento: ev.horaEvento,
     local: ev.local, cidade: ev.cidade, categoria: ev.categoria, imagemCapa: ev.imagemCapa, cores: ev.cores,
