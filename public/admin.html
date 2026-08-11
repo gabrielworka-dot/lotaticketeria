@@ -494,9 +494,9 @@ async function carregarUsuarios(){
     const d=await api('GET','/api/admin/usuarios');
     const produtores=d.usuarios.filter(u=>u.isOrganizador && !u.isAdmin);
     if(!produtores.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum produtor cadastrado ainda.</p></div>'; return; }
-    el.innerHTML='<table class="tbl"><thead><tr><th>Nome</th><th>Produtora</th><th>E-mail</th><th>Verificado</th><th>Status</th><th>Cadastro</th><th></th></tr></thead><tbody>'
+    el.innerHTML='<table class="tbl"><thead><tr><th>Nome</th><th>Produtora</th><th>E-mail</th><th>Verificado</th><th>Antecipação</th><th>Status</th><th>Cadastro</th><th></th></tr></thead><tbody>'
       +produtores.map(u=>{
-        return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(u.nomePublico||'—')+'</td><td>'+esc(u.email)+'</td><td>'+(u.verificado?'<span class="st-on">✓ Verificado</span>':'<span style="color:var(--text3)">—</span>')+'</td><td class="'+(u.ativo!==false?'st-on':'st-off')+'">'+(u.ativo!==false?'Ativo':'Inativo')+'</td><td>'+new Date(u.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn '+(u.verificado?'bo':'bgreen')+' btn-sm" onclick="toggleVerificado(\''+u.id+'\','+(!u.verificado)+')">'+(u.verificado?'Remover selo':'✓ Verificar')+'</button><button class="btn '+(u.ativo!==false?'bdng':'bgreen')+' btn-sm" onclick="toggleUsuario(\''+u.id+'\','+(u.ativo===false)+')">'+(u.ativo!==false?'Desativar':'Ativar')+'</button></td></tr>';
+        return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(u.nomePublico||'—')+'</td><td>'+esc(u.email)+'</td><td>'+(u.verificado?'<span class="st-on">✓ Verificado</span>':'<span style="color:var(--text3)">—</span>')+'</td><td>'+(u.podeAntecipar?'<span class="st-on">✓ Liberada</span>':'<span style="color:var(--text3)">Bloqueada</span>')+'</td><td class="'+(u.ativo!==false?'st-on':'st-off')+'">'+(u.ativo!==false?'Ativo':'Inativo')+'</td><td>'+new Date(u.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn '+(u.verificado?'bo':'bgreen')+' btn-sm" onclick="toggleVerificado(\''+u.id+'\','+(!u.verificado)+')">'+(u.verificado?'Remover selo':'✓ Verificar')+'</button><button class="btn '+(u.podeAntecipar?'bo':'bp')+' btn-sm" onclick="toggleAntecipacao(\''+u.id+'\','+(!u.podeAntecipar)+')">'+(u.podeAntecipar?'Bloquear antecipação':'💰 Liberar antecipação')+'</button><button class="btn '+(u.ativo!==false?'bdng':'bgreen')+' btn-sm" onclick="toggleUsuario(\''+u.id+'\','+(u.ativo===false)+')">'+(u.ativo!==false?'Desativar':'Ativar')+'</button></td></tr>';
       }).join('')+'</tbody></table>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
@@ -506,6 +506,11 @@ async function toggleUsuario(id,ativo){
 }
 async function toggleVerificado(id,verificado){
   try{ await api('PATCH','/api/admin/usuarios/'+id+'/verificado',{verificado}); toast(verificado?'Selo de verificado concedido!':'Selo removido.','ok'); carregarUsuarios(); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function toggleAntecipacao(id,podeAntecipar){
+  if(podeAntecipar && !confirm('Confirma que esse produtor tem contrato ativo com a Lota pra antecipação de recebíveis?')) return;
+  try{ await api('PATCH','/api/admin/usuarios/'+id+'/pode-antecipar',{podeAntecipar}); toast(podeAntecipar?'Antecipação liberada pra esse produtor!':'Antecipação bloqueada.','ok'); carregarUsuarios(); }
   catch(e){ toast(e.message,'err'); }
 }
 
