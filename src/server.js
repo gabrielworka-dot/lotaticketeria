@@ -659,13 +659,18 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
 app.post('/api/auth/tornar-organizador', auth, (req, res) => {
   const user = db.users.find(u => u.id === req.user.id);
   if (user.isOrganizador) return res.json({ user: safe(user) });
-  const { nomePublico, bio } = req.body;
+  const { nomePublico, bio, aceitouTermos } = req.body;
   if (!nomePublico) return res.status(400).json({ error: 'Nome público obrigatório.' });
+  // Aceite explícito e obrigatório dos Termos de Responsabilidade do Produtor — sem isso, ninguém
+  // vira produtor. Guardamos a data/hora exata como prova de que o aceite aconteceu.
+  if (!aceitouTermos) return res.status(400).json({ error: 'É necessário aceitar os Termos de Responsabilidade do Produtor.' });
   const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
   user.isOrganizador = true;
   user.nomePublico = sanitize(nomePublico, 100);
   user.organizadorSlug = gerarSlugUnico(nomePublico, slugsExistentes);
   user.bio = sanitize(bio || '', 500);
+  user.aceitouTermosProdutorEm = new Date().toISOString();
+  user.podeAntecipar = false; // só quem tem contrato com a gente pode solicitar adiantamento — ver rota de admin
   saveDB(db);
   res.json({ user: safe(user) });
 });
@@ -1123,6 +1128,10 @@ app.get('/api/produtor/adiantamentos', auth, organizadorOnly, (req, res) => {
 });
 
 app.post('/api/produtor/adiantamento', auth, organizadorOnly, (req, res) => {
+  // Antecipação só é liberada pra produtores que têm contrato com a gente — precisa ter sido
+  // habilitado manualmente pelo admin (aba Produtores). Sem isso, a rota fica bloqueada mesmo pra
+  // quem tenta chamar direto pela API.
+  if (!req.user.podeAntecipar) return res.status(403).json({ error: 'A antecipação de recebíveis está disponível apenas para produtores com contrato ativo com a Lota. Entre em contato com o suporte pra saber mais.' });
   const valor = Math.round((parseFloat(req.body.valor) || 0) * 100) / 100;
   if (valor <= 0) return res.status(400).json({ error: 'Informe um valor válido.' });
   if (!req.user.pagamentoInfo?.chavePix) return res.status(400).json({ error: 'Cadastre sua chave PIX no perfil antes de solicitar um adiantamento.' });
@@ -3104,6 +3113,19 @@ app.patch('/api/admin/usuarios/:id/verificado', auth, adminOnly, (req, res) => {
   if (!user.isOrganizador) return res.status(400).json({ error: 'Somente produtores podem ser verificados.' });
   user.verificado = !!req.body.verificado;
   saveDB(db);
+  res.json({ ok: true, usuario: safe(user) });
+});
+
+// Libera/revoga a possibilidade de solicitar antecipação de recebíveis — só produtores com
+// contrato ativo com a Lota devem ter isso habilitado. Decisão manual do admin, produtor nenhum
+// consegue ativar isso sozinho.
+app.patch('/api/admin/usuarios/:id/pode-antecipar', auth, adminOnly, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  if (!user.isOrganizador) return res.status(400).json({ error: 'Somente produtores podem ter essa permissão.' });
+  user.podeAntecipar = !!req.body.podeAntecipar;
+  saveDB(db);
+  registrarAuditoria(req.user, 'alterou_permissao_antecipacao', { produtorId: user.id, podeAntecipar: user.podeAntecipar });
   res.json({ ok: true, usuario: safe(user) });
 });
 
