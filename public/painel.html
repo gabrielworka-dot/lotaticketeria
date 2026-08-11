@@ -450,9 +450,11 @@ function goBack(){ if(!PH.length) return; const p=PH.pop(); gp(p); }
 function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
 
 async function tornarOrganizador(){
-  const nomePublico=document.getElementById('opNome').value.trim();
+  const nomePublico=document.getElementById('opNomeInput').value.trim();
+  const aceitouTermos=document.getElementById('opAceiteTermos')?.checked;
   if(!nomePublico){ alert('Digite um nome público.'); return; }
-  try{ await api('POST','/api/auth/tornar-organizador',{nomePublico,bio:''}); location.reload(); }
+  if(!aceitouTermos){ alert('É necessário aceitar os Termos de Responsabilidade do Produtor.'); return; }
+  try{ await api('POST','/api/auth/tornar-organizador',{nomePublico,bio:'',aceitouTermos}); location.reload(); }
   catch(e){ alert(e.message); }
 }
 
@@ -493,11 +495,16 @@ let SOMENTE_LEITURA=false;
           <h2 style="margin-bottom:8px">Área exclusiva de produtores</h2>
           <p style="font-size:13px;color:#A09880;margin-bottom:20px">Sua conta é de cliente. Quer também criar eventos e vender ingressos pela Lota?</p>
           <label style="font-size:11px;color:#A09880;display:block;margin-bottom:5px;text-align:left">Nome público (nome da sua produtora/marca)</label>
-          <input id="opNome" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:16px" placeholder="Ex: Atlética XYZ">
-          <button onclick="tornarOrganizador()" style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer;margin-bottom:10px">Quero vender ingressos também →</button>
+          <input id="opNomeInput" style="width:100%;background:#1E1C18;border:1.5px solid #2A2822;border-radius:9px;padding:10px 13px;color:#fff;margin-bottom:14px" placeholder="Ex: Atlética XYZ">
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#A09880;text-align:left;margin-bottom:16px;cursor:pointer">
+            <input type="checkbox" id="opAceiteTermos" onchange="document.getElementById('opBotaoConfirmar').disabled=!this.checked" style="margin-top:2px;flex-shrink:0">
+            <span>Li e aceito os <a href="/termos-produtor.html" target="_blank" style="color:#E8961A">Termos de Responsabilidade do Produtor</a> — sei que sou o único responsável pelo evento que criar, incluindo tudo o que envolve sua realização perante o meu público.</span>
+          </label>
+          <button id="opBotaoConfirmar" onclick="tornarOrganizador()" disabled style="width:100%;padding:12px;background:#E8961A;border:none;border-radius:9px;color:#18160F;font-weight:800;cursor:pointer;margin-bottom:10px;opacity:1;transition:opacity .2s" onmouseover="this.style.opacity=this.disabled?'.5':'1'">Quero vender ingressos também →</button>
           <a href="/" style="font-size:12px;color:#A09880">← Voltar para a vitrine de eventos</a>
         </div>
       </div>`;
+      document.getElementById('opBotaoConfirmar').style.opacity='.5';
       return;
     }
     SOMENTE_LEITURA=!CU.isOrganizador;
@@ -1355,10 +1362,15 @@ async function carregarSaldo(){
         <div class="met-c"><div class="met-l">Disponível p/ Solicitar</div><div class="met-v">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
       </div>
       ${saldo.totalPendente>0?'<div style="font-size:11px;color:var(--text3);margin:-6px 0 14px">Desse total a receber, <strong style="color:var(--p2)">R$ '+saldo.totalPendente.toFixed(2)+'</strong> já está com solicitação de adiantamento em análise.</div>':''}
+      <div class="card">
+        <div class="ct">Como funciona o repasse</div>
+        <p style="font-size:12px;color:var(--text2)">Você recebe o valor total das suas vendas em até <strong style="color:var(--text)">3 dias úteis após a realização do evento</strong>, na chave PIX cadastrada no seu perfil.</p>
+      </div>
+      ${CU.podeAntecipar?`
       ${(!temPix||!temDoc)?'<div class="card" style="border-color:var(--pb);background:var(--pbg)"><div style="font-size:13px;color:var(--p2);font-weight:700;margin-bottom:6px">⚠️ Complete seu cadastro para solicitar adiantamento</div><div style="font-size:12px;color:var(--text2);margin-bottom:12px">Falta cadastrar '+(!temDoc?'CPF/CNPJ':'')+((!temDoc&&!temPix)?' e ':'')+(!temPix?'chave PIX':'')+' no seu perfil.</div><button class="btn bp btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button></div>':''}
       <div class="card">
         <div class="ct">Solicitar Adiantamento</div>
-        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Peça o repasse do seu saldo disponível. O pagamento é feito manualmente via PIX pelo administrador, em até <strong>2 dias úteis</strong> após a solicitação.</p>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Peça o repasse do seu saldo disponível antes da realização do evento. O pagamento é feito manualmente via PIX pelo administrador, em até <strong>2 dias úteis</strong> após a solicitação.</p>
         <div class="fg2">
           <div class="fg"><label>Valor a solicitar (R$)</label><input type="number" class="fi" id="valorAdiantamento" min="0.01" step="0.01" max="${saldo.saldoDisponivel}" placeholder="0,00"></div>
           <div class="fg" style="display:flex;align-items:flex-end"><button class="btn bp" style="width:100%" onclick="solicitarAdiantamento()" ${(!temPix||!temDoc)?'disabled':''}>Solicitar →</button></div>
@@ -1373,7 +1385,11 @@ async function carregarSaldo(){
             return '<tr><td>R$'+a.valor.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td><td>'+(a.status==='pendente'?new Date(a.prazoLimite).toLocaleDateString('pt-BR'):'—')+'</td></tr>';
           }).join('')+'</tbody></table></div>'
           :'<div class="empty" style="padding:20px"><p>Nenhuma solicitação ainda.</p></div>'}
-      </div>`;
+      </div>`:`
+      <div class="card">
+        <div class="ct">Antecipação de Recebíveis</div>
+        <p style="font-size:12px;color:var(--text2)">A antecipação (receber parte do valor antes da realização do evento) está disponível apenas para produtores com contrato ativo com a Lota para essa finalidade. Fale com o nosso suporte se tiver interesse.</p>
+      </div>`}`;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function solicitarAdiantamento(){
