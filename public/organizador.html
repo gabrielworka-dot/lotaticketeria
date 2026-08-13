@@ -115,9 +115,6 @@ function render(d){
         <div class="event-img">${e.imagemCapa?'<img src="'+esc(e.imagemCapa)+'">':'🎪'}</div>
         <div class="event-body"><div class="event-name">${esc(e.nome)}</div><div class="event-meta">${parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')} · ${esc(e.cidade||'')}</div></div>
       </div>`).join(''):'<div class="empty">Nenhum evento publicado ainda.</div>'}</div>
-    <div class="section-title">Novidades</div>
-    <div id="postsList">${d.posts.length?d.posts.map(p=>`
-      <div class="feed-item"><div class="feed-time">${new Date(p.createdAt).toLocaleDateString('pt-BR')}</div><div class="feed-text">${esc(p.texto)}</div>${p.imagemUrl?'<img class="feed-img" src="'+esc(p.imagemUrl)+'">':''}</div>`).join(''):'<div class="empty">Nenhuma novidade publicada ainda.</div>'}</div>
   `;
 }
 
