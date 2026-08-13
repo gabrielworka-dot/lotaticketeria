@@ -261,12 +261,10 @@ function registrarAuditoria(user, acao, detalhes) {
   } catch (e) { console.error('Erro ao registrar auditoria:', e.message); }
 }
 function persistMensagens() { saveColecao('mensagens', MENSAGENS); }
-let POSTS    = loadColecao('posts');
 let FOLLOWS  = loadColecao('follows');
 let ADIANTAMENTOS = loadColecao('adiantamentos');
 function persistEventos() { saveColecao('eventos', EVENTOS); }
 function persistPedidos() { saveColecao('pedidos', cifrarCpfPedidos(PEDIDOS)); }
-function persistPosts()   { saveColecao('posts', POSTS); }
 function persistFollows() { saveColecao('follows', FOLLOWS); }
 function persistAdiantamentos() { saveColecao('adiantamentos', ADIANTAMENTOS); }
 
@@ -1881,7 +1879,6 @@ app.get('/api/organizadores/:slug', (req, res) => {
   const user = db.users.find(u => u.organizadorSlug === req.params.slug);
   if (!user) return res.status(404).json({ error: 'Página não encontrada.' });
   const eventosPublicados = EVENTOS.filter(e => e.organizadorId === user.id && e.status === 'publicado');
-  const posts = POSTS.filter(p => p.organizadorId === user.id).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
   const seguidores = FOLLOWS.filter(f => f.organizadorId === user.id).length;
   // Verifica se o usuário autenticado (se houver) já segue este organizador
   let jaSegue = false;
@@ -1891,11 +1888,12 @@ app.get('/api/organizadores/:slug', (req, res) => {
   }
   res.json({
     organizador: { id: user.id, nome: user.nomePublico || user.nome, slug: user.organizadorSlug, bio: user.bio, avatarUrl: user.avatarUrl, bannerUrl: user.bannerUrl, redesSociais: user.redesSociais || {}, seguidores, jaSegue, verificado: !!user.verificado },
-    eventos: eventosPublicados.map(e => ({ id: e.id, slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, cidade: e.cidade, imagemCapa: e.imagemCapa, categoria: e.categoria })),
-    posts
+    eventos: eventosPublicados.map(e => ({ id: e.id, slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, cidade: e.cidade, imagemCapa: e.imagemCapa, categoria: e.categoria }))
   });
 });
 
+// "Seguir" continua existindo — não é mais usado pra feed/comunidade (removido), só serve pra
+// decidir quem recebe e-mail quando esse produtor publica um evento novo (notificarSeguidoresNovoEvento).
 app.post('/api/organizadores/:organizadorId/seguir', auth, (req, res) => {
   const organizadorId = req.params.organizadorId;
   if (organizadorId === req.user.id) return res.status(400).json({ error: 'Você não pode seguir a si mesmo.' });
@@ -1904,27 +1902,6 @@ app.post('/api/organizadores/:organizadorId/seguir', auth, (req, res) => {
   FOLLOWS.push({ userId: req.user.id, organizadorId, createdAt: new Date().toISOString() });
   persistFollows();
   res.json({ seguindo: true });
-});
-
-app.get('/api/feed', auth, (req, res) => {
-  const seguindo = FOLLOWS.filter(f => f.userId === req.user.id).map(f => f.organizadorId);
-  const posts = POSTS.filter(p => seguindo.includes(p.organizadorId)).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 100);
-  const comAutor = posts.map(p => { const org = db.users.find(u => u.id === p.organizadorId); return { ...p, autorNome: org?.nomePublico || org?.nome, autorSlug: org?.organizadorSlug, autorAvatar: org?.avatarUrl }; });
-  res.json({ posts: comAutor, seguindoCount: seguindo.length });
-});
-
-app.post('/api/posts', auth, organizadorOnly, (req, res) => {
-  const { texto, imagemUrl } = req.body;
-  if (!texto) return res.status(400).json({ error: 'Escreva algo para publicar.' });
-  const post = { id: uuidv4(), organizadorId: req.user.id, texto: sanitize(texto, 1000), imagemUrl: sanitize(imagemUrl || '', 300), createdAt: new Date().toISOString() };
-  POSTS.unshift(post); persistPosts();
-  res.status(201).json({ post });
-});
-app.delete('/api/posts/:id', auth, (req, res) => {
-  const post = POSTS.find(p => p.id === req.params.id);
-  if (!post || post.organizadorId !== req.user.id) return res.status(404).json({ error: 'Post não encontrado.' });
-  POSTS = POSTS.filter(p => p.id !== req.params.id); persistPosts();
-  res.json({ ok: true });
 });
 
 // ════════════════════════════════════════════════════════
