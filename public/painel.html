@@ -163,7 +163,6 @@ a{color:inherit;}
     <div class="ni" id="navNovo" onclick="gp('novo',this)">✨ Criar Evento</div>
     <div class="sb-sec">Conta</div>
     <div class="ni" id="navSaldo" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
-    <div class="ni" id="navComunidade" onclick="gp('comunidade',this)">📣 Comunidade</div>
     <div class="ni" id="navDicas" onclick="gp('dicas',this)">🎓 Dicas</div>
     <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
     <div id="navAdminSec" style="display:none">
@@ -227,17 +226,6 @@ a{color:inherit;}
   <!-- SALDO E ADIANTAMENTO -->
   <div class="page" id="page-saldo">
     <div id="saldoContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
-  </div>
-
-  <!-- COMUNIDADE -->
-  <div class="page" id="page-comunidade">
-    <div class="card" style="max-width:600px">
-      <div class="ct">Publicar Novidade</div>
-      <div class="fg"><label>Texto</label><textarea class="fta" id="postTexto" placeholder="O que você quer compartilhar com seus seguidores?"></textarea></div>
-      <div class="fg"><label>Imagem (URL, opcional)</label><input class="fi" id="postImg" placeholder="https://..."></div>
-      <button class="btn bp" onclick="publicarPost()">Publicar</button>
-    </div>
-    <div id="meusPostsList"></div>
   </div>
 
   <!-- DICAS -->
@@ -417,7 +405,7 @@ function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 
-const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},comunidade:{t:'Comunidade',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false}};
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false}};
 
 function gp(id,el){
   const prev=document.querySelector('.page.active');
@@ -440,7 +428,6 @@ function gp(id,el){
   if(mobHam) mobHam.style.display = showBack ? 'none' : 'flex';
   if(id==='eventos') carregarEventos();
   if(id==='saldo') carregarSaldo();
-  if(id==='comunidade') carregarMeusPosts();
   if(id==='dicas') carregarDicasProdutor();
   if(id==='perfil') carregarPerfil();
   closeSb();
@@ -510,12 +497,11 @@ let SOMENTE_LEITURA=false;
     SOMENTE_LEITURA=!CU.isOrganizador;
     if(SOMENTE_LEITURA){
       document.body.classList.add('modo-leitura');
-      ['navNovo','navSaldo','navComunidade'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+      ['navNovo','navSaldo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
     }
     gp('eventos');
     if(CU.isAdmin){
       const s=document.getElementById('navAdminSec'); if(s) s.style.display='block';
-      const nc=document.getElementById('navComunidade'); if(nc) nc.style.display='none';
     }
   }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
 })();
@@ -1403,16 +1389,6 @@ async function solicitarAdiantamento(){
 }
 
 // ─── COMUNIDADE ─────────────────────────────────────────────
-async function publicarPost(){
-  if(bloqueiaSomenteLeitura())return;
-  const texto=gv('postTexto');
-  if(!texto){ toast('Escreva algo.','err'); return; }
-  try{
-    await api('POST','/api/posts',{texto,imagemUrl:gv('postImg')});
-    document.getElementById('postTexto').value=''; document.getElementById('postImg').value='';
-    toast('Publicado!','ok'); carregarMeusPosts();
-  }catch(e){ toast(e.message,'err'); }
-}
 async function carregarDicasProdutor(){
   const el=document.getElementById('dicasProdutorContent');
   try{
@@ -1428,20 +1404,6 @@ async function carregarDicasProdutor(){
       ${d.temPdf?'<a href="/api/produtor/dicas/pdf" target="_blank" class="btn bo" style="display:block;text-align:center;text-decoration:none">📄 Abrir material em PDF</a>':''}
       ${d.atualizadoEm?'<p style="font-size:11px;color:var(--text3);margin-top:14px">Atualizado em '+new Date(d.atualizadoEm).toLocaleDateString('pt-BR')+'</p>':''}`;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
-}
-async function carregarMeusPosts(){
-  // Não há endpoint dedicado "meus posts" — usamos o perfil público já que sabemos o slug
-  const el=document.getElementById('meusPostsList');
-  if(!CU.organizadorSlug){ el.innerHTML=''; return; }
-  try{
-    const d=await api('GET','/api/organizadores/'+CU.organizadorSlug);
-    el.innerHTML=d.posts.length?d.posts.map(p=>'<div class="card"><div style="font-size:11px;color:var(--text3);margin-bottom:6px">'+new Date(p.createdAt).toLocaleString('pt-BR')+'</div><div style="font-size:13px">'+esc(p.texto)+'</div>'+(p.imagemUrl?'<img src="'+esc(p.imagemUrl)+'" style="width:100%;border-radius:8px;margin-top:8px">':'')+'<button class="btn bdng btn-sm" style="margin-top:10px" onclick="deletarPost(\''+p.id+'\')">Excluir</button></div>').join(''):'';
-  }catch(e){}
-}
-async function deletarPost(id){
-  if(bloqueiaSomenteLeitura())return;
-  if(!confirm('Excluir esta publicação?')) return;
-  try{ await api('DELETE','/api/posts/'+id); toast('Excluído.','ok'); carregarMeusPosts(); }catch(e){ toast(e.message,'err'); }
 }
 
 // ─── PERFIL ─────────────────────────────────────────────────
