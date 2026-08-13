@@ -83,8 +83,8 @@ a{color:inherit;text-decoration:none;}
 .event-meta{font-size:11px;color:var(--text3);}
 .event-price{margin-top:8px;font-size:13px;font-weight:800;color:var(--p2);}
 .carrossel-wrap{position:relative;border-radius:18px;overflow:hidden;aspect-ratio:16/6;min-height:200px;background:var(--card);margin-bottom:8px;}
-.carrossel-slide{position:absolute;inset:0;opacity:0;transition:opacity .6s ease;cursor:pointer;}
-.carrossel-slide.active{opacity:1;}
+.carrossel-slide{position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .6s ease;cursor:pointer;}
+.carrossel-slide.active{pointer-events:auto;opacity:1;}
 .carrossel-slide img{width:100%;height:100%;object-fit:cover;}
 .carrossel-slide .carrossel-overlay{position:absolute;left:0;right:0;bottom:0;padding:20px 24px;background:linear-gradient(0deg,rgba(0,0,0,.85),transparent);}
 .carrossel-slide .carrossel-nome{font-size:clamp(16px,3vw,26px);font-weight:800;color:#fff;}
@@ -179,11 +179,6 @@ a{color:inherit;text-decoration:none;}
 </div>
 
 <div class="wrap">
-  <div id="feedSection" style="display:none">
-    <div class="section-title">Seu feed</div>
-    <div id="feedList"></div>
-  </div>
-
   <div id="carrosselSection" style="display:none">
     <div class="carrossel-wrap" id="carrosselWrap"></div>
   </div>
@@ -464,8 +459,6 @@ function initLoggedIn(){
     +'<div class="user-menu-item" onclick="abrirIndicacao(event)">🎁 Indique e Ganhe</div>'
     +'<div class="user-menu-item danger" onclick="doLogout()">🚪 Sair da conta</div>'
     +'</div></div>';
-  document.getElementById('feedSection').style.display='block';
-  loadFeed();
 }
 function toggleUserMenu(ev){
   ev.stopPropagation();
@@ -591,15 +584,6 @@ async function enviarRecuperacao(){
     btn.style.display='none';
   }catch(e){ err.textContent=e.message; err.style.display='block'; }
   finally{ btn.disabled=false; btn.textContent='Enviar link →'; }
-}
-
-async function loadFeed(){
-  try{
-    const d=await api('GET','/api/feed');
-    const el=document.getElementById('feedList');
-    if(!d.posts.length){el.innerHTML='<div class="empty" style="padding:24px"><span class="empty-ic" style="font-size:26px">👋</span><p>Siga produtores para ver novidades aqui.</p></div>';return;}
-    el.innerHTML=d.posts.map(p=>'<div class="feed-item"><div class="feed-hdr"><div class="av">'+esc((p.autorNome||'?').charAt(0).toUpperCase())+'</div><div><div class="feed-author">'+esc(p.autorNome||'')+'</div><div class="feed-time">'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</div></div></div><div class="feed-text">'+esc(p.texto)+'</div>'+(p.imagemUrl?'<img class="feed-img" src="'+esc(p.imagemUrl)+'">':'')+'</div>').join('');
-  }catch(e){}
 }
 
 // ─── MARKETPLACE ────────────────────────────────────────────
