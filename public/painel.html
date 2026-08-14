@@ -631,6 +631,14 @@ function renderTabGeral(){
         </div>
         <input type="hidden" id="edImg" value="${esc(EV_ATUAL.imagemCapa)}">
       </div>
+      <div class="fg"><label>Banner largo (opcional — pro carrossel de destaque da home)</label>
+        <p style="font-size:11px;color:var(--text3);margin-bottom:8px">Se você tiver uma peça de divulgação já pronta (com o nome do evento, artista, data), suba aqui em vez da imagem de capa comum. Tamanho recomendado: <strong style="color:var(--text2)">1600 × 600 pixels</strong> (proporção 8:3). Se subir num tamanho diferente, a imagem é cortada pra se ajustar — pra não perder nada importante, deixe o conteúdo principal centralizado.</p>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div id="edBannerPreview" style="width:120px;height:45px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;overflow:hidden">${EV_ATUAL.bannerLargo?'<img src="'+esc(EV_ATUAL.bannerLargo)+'" style="width:100%;height:100%;object-fit:cover">':'🖼️'}</div>
+          ${ro?'':'<div style="flex:1;display:flex;gap:8px"><input type="file" accept="image/*" id="edBannerFile" style="display:none" onchange="handleImageUpload(this,\'edBanner\',\'edBannerPreview\')"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'edBannerFile\').click()">🖼️ Escolher banner</button>'+(EV_ATUAL.bannerLargo?'<button type="button" class="btn bdng btn-sm" onclick="document.getElementById(\'edBanner\').value=\'\';document.getElementById(\'edBannerPreview\').innerHTML=\'🖼️\'">Remover</button>':'')+'</div>'}
+        </div>
+        <input type="hidden" id="edBanner" value="${esc(EV_ATUAL.bannerLargo||'')}">
+      </div>
       <div class="fg"><label>Vídeo do YouTube (opcional)</label><input class="fi" id="edVideo" value="${esc(EV_ATUAL.videoUrl||'')}" placeholder="https://youtube.com/watch?v=..." ${ro?'disabled':''}></div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Cole o link do vídeo (trailer, apresentação do espetáculo, etc). Ele aparece na página pública do evento.</div>
       ${ro?'':'<button class="btn bp" onclick="salvarGeral()">💾 Salvar Alterações</button>'}
@@ -644,7 +652,7 @@ function renderTabGeral(){
 async function salvarGeral(){
   if(bloqueiaSomenteLeitura())return;
   try{
-    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),videoUrl:gv('edVideo'),capacidadeMaxima:gv('edCapacidade')});
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id,{nome:gv('edNome'),descricao:gv('edDesc'),dataEvento:gv('edData'),horaEvento:gv('edHora'),cidade:gv('edCidade'),local:gv('edLocal'),imagemCapa:gv('edImg'),bannerLargo:gv('edBanner'),videoUrl:gv('edVideo'),capacidadeMaxima:gv('edCapacidade')});
     EV_ATUAL=d.evento; toast('Salvo!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
