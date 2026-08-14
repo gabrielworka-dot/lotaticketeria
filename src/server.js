@@ -910,6 +910,7 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
     ev.capacidadeMaxima = novoLimite;
   }
   if (req.body.imagemCapa !== undefined) ev.imagemCapa = sanitizeImagem(req.body.imagemCapa);
+  if (req.body.bannerLargo !== undefined) ev.bannerLargo = sanitizeImagem(req.body.bannerLargo);
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
   ev.updatedAt = new Date().toISOString();
@@ -2011,7 +2012,7 @@ app.get('/api/public/home', rateLimit(60000, 60), (req, res) => {
   const publicados = EVENTOS.filter(e => e.status === 'publicado' && parseDataLocal(e.dataEvento) >= new Date(Date.now() - 86400000));
   const mapear = (e) => {
     const precos = e.lotes.filter(l => l.ativo && !l.cortesia).map(l => l.preco);
-    return { slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, horaEvento: e.horaEvento, cidade: e.cidade, local: e.local, categoria: e.categoria, imagemCapa: e.imagemCapa, precoMin: precos.length ? Math.min(...precos) : 0 };
+    return { slug: e.slug, nome: e.nome, dataEvento: e.dataEvento, horaEvento: e.horaEvento, cidade: e.cidade, local: e.local, categoria: e.categoria, imagemCapa: e.imagemCapa, bannerLargo: e.bannerLargo || '', precoMin: precos.length ? Math.min(...precos) : 0 };
   };
   const maisVistos = publicados.slice().sort((a, b) => (b.visualizacoes || 0) - (a.visualizacoes || 0)).slice(0, 8).map(mapear);
   const destaques = publicados.filter(e => e.destaque).sort((a,b) => parseDataLocal(a.dataEvento) - parseDataLocal(b.dataEvento)).map(mapear);
