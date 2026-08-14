@@ -610,6 +610,12 @@ function renderCarrossel(eventos){
   wrap.innerHTML=eventos.map((ev,i)=>{
     const dt=parseDataLocal(ev.dataEvento);
     const dataFmt=dt.toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','');
+    // Se o produtor subiu um banner largo desenhado (já com nome/data no design), mostra ele puro,
+    // sem sobrepor texto — o banner já é uma peça pronta. Sem banner, cai no modo antigo (foto de
+    // capa + texto por cima).
+    if(ev.bannerLargo){
+      return '<div class="carrossel-slide'+(i===0?' active':'')+'" onclick="location.href=\'/e/'+ev.slug+'\'"><img src="'+esc(ev.bannerLargo)+'"></div>';
+    }
     return '<div class="carrossel-slide'+(i===0?' active':'')+'" onclick="location.href=\'/e/'+ev.slug+'\'">'
       +(ev.imagemCapa?'<img src="'+esc(ev.imagemCapa)+'">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:60px;background:var(--bg3)">🎪</div>')
       +'<div class="carrossel-overlay"><div class="carrossel-nome">'+esc(ev.nome)+'</div><div class="carrossel-meta">📅 '+dataFmt+' · 📍 '+esc(ev.cidade||ev.local||'')+'</div></div></div>';
