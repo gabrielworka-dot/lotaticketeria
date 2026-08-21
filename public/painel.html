@@ -1498,7 +1498,7 @@ function carregarPerfil(){
 
     <div style="border-top:1px solid var(--border);margin-bottom:16px;padding-top:16px">
       <div class="ct">Dados para Recebimento (PIX)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Usado para receber seus adiantamentos de vendas.</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Usado para receber seus repasses e adiantamentos de vendas. <strong style="color:var(--text)">Pode ser qualquer conta bancária</strong> — não precisa ser necessariamente do mesmo titular do seu cadastro (útil se você recebe numa conta de outra pessoa, sócio, ou da empresa).</p>
       <div class="fg2">
         <div class="fg"><label>Tipo de Chave</label><select class="fs" id="pfTipoPix"><option value="cpf" ${CU.pagamentoInfo?.tipoChavePix==='cpf'?'selected':''}>CPF</option><option value="cnpj" ${CU.pagamentoInfo?.tipoChavePix==='cnpj'?'selected':''}>CNPJ</option><option value="email" ${CU.pagamentoInfo?.tipoChavePix==='email'?'selected':''}>E-mail</option><option value="telefone" ${CU.pagamentoInfo?.tipoChavePix==='telefone'?'selected':''}>Telefone</option><option value="aleatoria" ${CU.pagamentoInfo?.tipoChavePix==='aleatoria'?'selected':''}>Chave Aleatória</option></select></div>
         <div class="fg"><label>Chave PIX</label><input class="fi" id="pfChavePix" value="${esc(CU.pagamentoInfo?.chavePix||'')}" placeholder="Sua chave PIX"></div>
