@@ -792,7 +792,7 @@ app.post('/api/auth/esqueci-senha', rateLimit(60000, 5), async (req, res) => {
     const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
     const link = `${proto}://${host}/redefinir-senha.html?token=${token}`;
     const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-      <div style="margin-bottom:20px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
+      <div style="margin-bottom:20px;"><img src="${proto}://${host}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
       <h2 style="font-size:18px;margin-bottom:12px;">Redefinir sua senha</h2>
       <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Clique no botão abaixo para criar uma nova senha. Este link expira em 30 minutos.</p>
       <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Redefinir senha →</a>
@@ -1922,6 +1922,10 @@ app.post('/api/public/contato', rateLimit(60000, 5), async (req, res) => {
     enviarEmailGenerico(SUPORTE_EMAIL, `Nova mensagem de contato — ${nome}`,
       `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Nova mensagem pelo formulário de contato</h3><p><strong>Nome:</strong> ${esc(nome)}</p><p><strong>E-mail:</strong> ${esc(email)}</p>${eventoSlug ? `<p><strong>Evento:</strong> ${esc(eventoSlug)}</p>` : ''}<p><strong>Mensagem:</strong><br>${esc(mensagem).replace(/\n/g, '<br>')}</p></div>`
     ).catch(e => console.error('Erro ao notificar suporte sobre nova mensagem:', e.message));
+  } else {
+    // Se isso aparecer no log, a variável SUPORTE_EMAIL não está configurada no servidor — a
+    // mensagem fica salva normalmente (aparece no admin), mas nenhum e-mail é sequer tentado.
+    console.error('[Contato] SUPORTE_EMAIL não configurado — e-mail de notificação não foi enviado pra mensagem de', email);
   }
   res.json({ ok: true });
 });
@@ -3466,6 +3470,7 @@ app.get('/health', (req, res) => {
     provedor_pagamento_ativo: db.provedorPagamento,
     mercadopago: MP_PLATFORM_TOKEN ? '✅' : '❌ (configure MP_ACCESS_TOKEN)',
     mercadopago_chave_publica: MP_PUBLIC_KEY ? '✅' : '❌ (configure MP_PUBLIC_KEY — sem isso, o formulário de cartão não aparece no checkout)',
+    suporte_email: SUPORTE_EMAIL ? `✅ (${SUPORTE_EMAIL})` : '❌ (configure SUPORTE_EMAIL — sem isso, mensagens do formulário de contato não geram e-mail de notificação)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
     asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
     criptografia_cpf: ENCRYPTION_KEY ? '✅ ativa' : '⚠️ não configurada (recomendado configurar ENCRYPTION_KEY)',
