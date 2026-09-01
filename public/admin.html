@@ -259,6 +259,19 @@ a{color:inherit;}
 
 <div class="toast" id="toast"></div>
 
+<!-- MODAL DE COMPROVANTE DE ADIANTAMENTO -->
+<div id="comprovanteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:250;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:420px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <h2 style="font-size:18px;font-weight:800">Marcar como Pago</h2>
+      <button onclick="document.getElementById('comprovanteModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Confirma que o PIX foi enviado de verdade. Se quiser, anexa o comprovante — ele fica visível pro produtor direto na plataforma.</p>
+    <div class="fg"><label>Comprovante (opcional)</label><input type="file" accept="image/*,application/pdf" class="fi" id="comprovanteFile" style="padding:8px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn bo" onclick="document.getElementById('comprovanteModal').style.display='none'">Cancelar</button><button class="btn bgreen" onclick="confirmarMarcarPago()">✅ Confirmar Pagamento</button></div>
+  </div>
+</div>
+
 <!-- MODAL DE PEDIDOS POR EVENTO -->
 <div id="pedidosModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;padding:16px">
   <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:920px;max-height:88vh;overflow-y:auto">
@@ -526,29 +539,57 @@ async function carregarAdiantamentos(){
       const prazo=new Date(a.prazoLimite);
       const vencido=comAcoes && prazo<new Date();
       return '<tr><td>'+esc(a.produtorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(a.produtorEmail)+'</span></td>'
+        +'<td style="font-size:12px">'+esc(a.eventoNome||'—')+'</td>'
         +'<td style="font-weight:700">R$'+a.valor.toFixed(2)+'</td>'
         +'<td><div style="font-size:11px">'+(tipoChaveLabel[a.tipoChavePix]||a.tipoChavePix)+': <strong>'+esc(a.chavePix)+'</strong></div><div style="font-size:10px;color:var(--text3)">Titular: '+esc(a.nomeTitular)+' · Doc: '+esc(a.cpfCnpj)+'</div><div style="font-size:10px;color:var(--text3)">'+(a.nomeBanco?esc(a.nomeBanco)+' · ':'')+(a.numeroAgencia?'Ag. '+esc(a.numeroAgencia)+' · ':'')+(a.tipoConta?(a.tipoConta==='poupanca'?'Poupança':'Corrente'):'')+'</div></td>'
         +'<td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td>'
         +'<td style="color:'+(vencido?'var(--red)':'var(--text2)')+'">'+new Date(a.prazoLimite).toLocaleDateString('pt-BR')+(vencido?' ⚠️':'')+'</td>'
-        +'<td>'+(comAcoes?'<div style="display:flex;gap:6px"><button class="btn bgreen btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'pago\')">✅ Marcar Pago</button><button class="btn bdng btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'recusado\')">Recusar</button></div>':(a.status==='pago'?'<span class="st-on">✅ Pago</span>':'<span class="st-off">❌ Recusado</span>'))+'</td></tr>';
+        +'<td>'+(comAcoes?'<div style="display:flex;gap:6px"><button class="btn bgreen btn-sm" onclick="abrirMarcarPago(\''+a.id+'\')">✅ Marcar Pago</button><button class="btn bdng btn-sm" onclick="processarAdiantamento(\''+a.id+'\',\'recusado\')">Recusar</button></div>':(a.status==='pago'?'<span class="st-on">✅ Pago</span>'+(a.comprovanteUrl?' <a href="'+esc(a.comprovanteUrl)+'" target="_blank" style="font-size:11px">📄 comprovante</a>':''):'<span class="st-off">❌ Recusado</span>'))+'</td></tr>';
     }
     el.innerHTML=`
       <div class="card">
         <div class="ct">Pendentes de Pagamento (${pendentes.length})</div>
-        ${pendentes.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo (2 dias)</th><th>Ações</th></tr></thead><tbody>'+pendentes.map(a=>linhaAdiant(a,true)).join('')+'</tbody></table></div>'
+        ${pendentes.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Evento</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo (2 dias)</th><th>Ações</th></tr></thead><tbody>'+pendentes.map(a=>linhaAdiant(a,true)).join('')+'</tbody></table></div>'
           :'<div class="empty" style="padding:20px"><p>Nenhum pedido pendente.</p></div>'}
       </div>
       <div class="card">
         <div class="ct">Histórico</div>
-        ${outros.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo</th><th>Status</th></tr></thead><tbody>'+outros.map(a=>linhaAdiant(a,false)).join('')+'</tbody></table></div>'
+        ${outros.length?'<div class="tw"><table class="tbl"><thead><tr><th>Produtor</th><th>Evento</th><th>Valor</th><th>Dados PIX</th><th>Solicitado</th><th>Prazo</th><th>Status</th></tr></thead><tbody>'+outros.map(a=>linhaAdiant(a,false)).join('')+'</tbody></table></div>'
           :'<div class="empty" style="padding:20px"><p>Sem histórico ainda.</p></div>'}
       </div>`;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
+let ADIANTAMENTO_MARCANDO_PAGO=null;
+function abrirMarcarPago(id){
+  ADIANTAMENTO_MARCANDO_PAGO=id;
+  document.getElementById('comprovanteFile').value='';
+  document.getElementById('comprovanteModal').style.display='flex';
+}
+async function confirmarMarcarPago(){
+  const arquivo=document.getElementById('comprovanteFile').files[0];
+  let comprovanteUrl='';
+  if(arquivo){
+    try{ comprovanteUrl=await lerArquivoComoDataUrl(arquivo); }
+    catch(e){ toast('Erro ao ler o arquivo.','err'); return; }
+  }
+  try{
+    await api('PATCH','/api/admin/adiantamentos/'+ADIANTAMENTO_MARCANDO_PAGO,{status:'pago',comprovanteUrl});
+    toast('Marcado como pago!','ok');
+    document.getElementById('comprovanteModal').style.display='none';
+    carregarAdiantamentos();
+  }catch(e){ toast(e.message,'err'); }
+}
+function lerArquivoComoDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
 async function processarAdiantamento(id,status){
-  const msg=status==='pago'?'Confirmar que o PIX foi enviado e marcar este adiantamento como PAGO?':'Recusar este pedido de adiantamento?';
-  if(!confirm(msg)) return;
-  try{ await api('PATCH','/api/admin/adiantamentos/'+id,{status}); toast(status==='pago'?'Marcado como pago!':'Recusado.','ok'); carregarAdiantamentos(); }
+  if(!confirm('Recusar este pedido de adiantamento?')) return;
+  try{ await api('PATCH','/api/admin/adiantamentos/'+id,{status}); toast('Recusado.','ok'); carregarAdiantamentos(); }
   catch(e){ toast(e.message,'err'); }
 }
 
