@@ -324,6 +324,7 @@ function renderEvento(){
     <div class="card">
       <div class="card-title">${temMapaAssentos&&lotesSemAssento.length?'Outros ingressos':'Escolha seus ingressos'}</div>
       ${lotesHtml}
+      <div id="nomesAdicionaisContainer"></div>
       <div style="margin-top:14px">
         <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Cupom de desconto</label>
         <div id="cupomArea">
@@ -435,6 +436,40 @@ function alterarQtd(loteId,delta,max){
   document.getElementById('qtd-'+loteId).textContent=novo;
   atualizarTotal();
 }
+// Detecta quantas PESSOAS um lote admite, pelo nome — mesma lógica usada no backend, pra saber
+// quantos campos de nome mostrar (Duplo=2, Quádruplo=4, resto=1 — só o próprio comprador).
+function pessoasPorUnidadeLote(nomeLote){
+  const nome=(nomeLote||'').toLowerCase();
+  if(/qu[aá]druplo|quadrupla/.test(nome)) return 4;
+  if(/\bduplo\b|\bdupla\b/.test(nome)) return 2;
+  return 1;
+}
+let nomesAdicionaisPorLote={};
+function renderNomesAdicionais(){
+  const container=document.getElementById('nomesAdicionaisContainer');
+  if(!container) return;
+  const lotes=getLotesFonte();
+  let html='';
+  for(const loteId in selecoes){
+    const qtd=selecoes[loteId]||0;
+    if(qtd<=0) continue;
+    const lote=lotes.find(l=>l.id===loteId);
+    if(!lote) continue;
+    const pessoas=pessoasPorUnidadeLote(lote.nome);
+    if(pessoas<=1) continue;
+    const totalNomes=qtd*pessoas-1; // o comprador já leva o próprio ingresso automaticamente
+    if(!nomesAdicionaisPorLote[loteId]) nomesAdicionaisPorLote[loteId]=[];
+    html+='<div style="margin-top:14px;padding:12px;background:var(--bg3);border-radius:10px">'
+      +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">👥 Quem mais vai usar o ingresso "'+esc(lote.nome)+'"?</div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Cada pessoa recebe o próprio ingresso com QR Code individual. Você leva o seu automaticamente — só falta o nome '+(totalNomes>1?'das outras '+totalNomes+' pessoas.':'da outra pessoa.')+'</div>';
+    for(let i=0;i<totalNomes;i++){
+      const valorAtual=esc(nomesAdicionaisPorLote[loteId][i]||'');
+      html+='<input class="fi" style="margin-bottom:8px" placeholder="Nome da pessoa '+(i+2)+'" value="'+valorAtual+'" oninput="nomesAdicionaisPorLote[\''+loteId+'\']=nomesAdicionaisPorLote[\''+loteId+'\']||[];nomesAdicionaisPorLote[\''+loteId+'\']['+i+']=this.value">';
+    }
+    html+='</div>';
+  }
+  container.innerHTML=html;
+}
 
 function getLotesFonte(){ return PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes; }
 
@@ -488,6 +523,7 @@ async function carregarSaldoCredito(){
 carregarSaldoCredito();
 
 function atualizarTotal(){
+  renderNomesAdicionais();
   let subtotal=0, temItem=false;
   const lotes=getLotesFonte();
   for(const loteId in selecoes){
@@ -692,7 +728,7 @@ async function processarSubmitAsaas(){
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
   if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
   if(!cep||cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
-  const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
+  const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd,nomesAdicionais:nomesAdicionaisPorLote[loteId]||[]}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
 
@@ -839,7 +875,7 @@ function coletarDadosComprador(){
   const tel=document.getElementById('cTel').value.trim();
   const cep=document.getElementById('cCep')?.value.trim().replace(/[^\d]/g,'')||'';
   const numero=document.getElementById('cNumero')?.value.trim()||'';
-  const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd}));
+  const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd,nomesAdicionais:nomesAdicionaisPorLote[loteId]||[]}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   return {nome,email,cpf,tel,cep,numero,itens};
 }
