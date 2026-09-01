@@ -573,6 +573,7 @@ function renderEventoDetalhe(){
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'equipe\',this)">👥 Equipe</div>'}
+      ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'repasses\',this)">💰 Repasses</div>'}
     </div>
     <div id="evTabGeral"></div>
     <div id="evTabLotes" style="display:none"></div>
@@ -584,12 +585,13 @@ function renderEventoDetalhe(){
     <div id="evTabCheckin" style="display:none"></div>
     <div id="evTabBar" style="display:none"></div>
     <div id="evTabEquipe" style="display:none"></div>
+    <div id="evTabRepasses" style="display:none"></div>
   `;
   renderTabGeral();
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar','Equipe'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -602,6 +604,7 @@ function evTab(tab,el){
   if(tab==='checkin') renderTabCheckin();
   if(tab==='bar') renderTabBar();
   if(tab==='equipe') renderTabEquipe();
+  if(tab==='repasses') renderTabRepasses();
 }
 
 async function togglePublicar(){
@@ -1039,6 +1042,62 @@ async function baixarComAuth(ev,tipo){
 
 // ── CHECK-IN ──
 let _barConfigTemp=null;
+async function renderTabRepasses(){
+  const el=document.getElementById('evTabRepasses');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const [saldo,adiant]=await Promise.all([
+      api('GET','/api/eventos/'+EV_ATUAL.id+'/saldo'),
+      api('GET','/api/eventos/'+EV_ATUAL.id+'/adiantamentos')
+    ]);
+    const temPix=!!CU.pagamentoInfo?.chavePix, temDoc=!!CU.cpfCnpj;
+    el.innerHTML=`
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Total Vendido (líquido)</div><div class="met-v" style="color:var(--green)">R$ ${saldo.totalVendido.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Já Adiantado</div><div class="met-v">R$ ${saldo.totalJaPago.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Saldo Restante</div><div class="met-v" style="color:var(--p2)">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">Como funciona o repasse</div>
+        <p style="font-size:12px;color:var(--text2)">Você recebe o valor total das vendas deste evento em até <strong style="color:var(--text)">3 dias úteis após a realização do evento</strong>, na chave PIX cadastrada no seu perfil.</p>
+      </div>
+      ${CU.podeAntecipar?`
+      ${(!temPix||!temDoc)?'<div class="card" style="border-color:var(--pb);background:var(--pbg)"><div style="font-size:13px;color:var(--p2);font-weight:700;margin-bottom:6px">⚠️ Complete seu cadastro para solicitar adiantamento</div><div style="font-size:12px;color:var(--text2);margin-bottom:12px">Falta cadastrar '+(!temDoc?'CPF/CNPJ':'')+((!temDoc&&!temPix)?' e ':'')+(!temPix?'chave PIX':'')+' no seu perfil.</div><button class="btn bp btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button></div>':''}
+      <div class="card">
+        <div class="ct">Solicitar Adiantamento deste Evento</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Peça o repasse do saldo já vendido <strong>deste evento específico</strong>, antes da realização. O pagamento é feito manualmente via PIX pelo administrador, em até <strong>2 dias úteis</strong> após a solicitação.</p>
+        <div class="fg2">
+          <div class="fg"><label>Valor a solicitar (R$)</label><input type="number" class="fi" id="valorAdiantamentoEvento" min="0.01" step="0.01" max="${saldo.saldoDisponivel}" placeholder="0,00"></div>
+          <div class="fg" style="display:flex;align-items:flex-end"><button class="btn bp" style="width:100%" onclick="solicitarAdiantamentoEvento()" ${(!temPix||!temDoc)?'disabled':''}>Solicitar →</button></div>
+        </div>
+      </div>`:`
+      <div class="card">
+        <div class="ct">Antecipação de Recebíveis</div>
+        <p style="font-size:12px;color:var(--text2)">A antecipação (receber parte do valor antes da realização do evento) está disponível apenas para produtores com contrato ativo com a Lota para essa finalidade. Fale com o nosso suporte se tiver interesse.</p>
+      </div>`}
+      <div class="card">
+        <div class="ct">Comprovantes e Histórico deste Evento</div>
+        ${adiant.adiantamentos.length?adiant.adiantamentos.map(a=>{
+          const stMap={pendente:['','⏳ Pendente'],pago:['st-on','✅ Pago'],recusado:['st-off','❌ Recusado']};
+          const [cls,lbl]=stMap[a.status]||['',a.status];
+          return '<div style="border-bottom:1px solid var(--border);padding:12px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+            +'<div><div style="font-weight:700">R$ '+a.valor.toFixed(2)+' <span class="'+cls+'" style="font-size:12px;margin-left:6px">'+lbl+'</span></div>'
+            +'<div style="font-size:11px;color:var(--text3)">Solicitado em '+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+(a.pagoEm?' · Pago em '+new Date(a.pagoEm).toLocaleDateString('pt-BR'):'')+'</div></div>'
+            +(a.comprovanteUrl?'<a href="'+esc(a.comprovanteUrl)+'" target="_blank" class="btn bo btn-sm">📄 Ver comprovante</a>':'')
+            +'</div>';
+        }).join(''):'<div class="empty" style="padding:20px"><p>Nenhuma solicitação ainda pra este evento.</p></div>'}
+      </div>`;
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function solicitarAdiantamentoEvento(){
+  const valor=parseFloat(document.getElementById('valorAdiantamentoEvento').value);
+  if(!valor||valor<=0){ toast('Digite um valor válido.','err'); return; }
+  try{
+    await api('POST','/api/produtor/adiantamento',{valor,eventoId:EV_ATUAL.id});
+    toast('Solicitação enviada!','ok');
+    renderTabRepasses();
+  }catch(e){ toast(e.message,'err'); }
+}
 async function renderTabEquipe(){
   const el=document.getElementById('evTabEquipe');
   el.innerHTML=`
@@ -1341,59 +1400,24 @@ async function iniciarScanner(){
 async function carregarSaldo(){
   const el=document.getElementById('saldoContent');
   try{
-    const [saldo,adiant]=await Promise.all([
-      api('GET','/api/produtor/saldo'),
-      api('GET','/api/produtor/adiantamentos')
-    ]);
-    const temPix=!!(CU.pagamentoInfo?.chavePix);
-    const temDoc=!!(CU.cpfCnpj);
+    const saldo=await api('GET','/api/produtor/saldo');
     const aReceberDaLota=Math.max(0,Math.round((saldo.saldoBruto-saldo.totalJaPago)*100)/100);
     el.innerHTML=`
       <div class="met-g">
         <div class="met-c"><div class="met-l">Valor Total em Vendas</div><div class="met-v">R$ ${saldo.saldoBruto.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">Pagamentos Efetuados</div><div class="met-v" style="color:var(--green)">R$ ${saldo.totalJaPago.toFixed(2)}</div></div>
         <div class="met-c"><div class="met-l">A Receber da Lota</div><div class="met-v" style="color:var(--p2)">R$ ${aReceberDaLota.toFixed(2)}</div></div>
-        <div class="met-c"><div class="met-l">Disponível p/ Solicitar</div><div class="met-v">R$ ${saldo.saldoDisponivel.toFixed(2)}</div></div>
       </div>
       ${saldo.totalPendente>0?'<div style="font-size:11px;color:var(--text3);margin:-6px 0 14px">Desse total a receber, <strong style="color:var(--p2)">R$ '+saldo.totalPendente.toFixed(2)+'</strong> já está com solicitação de adiantamento em análise.</div>':''}
       <div class="card">
         <div class="ct">Como funciona o repasse</div>
         <p style="font-size:12px;color:var(--text2)">Você recebe o valor total das suas vendas em até <strong style="color:var(--text)">3 dias úteis após a realização do evento</strong>, na chave PIX cadastrada no seu perfil.</p>
       </div>
-      ${CU.podeAntecipar?`
-      ${(!temPix||!temDoc)?'<div class="card" style="border-color:var(--pb);background:var(--pbg)"><div style="font-size:13px;color:var(--p2);font-weight:700;margin-bottom:6px">⚠️ Complete seu cadastro para solicitar adiantamento</div><div style="font-size:12px;color:var(--text2);margin-bottom:12px">Falta cadastrar '+(!temDoc?'CPF/CNPJ':'')+((!temDoc&&!temPix)?' e ':'')+(!temPix?'chave PIX':'')+' no seu perfil.</div><button class="btn bp btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button></div>':''}
       <div class="card">
-        <div class="ct">Solicitar Adiantamento</div>
-        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Peça o repasse do seu saldo disponível antes da realização do evento. O pagamento é feito manualmente via PIX pelo administrador, em até <strong>2 dias úteis</strong> após a solicitação.</p>
-        <div class="fg2">
-          <div class="fg"><label>Valor a solicitar (R$)</label><input type="number" class="fi" id="valorAdiantamento" min="0.01" step="0.01" max="${saldo.saldoDisponivel}" placeholder="0,00"></div>
-          <div class="fg" style="display:flex;align-items:flex-end"><button class="btn bp" style="width:100%" onclick="solicitarAdiantamento()" ${(!temPix||!temDoc)?'disabled':''}>Solicitar →</button></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="ct">Histórico de Solicitações</div>
-        ${adiant.adiantamentos.length?'<div class="tw"><table class="tbl"><thead><tr><th>Valor</th><th>Status</th><th>Solicitado em</th><th>Prazo</th></tr></thead><tbody>'
-          +adiant.adiantamentos.map(a=>{
-            const stMap={pendente:['','⏳ Pendente'],pago:['st-on','✅ Pago'],recusado:['st-off','❌ Recusado']};
-            const [cls,lbl]=stMap[a.status]||['',a.status];
-            return '<tr><td>R$'+a.valor.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+new Date(a.solicitadoEm).toLocaleDateString('pt-BR')+'</td><td>'+(a.status==='pendente'?new Date(a.prazoLimite).toLocaleDateString('pt-BR'):'—')+'</td></tr>';
-          }).join('')+'</tbody></table></div>'
-          :'<div class="empty" style="padding:20px"><p>Nenhuma solicitação ainda.</p></div>'}
-      </div>`:`
-      <div class="card">
-        <div class="ct">Antecipação de Recebíveis</div>
-        <p style="font-size:12px;color:var(--text2)">A antecipação (receber parte do valor antes da realização do evento) está disponível apenas para produtores com contrato ativo com a Lota para essa finalidade. Fale com o nosso suporte se tiver interesse.</p>
-      </div>`}`;
+        <div class="ct">💰 Solicitar Adiantamento</div>
+        <p style="font-size:12px;color:var(--text2)">A solicitação de adiantamento agora é feita <strong style="color:var(--text)">dentro de cada evento</strong> — assim dá pra acompanhar certinho o total vendido, o que já foi adiantado, e o comprovante de cada pagamento, tudo separado por evento. Abre o evento e procura a aba "💰 Repasses".</p>
+      </div>`;
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
-}
-async function solicitarAdiantamento(){
-  const valor=parseFloat(document.getElementById('valorAdiantamento').value);
-  if(!valor||valor<=0){ toast('Informe um valor válido.','err'); return; }
-  try{
-    await api('POST','/api/produtor/adiantamento',{valor});
-    toast('Solicitação enviada! Você será pago em até 2 dias.','ok');
-    carregarSaldo();
-  }catch(e){ toast(e.message,'err'); }
 }
 
 // ─── COMUNIDADE ─────────────────────────────────────────────
