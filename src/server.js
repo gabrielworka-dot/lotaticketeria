@@ -183,6 +183,15 @@ function gerarSlugUnico(nome, existentes) {
 function gerarCodigoTicket() {
   return 'RL-' + uuidv4().split('-')[0].toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
+// Detecta quantas PESSOAS um lote admite, pelo nome (não temos campo estruturado pra isso ainda).
+// "Duplo" admite 2, "Quádruplo/Quadruplo" admite 4 — cada pessoa recebe seu próprio ingresso com
+// QR Code individual, mesmo comprados juntos numa única unidade do lote.
+function pessoasPorUnidadeLote(nomeLote) {
+  const nome = (nomeLote || '').toLowerCase();
+  if (/qu[aá]druplo|quadrupla/.test(nome)) return 4;
+  if (/\bduplo\b|\bdupla\b/.test(nome)) return 2;
+  return 1;
+}
 function gerarCodigoPromoter() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -1116,6 +1125,18 @@ function calcularSaldoProdutor(userId) {
   const saldoDisponivel = Math.max(0, Math.round((saldoBruto - totalJaPago - totalPendente) * 100) / 100);
   return { saldoBruto, totalJaPago, totalPendente, saldoDisponivel };
 }
+// Mesmo cálculo, mas restrito a UM evento específico — é o que passou a valer pra pedir
+// adiantamento, já que agora a solicitação é feita dentro de cada evento, não mais de forma geral
+// somando todos os eventos do produtor de uma vez.
+function calcularSaldoEvento(eventoId) {
+  const pedidosPagos = PEDIDOS.filter(p => p.eventoId === eventoId && p.status === 'pago');
+  const totalVendido = pedidosPagos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : (p.total - ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))))), 0);
+  const adiantamentosDoEvento = ADIANTAMENTOS.filter(a => a.eventoId === eventoId);
+  const totalJaPago = adiantamentosDoEvento.filter(a => a.status === 'pago').reduce((s, a) => s + a.valor, 0);
+  const totalPendente = adiantamentosDoEvento.filter(a => a.status === 'pendente').reduce((s, a) => s + a.valor, 0);
+  const saldoDisponivel = Math.max(0, Math.round((totalVendido - totalJaPago - totalPendente) * 100) / 100);
+  return { totalVendido: Math.round(totalVendido * 100) / 100, totalJaPago, totalPendente, saldoDisponivel };
+}
 
 app.get('/api/produtor/saldo', auth, organizadorOnly, (req, res) => {
   res.json(calcularSaldoProdutor(req.user.id));
@@ -1131,25 +1152,41 @@ app.post('/api/produtor/adiantamento', auth, organizadorOnly, (req, res) => {
   // habilitado manualmente pelo admin (aba Produtores). Sem isso, a rota fica bloqueada mesmo pra
   // quem tenta chamar direto pela API.
   if (!req.user.podeAntecipar) return res.status(403).json({ error: 'A antecipação de recebíveis está disponível apenas para produtores com contrato ativo com a Lota. Entre em contato com o suporte pra saber mais.' });
+  const ev = eventoDoUsuario(req.body.eventoId, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const valor = Math.round((parseFloat(req.body.valor) || 0) * 100) / 100;
   if (valor <= 0) return res.status(400).json({ error: 'Informe um valor válido.' });
   if (!req.user.pagamentoInfo?.chavePix) return res.status(400).json({ error: 'Cadastre sua chave PIX no perfil antes de solicitar um adiantamento.' });
   if (!req.user.cpfCnpj) return res.status(400).json({ error: 'Cadastre seu CPF/CNPJ no perfil antes de solicitar um adiantamento.' });
-  const { saldoDisponivel } = calcularSaldoProdutor(req.user.id);
-  if (valor > saldoDisponivel) return res.status(400).json({ error: `Valor solicitado maior que o saldo disponível (R$ ${saldoDisponivel.toFixed(2)}).` });
+  // A partir de agora, o saldo disponível é calculado só com base nesse evento específico — não
+  // soma mais as vendas de todos os eventos do produtor juntas.
+  const { saldoDisponivel } = calcularSaldoEvento(ev.id);
+  if (valor > saldoDisponivel) return res.status(400).json({ error: `Valor solicitado maior que o saldo disponível deste evento (R$ ${saldoDisponivel.toFixed(2)}).` });
   const agora = new Date();
   const prazoLimite = new Date(agora.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 dias
   const adiantamento = {
-    id: uuidv4(), produtorId: req.user.id, valor,
+    id: uuidv4(), produtorId: req.user.id, eventoId: ev.id, eventoNome: ev.nome, valor,
     chavePix: req.user.pagamentoInfo.chavePix, tipoChavePix: req.user.pagamentoInfo.tipoChavePix,
     nomeTitular: req.user.pagamentoInfo.nomeTitular, cpfCnpj: req.user.cpfCnpj,
     nomeBanco: req.user.pagamentoInfo.nomeBanco || '', numeroAgencia: req.user.pagamentoInfo.numeroAgencia || '', tipoConta: req.user.pagamentoInfo.tipoConta || '',
     status: 'pendente', solicitadoEm: agora.toISOString(), prazoLimite: prazoLimite.toISOString(),
-    pagoEm: null, observacoesAdmin: ''
+    pagoEm: null, observacoesAdmin: '', comprovanteUrl: ''
   };
   ADIANTAMENTOS.push(adiantamento);
   persistAdiantamentos();
   res.status(201).json({ adiantamento });
+});
+// Visão de adiantamentos e saldo restrita a UM evento — usada dentro da própria página do evento.
+app.get('/api/eventos/:id/saldo', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  res.json(calcularSaldoEvento(ev.id));
+});
+app.get('/api/eventos/:id/adiantamentos', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const lista = ADIANTAMENTOS.filter(a => a.eventoId === ev.id).sort((a, b) => new Date(b.solicitadoEm) - new Date(a.solicitadoEm));
+  res.json({ adiantamentos: lista });
 });
 
 // ── ADMIN — processar adiantamentos ──
@@ -1164,8 +1201,9 @@ app.get('/api/admin/adiantamentos', auth, adminOnly, (req, res) => {
 app.patch('/api/admin/adiantamentos/:id', auth, adminOnly, (req, res) => {
   const a = ADIANTAMENTOS.find(x => x.id === req.params.id);
   if (!a) return res.status(404).json({ error: 'Pedido de adiantamento não encontrado.' });
-  const { status, observacoes } = req.body;
+  const { status, observacoes, comprovanteUrl } = req.body;
   if (!['pago', 'recusado'].includes(status)) return res.status(400).json({ error: 'Status inválido.' });
+  if (status === 'pago' && comprovanteUrl) a.comprovanteUrl = sanitizeImagem(comprovanteUrl);
   a.status = status;
   if (status === 'pago') a.pagoEm = new Date().toISOString();
   if (observacoes !== undefined) a.observacoesAdmin = sanitize(observacoes, 300);
@@ -1234,7 +1272,7 @@ function liberarReservaPedido(pedido, ev) {
       if (ev.assentosOcupados) ev.assentosOcupados = ev.assentosOcupados.filter(a => a !== it.assento);
     } else {
       const lote = ev.lotes.find(l => l.id === it.loteId);
-      if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd);
+      if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd * pessoasPorUnidadeLote(lote.nome));
     }
   }
   pedido.reservaLiberada = true;
@@ -1248,7 +1286,7 @@ function marcarPedidoComoReembolsado(pedido, ev) {
   const qtdTotal = (pedido.itens || []).reduce((s, it) => s + it.qtd, 0);
   for (const it of (pedido.itens || [])) {
     const lote = ev.lotes.find(l => l.id === it.loteId);
-    if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd);
+    if (lote) lote.vendidos = Math.max(0, (lote.vendidos || 0) - it.qtd * pessoasPorUnidadeLote(lote.nome));
     if (it.assento && ev.assentosOcupados) ev.assentosOcupados = ev.assentosOcupados.filter(a => a !== it.assento);
   }
   if (pedido.cupomUsado) {
@@ -2061,7 +2099,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   persistEventos();
   const organizador = db.users.find(u => u.id === ev.organizadorId);
   const lotesPublicos = ev.lotes.filter(l => l.ativo && !l.exclusivoPromoter && l.vendidos < l.qtdTotal)
-    .map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos, imagemUrl: l.imagemUrl || '' }));
+    .map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: Math.floor((l.qtdTotal - l.vendidos) / pessoasPorUnidadeLote(l.nome)), imagemUrl: l.imagemUrl || '' }));
   res.json({
     nome: ev.nome, descricao: ev.descricao, dataEvento: ev.dataEvento, horaEvento: ev.horaEvento,
     local: ev.local, cidade: ev.cidade, categoria: ev.categoria, imagemCapa: ev.imagemCapa, cores: ev.cores,
@@ -2096,7 +2134,7 @@ app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (
   const ev = EVENTOS.find(e => e.id === ref.eventoId);
   const promoter = ev?.promoters.find(p => p.codigoRef === req.params.codigoRef && p.ativo);
   if (!promoter) return res.status(404).json({ error: 'Promoter não encontrado.' });
-  const lotesExclusivos = ev.lotes.filter(l => l.ativo && l.vendidos < l.qtdTotal).map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: l.qtdTotal - l.vendidos }));
+  const lotesExclusivos = ev.lotes.filter(l => l.ativo && l.vendidos < l.qtdTotal).map(l => ({ id: l.id, nome: l.nome, preco: l.preco, cortesia: l.cortesia, disponivel: Math.floor((l.qtdTotal - l.vendidos) / pessoasPorUnidadeLote(l.nome)) }));
   res.json({ promoterNome: promoter.nome, lotes: lotesExclusivos });
 });
 // ── CHECKOUT (com cupom, promoter e cortesia) ──
@@ -2136,9 +2174,16 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         continue;
       }
       const qtd = Math.max(1, parseInt(it.qtd) || 1);
-      if (lote.vendidos + qtd > lote.qtdTotal) return res.status(400).json({ error: `Apenas ${lote.qtdTotal - lote.vendidos} disponíveis em "${lote.nome}".` });
+      const pessoasUnidade = pessoasPorUnidadeLote(lote.nome);
+      if (lote.vendidos + qtd * pessoasUnidade > lote.qtdTotal) return res.status(400).json({ error: `Apenas ${Math.floor((lote.qtdTotal - lote.vendidos) / pessoasUnidade)} disponíveis em "${lote.nome}".` });
       subtotal += lote.preco * qtd;
-      itensDetalhados.push({ loteId: lote.id, qtd, precoUnit: lote.preco, loteNome: lote.nome });
+      // Nomes das pessoas adicionais (pra lotes Duplo/Quádruplo) — o comprador leva o próprio nome
+      // automaticamente, então só recebemos os nomes de quem MAIS vai usar os ingressos desse item.
+      const nomesEsperados = qtd * pessoasUnidade - 1;
+      const nomesAdicionais = nomesEsperados > 0 && Array.isArray(it.nomesAdicionais)
+        ? it.nomesAdicionais.slice(0, nomesEsperados).map(n => sanitize(n || '', 100))
+        : [];
+      itensDetalhados.push({ loteId: lote.id, qtd, precoUnit: lote.preco, loteNome: lote.nome, nomesAdicionais });
     }
 
     // ── Reserva IMEDIATA (crítico pra alta concorrência) ──
@@ -2149,7 +2194,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     // o pagamento for recusado, cancelado ou expirar sem confirmação (ver liberarReservaPedido).
     for (const it of itensDetalhados) {
       const lote = ev.lotes.find(l => l.id === it.loteId);
-      if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd;
+      if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd * pessoasPorUnidadeLote(lote.nome);
     }
     if (assentosSelecionadosNestePedido.length) {
       ev.assentosOcupados = [...assentosOcupadosAtuais, ...assentosSelecionadosNestePedido];
@@ -2433,7 +2478,23 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
     if (it.assento) {
       pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
     } else {
-      for (let i = 0; i < it.qtd; i++) pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
+      // Lotes "Duplo"/"Quádruplo" geram um ingresso PRA CADA PESSOA (com QR Code próprio), não um
+      // só pra unidade comprada. O comprador leva o dele automaticamente; os nomes das demais
+      // pessoas (se informados no checkout) vão pra cada ingresso adicional correspondente.
+      const pessoasPorUnidade = pessoasPorUnidadeLote(it.loteNome);
+      const nomesAdicionais = Array.isArray(it.nomesAdicionais) ? it.nomesAdicionais : [];
+      let ponteiroNomes = 0;
+      for (let unidade = 0; unidade < it.qtd; unidade++) {
+        for (let pessoa = 0; pessoa < pessoasPorUnidade; pessoa++) {
+          const ehTitularPrincipal = unidade === 0 && pessoa === 0;
+          const nomeAdicional = ehTitularPrincipal ? null : (nomesAdicionais[ponteiroNomes++] || '');
+          pedido.tickets.push({
+            codigo: gerarCodigoTicket(), loteNome: it.loteNome, usado: false, usadoEm: null,
+            titularNome: ehTitularPrincipal ? (pedido.comprador?.nome || '') : (nomeAdicional || pedido.comprador?.nome || ''),
+            titularEmail: pedido.comprador?.email || ''
+          });
+        }
+      }
     }
   }
   if (cupomObj) cupomObj.usosAtuais = (cupomObj.usosAtuais || 0) + 1;
@@ -2605,7 +2666,7 @@ async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
     if (pedido.reservaLiberada) {
       for (const it of (pedido.itens || [])) {
         if (it.assento) { if (!ev.assentosOcupados) ev.assentosOcupados = []; if (!ev.assentosOcupados.includes(it.assento)) ev.assentosOcupados.push(it.assento); }
-        else { const lote = ev.lotes.find(l => l.id === it.loteId); if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd; }
+        else { const lote = ev.lotes.find(l => l.id === it.loteId); if (lote) lote.vendidos = (lote.vendidos || 0) + it.qtd * pessoasPorUnidadeLote(lote.nome); }
       }
       pedido.reservaLiberada = false;
     }
@@ -3331,7 +3392,7 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
   // Reserva as vagas/assentos normalmente, como qualquer venda real
   for (const it of itensDetalhados) {
     const lote = ev.lotes.find(l => l.id === it.loteId);
-    if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd;
+    if (lote && !it.assento) lote.vendidos = (lote.vendidos || 0) + it.qtd * pessoasPorUnidadeLote(lote.nome);
     if (it.assento) { if (!ev.assentosOcupados) ev.assentosOcupados = []; ev.assentosOcupados.push(it.assento); }
   }
   gerarTicketsEAtualizar(ev, pedido, null, null);
