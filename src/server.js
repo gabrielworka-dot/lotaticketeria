@@ -298,7 +298,7 @@ function organizadorOuColaborador(req, res, next) {
   // Bug corrigido: essa checagem só reconhecia o sistema antigo (colaboradorDe, vínculo com TODOS
   // os eventos de um produtor) — quem foi adicionado só a um evento específico (sistema novo) nunca
   // passava daqui, e a plataforma aparecia vazia mesmo com o acesso concedido corretamente.
-  const ehColaboradorDeAlgumEvento = EVENTOS.some(e => (e.colaboradoresIds || []).includes(req.user.id));
+  const ehColaboradorDeAlgumEvento = EVENTOS.some(e => (e.colaboradoresIds || []).includes(req.user.id) || (e.colaboradoresScannerIds || []).includes(req.user.id));
   if (!req.user.isOrganizador && !req.user.colaboradorDe && !ehColaboradorDeAlgumEvento) {
     return res.status(403).json({ error: 'Acesso restrito a produtores e sua equipe.' });
   }
@@ -316,7 +316,8 @@ function eventoDoUsuario(eventoId, userId) {
 }
 // Usado só em rotas de LEITURA — permite dono do evento, colaborador adicionado NESSE evento
 // específico, ou (compatibilidade com quem já foi adicionado do jeito antigo) colaborador geral
-// do produtor.
+// do produtor. NÃO inclui quem só tem acesso de scanner (essa pessoa não deve ver o evento completo
+// — só a tela dedicada de check-in, controlada por eventoAcessivelParaCheckin).
 function eventoVisivelPara(eventoId, user) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev) return null;
@@ -324,6 +325,16 @@ function eventoVisivelPara(eventoId, user) {
   if (ev.organizadorId === user.id) return ev;
   if ((ev.colaboradoresIds || []).includes(user.id)) return ev;
   if (user.colaboradorDe && ev.organizadorId === user.colaboradorDe) return ev; // compatibilidade
+  return null;
+}
+// Quem pode usar o SCANNER desse evento — inclui todo mundo que já pode ver o evento completo
+// (dono, colaborador padrão), MAIS quem foi adicionado só com acesso de scanner especificamente.
+// Essa é a checagem usada pela tela dedicada de check-in (separada do resto do painel).
+function eventoAcessivelParaCheckin(eventoId, user) {
+  const ev = eventoVisivelPara(eventoId, user);
+  if (ev) return ev;
+  const evBruto = EVENTOS.find(e => e.id === eventoId);
+  if (evBruto && (evBruto.colaboradoresScannerIds || []).includes(user.id)) return evBruto;
   return null;
 }
 
@@ -741,6 +752,56 @@ app.delete('/api/eventos/:id/colaboradores/:userId', auth, (req, res) => {
   ev.colaboradoresIds = ev.colaboradoresIds.filter(id => id !== req.params.userId);
   persistEventos();
   res.json({ ok: true });
+});
+
+// ── Acesso SOMENTE SCANNER — pra quem vai só escanear ingresso na porta, sem ver nada do resto
+// do evento (vendas, financeiro, lotes, etc). Essa pessoa usa uma tela própria e separada
+// (scanner.html), nunca o painel completo.
+app.get('/api/eventos/:id/colaboradores-scanner', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const membros = (ev.colaboradoresScannerIds || []).map(id => db.users.find(u => u.id === id)).filter(Boolean).map(u => ({ id: u.id, nome: u.nome, email: u.email }));
+  res.json({ colaboradores: membros });
+});
+app.post('/api/eventos/:id/colaboradores-scanner', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const email = sanitize(req.body.email || '', 150).toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
+  const pessoa = db.users.find(u => u.email === email);
+  if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
+  if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
+  if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
+  if (!ev.colaboradoresScannerIds) ev.colaboradoresScannerIds = [];
+  if (ev.colaboradoresScannerIds.includes(pessoa.id)) return res.status(400).json({ error: 'Essa pessoa já tem acesso ao scanner deste evento.' });
+  ev.colaboradoresScannerIds.push(pessoa.id);
+  persistEventos();
+  res.status(201).json({ ok: true, colaborador: { id: pessoa.id, nome: pessoa.nome, email: pessoa.email } });
+});
+app.delete('/api/eventos/:id/colaboradores-scanner/:userId', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  if (!ev.colaboradoresScannerIds || !ev.colaboradoresScannerIds.includes(req.params.userId)) return res.status(404).json({ error: 'Colaborador não encontrado neste evento.' });
+  ev.colaboradoresScannerIds = ev.colaboradoresScannerIds.filter(id => id !== req.params.userId);
+  persistEventos();
+  res.json({ ok: true });
+});
+// Lista mínima de eventos que essa pessoa pode escanear — usada pela tela dedicada, pra ela ir
+// direto pro evento certo (ou escolher, se tiver acesso a mais de um) sem nunca tocar no painel completo.
+app.get('/api/meus-eventos-scanner', auth, (req, res) => {
+  const eventos = EVENTOS.filter(e => (e.colaboradoresScannerIds || []).includes(req.user.id))
+    .map(e => ({ id: e.id, nome: e.nome, dataEvento: e.dataEvento, imagemCapa: e.imagemCapa }));
+  res.json({ eventos });
+});
+// Dados mínimos pra tela de check-in — só o necessário pra escanear e ver o contador de entradas,
+// nada de vendas, financeiro ou qualquer outra informação sensível do evento.
+app.get('/api/eventos/:id/checkin-info', auth, (req, res) => {
+  const ev = eventoAcessivelParaCheckin(req.params.id, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado ou sem acesso.' });
+  const pedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+  const totalIngressos = pedidosPagos.reduce((s, p) => s + (p.tickets || []).length, 0);
+  const totalUsados = pedidosPagos.reduce((s, p) => s + (p.tickets || []).filter(t => t.usado).length, 0);
+  res.json({ id: ev.id, nome: ev.nome, dataEvento: ev.dataEvento, imagemCapa: ev.imagemCapa, totalIngressos, totalUsados });
 });
 
 
@@ -1904,7 +1965,7 @@ app.get('/api/public/bar/recarga/:recargaId/status', auth, (req, res) => {
 
 app.post('/api/checkin/validar', auth, rateLimit(60000, 60), (req, res) => {
   const { eventoId, codigo } = req.body;
-  const ev = eventoDoUsuario(eventoId, req.user.id);
+  const ev = eventoAcessivelParaCheckin(eventoId, req.user);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === eventoId);
   let ticket = null, pedido = null;
@@ -3843,7 +3904,7 @@ setInterval(async () => {
                 conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
                 enviarEmailGenerico(conta.email,
                   `Saldo do bar devolvido — ${ev.nome}`,
-                  `<div stye="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
+                  `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
                 ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
               }
               CONSUMOS_BAR.push({
