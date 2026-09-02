@@ -1337,7 +1337,7 @@ let _scanStream=null,_scanRAF=null;
 function garantirJsQR(cb){
   if(window.jsQR){cb();return;}
   const s=document.createElement('script');
-  s.src='https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js';
+  s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
   s.onload=cb;
   s.onerror=()=>toast('Não foi possível carregar o leitor de QR Code. Confira sua conexão com a internet e tente de novo.','err');
   document.head.appendChild(s);
