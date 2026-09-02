@@ -1102,15 +1102,25 @@ async function renderTabEquipe(){
   const el=document.getElementById('evTabEquipe');
   el.innerHTML=`
     <div class="card" style="max-width:520px">
-      <div class="ct">Equipe deste evento</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Adicione pessoas de confiança que possam acompanhar as vendas, relatórios e pedidos <strong>só deste evento</strong> — sem poder editar nada, e sem ver seus outros eventos. A pessoa precisa já ter uma conta na Lota.</p>
+      <div class="ct">Equipe — Acesso Completo (leitura)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Pessoas que acompanham vendas, relatórios e pedidos <strong>só deste evento</strong> — sem poder editar nada. A pessoa precisa já ter uma conta na Lota.</p>
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <input class="fi" id="colabEventoEmail" type="email" placeholder="e-mail da pessoa">
         <button class="btn bp btn-sm" onclick="adicionarColaboradorEvento()">+ Adicionar</button>
       </div>
       <div id="listaColaboradoresEvento"></div>
+    </div>
+    <div class="card" style="max-width:520px">
+      <div class="ct">Equipe — Somente Scanner (porta)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Pra quem só vai <strong>escanear ingresso na entrada</strong> — não vê vendas, financeiro, lotes nem qualquer outra informação do evento. Essa pessoa usa uma tela própria e separada: <a href="/scanner.html" target="_blank" style="color:var(--p2)">lotaticketeria.com.br/scanner.html</a></p>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="fi" id="colabScannerEmail" type="email" placeholder="e-mail da pessoa">
+        <button class="btn bo btn-sm" onclick="adicionarColaboradorScanner()">+ Adicionar</button>
+      </div>
+      <div id="listaColaboradoresScanner"></div>
     </div>`;
   carregarColaboradoresEvento();
+  carregarColaboradoresScanner();
 }
 async function carregarColaboradoresEvento(){
   const el=document.getElementById('listaColaboradoresEvento');
@@ -1118,6 +1128,28 @@ async function carregarColaboradoresEvento(){
     const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/colaboradores');
     el.innerHTML=d.colaboradores.length?d.colaboradores.map(c=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(c.nome)+' <span style="color:var(--text3)">('+esc(c.email)+')</span></span><button class="btn bdng btn-sm" onclick="removerColaboradorEvento(\''+c.id+'\')">Remover</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Ninguém adicionado ainda.</p>';
   }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">'+esc(e.message)+'</p>'; }
+}
+async function carregarColaboradoresScanner(){
+  const el=document.getElementById('listaColaboradoresScanner');
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/colaboradores-scanner');
+    el.innerHTML=d.colaboradores.length?d.colaboradores.map(c=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(c.nome)+' <span style="color:var(--text3)">('+esc(c.email)+')</span></span><button class="btn bdng btn-sm" onclick="removerColaboradorScanner(\''+c.id+'\')">Remover</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Ninguém adicionado ainda.</p>';
+  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">'+esc(e.message)+'</p>'; }
+}
+async function adicionarColaboradorScanner(){
+  const email=gv('colabScannerEmail');
+  if(!email){ toast('Digite o e-mail.','err'); return; }
+  try{
+    await api('POST','/api/eventos/'+EV_ATUAL.id+'/colaboradores-scanner',{email});
+    document.getElementById('colabScannerEmail').value='';
+    toast('Adicionado! Já pode acessar o scanner deste evento.','ok');
+    carregarColaboradoresScanner();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function removerColaboradorScanner(id){
+  if(!confirm('Remover o acesso de scanner dessa pessoa a este evento?')) return;
+  try{ await api('DELETE','/api/eventos/'+EV_ATUAL.id+'/colaboradores-scanner/'+id); toast('Removido.','ok'); carregarColaboradoresScanner(); }
+  catch(e){ toast(e.message,'err'); }
 }
 async function adicionarColaboradorEvento(){
   const email=document.getElementById('colabEventoEmail').value.trim();
