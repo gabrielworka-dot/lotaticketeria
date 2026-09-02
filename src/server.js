@@ -3351,6 +3351,22 @@ app.delete('/api/admin/eventos/:id/pedidos/:pedidoId', auth, adminOnly, async (r
   res.json({ ok: true });
 });
 
+// Tenta vincular um pedido (que ainda não tem compradorUserId) a uma conta existente, procurando
+// por e-mail — útil no admin pra diagnosticar/corrigir na hora por que um pedido não aparece em
+// "Meus Ingressos" do cliente (só aparece se estiver vinculado, ou se o e-mail bater exatamente).
+app.post('/api/admin/pedidos/:pedidoId/vincular-conta', auth, adminOnly, (req, res) => {
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  const emailPedido = (pedido.comprador?.email || '').toLowerCase();
+  if (!emailPedido) return res.status(400).json({ error: 'Esse pedido não tem e-mail cadastrado.' });
+  const conta = db.users.find(u => u.email.toLowerCase() === emailPedido);
+  if (!conta) return res.json({ vinculado: false });
+  pedido.compradorUserId = conta.id;
+  persistPedidos();
+  registrarAuditoria(req.user, 'vinculou_pedido_manualmente', { pedidoId: pedido.id, contaId: conta.id, contaEmail: conta.email });
+  res.json({ vinculado: true, contaEmail: conta.email });
+});
+
 app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
