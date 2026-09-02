@@ -1234,7 +1234,14 @@ app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res)
   if (!semPagamentoReal) {
     if (pedido.provedorPagamento === 'asaas') {
       if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Asaas não configurado no servidor.' });
-      const estorno = await asaasFetch(`/payments/${pedido.mpPaymentId}/refund`, { method: 'POST' });
+      // Se o pagamento foi feito parcelado no cartão, o Asaas trata cada parcela como uma "cobrança"
+      // vinculada a um grupo maior (parcelamento) — e recusa estornar uma cobrança individual dentro
+      // desse grupo, exigindo o endpoint específico de estorno de PARCELAMENTO em vez do de cobrança
+      // avulsa. Por isso, primeiro consultamos o pagamento pra saber se ele pertence a um parcelamento.
+      const consultaPagamento = await asaasFetch(`/payments/${pedido.mpPaymentId}`);
+      const idParcelamento = consultaPagamento.ok ? consultaPagamento.data.installment : null;
+      const endpointEstorno = idParcelamento ? `/installments/${idParcelamento}/refund` : `/payments/${pedido.mpPaymentId}/refund`;
+      const estorno = await asaasFetch(endpointEstorno, { method: 'POST' });
       if (!estorno.ok) return res.status(400).json({ error: estorno.data.errors?.[0]?.description || 'Erro ao processar reembolso no Asaas.' });
     } else {
       if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Mercado Pago não configurado no servidor.' });
@@ -3836,7 +3843,7 @@ setInterval(async () => {
                 conta.saldoCredito = Math.round(((conta.saldoCredito || 0) + saldoCashless) * 100) / 100;
                 enviarEmailGenerico(conta.email,
                   `Saldo do bar devolvido — ${ev.nome}`,
-                  `<div style="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
+                  `<div stye="font-family:Arial,sans-serif;padding:20px"><h3>Você tinha saldo sobrando no bar de "${esc(ev.nome)}"</h3><p>Devolvemos <strong>R$ ${saldoCashless.toFixed(2)}</strong> como crédito na sua conta Lota — é só usar na sua próxima compra de ingresso.</p></div>`
                 ).catch(e => console.error('[Reembolso Bar] Erro ao notificar:', e.message));
               }
               CONSUMOS_BAR.push({
