@@ -659,7 +659,7 @@ async function renderPedidosEvento(){
     const filtroHtml='<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3);margin-bottom:10px;cursor:pointer"><input type="checkbox" '+(MOSTRAR_RECUSADOS_EXPIRADOS?'checked':'')+' onchange="alternarFiltroRecusados()">Mostrar recusados/expirados também ('+escondidos+' escondido(s))</label>';
     if(!pedidos.length){ el.innerHTML=filtroHtml+'<div class="empty"><span class="empty-ic">📦</span><p>Nenhum pedido pra mostrar com esse filtro.</p></div>'; return; }
     const stMap={pago:['st-on','✅ Pago'],pendente:['','⏳ Pendente'],recusado:['st-off','❌ Recusado'],reembolsado:['st-off','↩️ Reembolsado'],expirado:['st-off','⌛ Expirado']};
-    el.innerHTML=filtroHtml+'<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
+    el.innerHTML=filtroHtml+'<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Itens</th><th>Valor do Produtor</th><th>Status</th><th>E-mail</th><th>Conta / Meus Ingressos</th><th>ID Pagamento</th><th>Data</th><th></th></tr></thead><tbody>'
       +pedidos.map(p=>{
         const [cls,lbl]=stMap[p.status]||['',p.status];
         const qtd=(p.tickets?.length)||(p.itens?.reduce((s,i)=>s+(i.qtd||0),0))||0;
@@ -670,9 +670,20 @@ async function renderPedidosEvento(){
         const btnEditar='<button class="btn bo btn-sm" onclick="abrirEditarPedido(\''+p.id+'\')">✏️ Editar</button>';
         const btnExcluir='<button class="btn bdng btn-sm" onclick="excluirPedidoAdmin(\''+p.id+'\',\''+p.status+'\')">🗑️ Excluir</button>';
         const statusEmail=p.status!=='pago'?'—':(p.emailEnviado?'<span class="st-on">✅ Enviado</span>':'<span class="st-off">❌ Falhou</span>');
-        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+btnEditar+btnExcluir+'</td></tr>';
+        // Mostra se esse pedido está de fato vinculado a uma conta (é isso que decide se aparece em
+        // "Meus Ingressos") — se não estiver, dá pra tentar vincular manualmente na hora.
+        const statusConta=p.compradorUserId?'<span class="st-on">✅ Vinculado</span>':'<span class="st-off">❌ Sem conta</span><br><button class="btn bo btn-sm" style="margin-top:4px" onclick="tentarVincularConta(\''+p.id+'\')">🔗 Tentar vincular</button>';
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+(p.comprador?.telefone?' · 📱 '+esc(p.comprador.telefone):'')+'</span></td><td>'+qtd+' ingresso(s)</td><td>R$'+valorLiquido.toFixed(2)+'</td><td class="'+cls+'">'+lbl+'</td><td>'+statusEmail+'</td><td>'+statusConta+'</td><td style="font-family:monospace;font-size:11px">'+esc(p.mpPaymentId||'—')+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+btnReembolso+btnSync+btnReenviarEmail+btnEditar+btnExcluir+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function tentarVincularConta(pedidoId){
+  try{
+    const d=await api('POST','/api/admin/pedidos/'+pedidoId+'/vincular-conta',{});
+    if(d.vinculado) toast('Vinculado com sucesso à conta de '+d.contaEmail+'!','ok');
+    else toast('Não existe conta cadastrada com esse e-mail ainda. Peça pro cliente criar uma conta primeiro.','err');
+    renderPedidosEvento();
+  }catch(e){ toast(e.message,'err'); }
 }
 async function excluirPedidoAdmin(pedidoId,status){
   const avisoExtra=status==='pago'?' Esse pedido está PAGO — excluir aqui NÃO estorna o pagamento, só remove o registro da lista.':'';
