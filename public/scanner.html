@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<link rel="icon" type="image/png" href="/favicon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>Scanner de Ingressos — Lota</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0F0E0C;--bg2:#161410;--bg3:#1E1C18;--card:#161410;
+  --border:#2A2822;--text:#F0EDE8;--text2:#A09880;--text3:#605848;
+  --p:#C47B14;--p2:#E8961A;--green:#22C55E;--gbg:rgba(34,197,94,.1);
+  --red:#EF4444;--rbg:rgba(239,68,68,.1);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;min-height:100%;}
+.wrap{max-width:480px;margin:0 auto;padding:20px 16px 40px;min-height:100vh;display:flex;flex-direction:column;}
+.logo{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:24px;padding-top:10px}
+.logo img{height:28px}
+.logo span{font-size:18px;font-weight:900;color:var(--p2)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-bottom:14px}
+.fg{margin-bottom:14px}
+.fg label{font-size:12px;color:var(--text2);display:block;margin-bottom:6px;font-weight:600}
+.fi{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;color:var(--text);font-family:inherit;font-size:15px;outline:none}
+.fi:focus{border-color:var(--p)}
+.btn{width:100%;padding:14px;border-radius:11px;border:none;font-family:inherit;font-weight:800;font-size:15px;cursor:pointer;text-align:center}
+.btn-p{background:var(--p2);color:#18160F}
+.btn-o{background:transparent;border:1.5px solid var(--border);color:var(--text)}
+.err{background:var(--rbg);color:var(--red);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px;display:none}
+.empty{text-align:center;padding:40px 20px;color:var(--text3)}
+.empty-ic{font-size:36px;display:block;margin-bottom:10px}
+.evento-pick{display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg3);border-radius:12px;margin-bottom:10px;cursor:pointer;border:1px solid var(--border)}
+.evento-pick img{width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0}
+.stat-row{display:flex;gap:12px;margin-bottom:16px}
+.stat{flex:1;background:var(--bg3);border-radius:12px;padding:14px;text-align:center}
+.stat-v{font-size:22px;font-weight:900}
+.stat-l{font-size:10px;color:var(--text3);margin-top:2px}
+#scanVideo{width:100%;border-radius:12px;background:#000;display:block}
+#scanCanvas{display:none}
+.scan-status{font-size:12px;color:var(--text3);text-align:center;margin-top:10px}
+.result-box{border-radius:12px;padding:16px;display:flex;align-items:center;gap:12px;margin-top:14px}
+.result-ic{font-size:30px}
+.top-actions{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.sair-btn{background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo"><img src="/logo-header.png" alt="Lota"><span>Scanner de Ingressos</span></div>
+  <div id="app"></div>
+</div>
+
+<script>
+let AT=localStorage.getItem('role_token_scanner')||null;
+let CU=null;
+let MEUS_EVENTOS_SCANNER=[];
+let EVENTO_ATUAL=null;
+
+function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+function gv(id){ return (document.getElementById(id)?.value||'').trim(); }
+async function api(m,p,b){
+  const o={method:m,headers:{'Content-Type':'application/json'}};
+  if(AT) o.headers['Authorization']='Bearer '+AT;
+  if(b) o.body=JSON.stringify(b);
+  const r=await fetch(p,o);
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||'Erro');
+  return d;
+}
+
+function renderLogin(erro){
+  document.getElementById('app').innerHTML=`
+    <div class="card">
+      ${erro?'<div class="err" style="display:block">'+esc(erro)+'</div>':''}
+      <div class="fg"><label>E-mail</label><input class="fi" id="lEmail" type="email" placeholder="seu@email.com" onkeydown="if(event.key==='Enter')document.getElementById('lSenha').focus()"></div>
+      <div class="fg"><label>Senha</label><input class="fi" id="lSenha" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')fazerLogin()"></div>
+      <button class="btn btn-p" onclick="fazerLogin()">Entrar</button>
+    </div>
+    <p style="text-align:center;font-size:12px;color:var(--text3)">Acesso só pra quem foi convidado como equipe de scanner de algum evento.</p>
+  `;
+}
+async function fazerLogin(){
+  const email=gv('lEmail'), senha=gv('lSenha');
+  if(!email||!senha){ renderLogin('Preencha e-mail e senha.'); return; }
+  try{
+    const d=await api('POST','/api/auth/login',{email,senha});
+    if(d.precisa2FA){ renderLogin2FA(d.preAuthToken); return; }
+    AT=d.token; localStorage.setItem('role_token_scanner',AT);
+    CU=d.user;
+    await iniciar();
+  }catch(e){ renderLogin(e.message); }
+}
+function renderLogin2FA(preAuthToken){
+  document.getElementById('app').innerHTML=`
+    <div class="card">
+      <div class="fg"><label>Código do autenticador</label><input class="fi" id="l2fa" placeholder="000000" maxlength="6" onkeydown="if(event.key==='Enter')confirmar2FA('${preAuthToken}')"></div>
+      <button class="btn btn-p" onclick="confirmar2FA('${preAuthToken}')">Confirmar</button>
+    </div>`;
+}
+async function confirmar2FA(preAuthToken){
+  try{
+    const d=await api('POST','/api/auth/2fa/verificar-login',{preAuthToken,codigo:gv('l2fa')});
+    AT=d.token; localStorage.setItem('role_token_scanner',AT);
+    CU=d.user;
+    await iniciar();
+  }catch(e){ renderLogin(e.message); }
+}
+function sair(){ AT=null; localStorage.removeItem('role_token_scanner'); location.reload(); }
+
+async function iniciar(){
+  try{
+    const d=await api('GET','/api/meus-eventos-scanner');
+    MEUS_EVENTOS_SCANNER=d.eventos;
+    if(!MEUS_EVENTOS_SCANNER.length){
+      document.getElementById('app').innerHTML='<div class="card"><div class="empty"><span class="empty-ic">🔒</span><p>Você ainda não foi adicionado como scanner de nenhum evento.</p><p style="font-size:11px;margin-top:8px">Peça pro produtor te adicionar na aba "👥 Equipe" do evento (opção "Somente Scanner").</p></div></div><button class="btn btn-o" style="margin-top:10px" onclick="sair()">Sair</button>';
+      return;
+    }
+    if(MEUS_EVENTOS_SCANNER.length===1){ abrirEvento(MEUS_EVENTOS_SCANNER[0].id); return; }
+    document.getElementById('app').innerHTML='<div class="card"><div style="font-weight:700;margin-bottom:12px">Escolha o evento</div>'
+      +MEUS_EVENTOS_SCANNER.map(e=>'<div class="evento-pick" onclick="abrirEvento(\''+e.id+'\')">'+(e.imagemCapa?'<img src="'+esc(e.imagemCapa)+'">':'<div style="width:44px;height:44px;border-radius:8px;background:var(--bg2);display:flex;align-items:center;justify-content:center">🎪</div>')+'<div><div style="font-weight:700">'+esc(e.nome)+'</div><div style="font-size:11px;color:var(--text3)">'+e.dataEvento+'</div></div></div>').join('')
+      +'</div><button class="btn btn-o" onclick="sair()">Sair</button>';
+  }catch(e){ renderLogin(); }
+}
+async function abrirEvento(id){
+  try{
+    const info=await api('GET','/api/eventos/'+id+'/checkin-info');
+    EVENTO_ATUAL=info;
+    renderTelaScanner();
+  }catch(e){ document.getElementById('app').innerHTML='<div class="card"><p style="color:var(--red)">'+esc(e.message)+'</p></div>'; }
+}
+function renderTelaScanner(){
+  document.getElementById('app').innerHTML=`
+    <div class="top-actions">
+      <div style="font-weight:800;font-size:15px">${esc(EVENTO_ATUAL.nome)}</div>
+      ${MEUS_EVENTOS_SCANNER.length>1?'<button class="sair-btn" onclick="iniciar()">Trocar evento</button>':'<button class="sair-btn" onclick="sair()">Sair</button>'}
+    </div>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-v" style="color:var(--green)">${EVENTO_ATUAL.totalUsados}</div><div class="stat-l">JÁ ENTRARAM</div></div>
+      <div class="stat"><div class="stat-v">${EVENTO_ATUAL.totalIngressos}</div><div class="stat-l">TOTAL DE INGRESSOS</div></div>
+    </div>
+    <div class="card">
+      <button class="btn btn-p" onclick="abrirScanner()" style="margin-bottom:12px">📷 Escanear QR Code</button>
+      <div class="fg"><label>Ou digite o código manualmente</label><input class="fi" id="checkinCodigo" placeholder="Código do ingresso" onkeydown="if(event.key==='Enter')validarCheckin()"></div>
+      <button class="btn btn-o" onclick="validarCheckin()">Validar</button>
+      <div id="checkinResult"></div>
+    </div>
+    <div id="scanArea" style="display:none">
+      <div class="card">
+        <video id="scanVideo" playsinline></video>
+        <canvas id="scanCanvas"></canvas>
+        <div class="scan-status" id="scanStatus">Aponte a câmera pro QR Code...</div>
+        <button class="btn btn-o" style="margin-top:12px" onclick="fecharScanner()">Fechar câmera</button>
+      </div>
+    </div>
+  `;
+}
+async function validarCheckin(){
+  const codigo=gv('checkinCodigo');
+  if(!codigo){ return; }
+  const resEl=document.getElementById('checkinResult');
+  try{
+    const d=await api('POST','/api/checkin/validar',{eventoId:EVENTO_ATUAL.id,codigo});
+    if(d.valido){
+      resEl.innerHTML='<div class="result-box" style="background:var(--gbg);border:1px solid rgba(34,197,94,.3)"><span class="result-ic">✅</span><div><div style="font-weight:700;color:var(--green)">Entrada liberada!</div><div style="font-size:12px;color:var(--text2)">'+esc(d.comprador?.nome||'')+' · '+esc(d.ticket?.loteNome||'')+'</div></div></div>';
+      document.getElementById('checkinCodigo').value='';
+      EVENTO_ATUAL.totalUsados++;
+      const statEl=document.querySelector('.stat-v'); if(statEl) statEl.textContent=EVENTO_ATUAL.totalUsados;
+    }else if(d.jaUsado){
+      resEl.innerHTML='<div class="result-box" style="background:var(--rbg);border:1px solid rgba(239,68,68,.3)"><span class="result-ic">⚠️</span><div><div style="font-weight:700;color:var(--red)">Já utilizado!</div><div style="font-size:12px;color:var(--text2)">Usado em '+new Date(d.usadoEm).toLocaleString('pt-BR')+'</div></div></div>';
+    }else if(d.cancelado){
+      resEl.innerHTML='<div class="result-box" style="background:var(--rbg);border:1px solid rgba(239,68,68,.3)"><span class="result-ic">🚫</span><div><div style="font-weight:700;color:var(--red)">Ingresso reembolsado</div></div></div>';
+    }
+  }catch(e){
+    resEl.innerHTML='<div class="result-box" style="background:var(--rbg);border:1px solid rgba(239,68,68,.3)"><span class="result-ic">❌</span><div><div style="font-weight:700;color:var(--red)">Inválido</div><div style="font-size:12px;color:var(--text2)">'+esc(e.message)+'</div></div></div>';
+  }
+}
+let _scanStream=null,_scanRAF=null;
+function garantirJsQR(cb){
+  if(window.jsQR){cb();return;}
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+  s.onload=cb;
+  s.onerror=()=>alert('Não foi possível carregar o leitor de QR Code. Confira sua conexão com a internet.');
+  document.head.appendChild(s);
+}
+function abrirScanner(){ garantirJsQR(()=>{ document.getElementById('scanArea').style.display='block'; iniciarScanner(); }); }
+function fecharScanner(){ if(_scanRAF) cancelAnimationFrame(_scanRAF); if(_scanStream) _scanStream.getTracks().forEach(t=>t.stop()); document.getElementById('scanArea').style.display='none'; }
+async function iniciarScanner(){
+  const statusEl=document.getElementById('scanStatus');
+  statusEl.style.color='var(--text3)'; statusEl.textContent='Solicitando acesso à câmera...';
+  if(!window.isSecureContext){ statusEl.style.color='var(--red)'; statusEl.textContent='A câmera só funciona em conexão segura (HTTPS).'; return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ statusEl.style.color='var(--red)'; statusEl.textContent='Este navegador não suporta câmera. Tente outro navegador.'; return; }
+  try{
+    _scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const video=document.getElementById('scanVideo');
+    video.srcObject=_scanStream; video.muted=true; video.setAttribute('muted','');
+    await video.play();
+    statusEl.style.color='var(--text3)'; statusEl.textContent='Aponte a câmera pro QR Code...';
+    const canvas=document.getElementById('scanCanvas'); const ctx=canvas.getContext('2d');
+    const tick=()=>{
+      if(document.getElementById('scanArea').style.display==='none') return;
+      if(video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code=window.jsQR(img.data,img.width,img.height);
+        if(code&&code.data){ document.getElementById('checkinCodigo').value=code.data; fecharScanner(); validarCheckin(); return; }
+      }
+      _scanRAF=requestAnimationFrame(tick);
+    };
+    _scanRAF=requestAnimationFrame(tick);
+  }catch(e){
+    statusEl.style.color='var(--red)';
+    if(e.name==='NotAllowedError'){ statusEl.textContent='Permissão de câmera negada. Libere o acesso nas configurações do navegador.'; }
+    else if(e.name==='NotFoundError'){ statusEl.textContent='Nenhuma câmera encontrada.'; }
+    else if(e.name==='NotReadableError'){ statusEl.textContent='A câmera está sendo usada por outro app.'; }
+    else{ statusEl.textContent='Erro ao abrir câmera: '+e.message; }
+  }
+}
+
+(async function(){
+  if(!AT){ renderLogin(); return; }
+  try{ const d=await api('GET','/api/auth/me'); CU=d.user; await iniciar(); }
+  catch(e){ AT=null; localStorage.removeItem('role_token_scanner'); renderLogin(); }
+})();
+</script>
+</body>
+</html>
