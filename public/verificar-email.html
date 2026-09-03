@@ -25,26 +25,7 @@ a.btn{display:inline-block;padding:12px 24px;background:#E8961A;color:#18160F;fo
 <body>
 <div class="card">
   <div class="logo"><img src="/logo-header.png" alt="Lota" style="height:26px;vertical-align:middle;margin-right:7px">Lota</div>
-  <div id="content"><div class="spinner"></div><p>Confirmando seu e-mail...</p></div>
+  <div id="content"><div class="ic">📩</div><h2>Agora é por código</h2><p>Mudamos a forma de confirmar seu e-mail — agora é com um código de 6 dígitos, mostrado direto na tela onde você está comprando o ingresso (ou faça login novamente pra receber um código novo).</p><a href="/" class="btn">Ir para a plataforma →</a></div>
 </div>
-<script>
-const token=new URLSearchParams(location.search).get('token');
-async function confirmar(){
-  const el=document.getElementById('content');
-  if(!token){
-    el.innerHTML='<div class="ic">⚠️</div><h2>Link inválido</h2><p>O link de confirmação está incompleto ou expirado.</p><a href="/" class="btn">Voltar ao início</a>';
-    return;
-  }
-  try{
-    const r=await fetch('/api/auth/verificar-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
-    const d=await r.json();
-    if(!r.ok) throw new Error(d.error||'Erro ao confirmar.');
-    el.innerHTML='<div class="ic">✅</div><h2>E-mail confirmado!</h2><p>Sua conta foi verificada com sucesso.</p><a href="/" class="btn">Ir para a plataforma →</a>';
-  }catch(e){
-    el.innerHTML='<div class="ic">❌</div><h2>Não foi possível confirmar</h2><p>'+e.message+'</p><a href="/" class="btn">Voltar ao início</a>';
-  }
-}
-confirmar();
-</script>
 </body>
 </html>
