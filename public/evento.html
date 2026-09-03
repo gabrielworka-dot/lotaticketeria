@@ -210,6 +210,8 @@ let EVENTO=null, PROMOTER_INFO=null;
 let selecoes={};
 let cupomAplicado=null;
 let AT_COMPRADOR=localStorage.getItem('role_token')||null;
+let EMAIL_PENDENTE_CONFIRMACAO=false;
+let CU_EMAIL_PENDENTE=null;
 
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
@@ -265,6 +267,12 @@ function dispararConversao(pixels,valor,pedidoId){
 
 async function init(){
   if(pedidoParam){ renderStatusPedido(); return; }
+  // Se a pessoa já estava logada de antes (token salvo no navegador), confere se o e-mail dela já
+  // foi confirmado — cobre o caso de contas antigas, criadas antes desse recurso existir.
+  if(AT_COMPRADOR){
+    try{ const d=await api('GET','/api/auth/me'); if(!d.user.emailVerificado){ EMAIL_PENDENTE_CONFIRMACAO=true; CU_EMAIL_PENDENTE=d.user.email; } }
+    catch(e){ AT_COMPRADOR=null; localStorage.removeItem('role_token'); }
+  }
   try{
     EVENTO=await api('GET','/api/public/eventos/'+slug);
     injetarPixels(EVENTO.pixels);
@@ -370,6 +378,15 @@ function renderEvento(){
         <div class="fg"><label>Senha</label><input class="fi" id="gCadSenha" type="password" placeholder="Mínimo 6 caracteres"></div>
         <button class="btn" type="button" onclick="fazerCadastroGate()">Criar conta e continuar →</button>
       </div>
+    </div>
+    <!-- Confirmação de e-mail com código de 6 dígitos — evita comprar com e-mail digitado errado -->
+    <div class="card" id="gateCodigoCard" style="display:none">
+      <div class="card-title">Confirme seu e-mail</div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Enviamos um código de 6 dígitos para <strong id="gateCodigoEmailTxt" style="color:var(--text)"></strong>. Digite ele abaixo pra continuar — isso garante que seu ingresso chegue certinho.</p>
+      <div class="err" id="errGateCodigo"></div>
+      <div class="fg"><label>Código de confirmação</label><input class="fi" id="gCodigoInput" placeholder="000000" maxlength="6" inputmode="numeric" style="text-align:center;font-size:22px;letter-spacing:6px;font-weight:800" onkeydown="if(event.key==='Enter')confirmarCodigoGate()"></div>
+      <button class="btn" type="button" onclick="confirmarCodigoGate()">Confirmar →</button>
+      <button type="button" onclick="reenviarCodigoGate()" style="background:none;border:none;color:var(--text3);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:12px;width:100%;text-align:center">Não recebi — reenviar código</button>
     </div>
     <div class="card" id="dadosCard" style="display:none">
       <div class="card-title">Seus dados</div>
@@ -557,9 +574,15 @@ function atualizarTotal(){
     document.getElementById('creditoDescontoVal').style.display=creditoAplicado>0?'inline':'none';
     document.getElementById('creditoDescontoVal').textContent='- R$ '+creditoAplicado.toFixed(2).replace('.',',');
   } else cRow.style.display='none';
-  const autenticado=!!AT_COMPRADOR;
-  document.getElementById('gateAuthCard').style.display=(temItem&&!autenticado)?'block':'none';
+  const autenticado=!!AT_COMPRADOR && !EMAIL_PENDENTE_CONFIRMACAO;
+  document.getElementById('gateAuthCard').style.display=(temItem&&!AT_COMPRADOR)?'block':'none';
   document.getElementById('dadosCard').style.display=(temItem&&autenticado)?'block':'none';
+  const gateCodigoEl=document.getElementById('gateCodigoCard');
+  if(temItem && AT_COMPRADOR && EMAIL_PENDENTE_CONFIRMACAO){
+    if(gateCodigoEl.style.display==='none' && CU_EMAIL_PENDENTE) mostrarTelaCodigoGate(CU_EMAIL_PENDENTE);
+  } else if(!temItem){
+    gateCodigoEl.style.display='none';
+  }
   const usaAsaas=EVENTO?.provedorPagamento==='asaas';
   document.getElementById('camposEnderecoAsaas').style.display=usaAsaas?'block':'none';
   document.getElementById('pagamentoCard').style.display=(temItem&&autenticado&&!usaAsaas)?'block':'none';
@@ -667,7 +690,40 @@ async function autenticarEContinuar(token,usuario){
     const campoNome=document.getElementById('cNome'); if(campoNome) campoNome.value=usuario.nome||'';
     const campoEmail=document.getElementById('cEmail'); if(campoEmail) campoEmail.value=usuario.email||'';
   }
+  // E-mail ainda não confirmado (seja porque acabou de se cadastrar, ou porque é uma conta antiga
+  // que nunca confirmou) — mostra a tela de código antes de liberar o checkout.
+  if(usuario && !usuario.emailVerificado){
+    EMAIL_PENDENTE_CONFIRMACAO=true;
+    CU_EMAIL_PENDENTE=usuario.email;
+    mostrarTelaCodigoGate(usuario.email);
+    return;
+  }
   atualizarTotal();
+}
+function mostrarTelaCodigoGate(email){
+  document.getElementById('gateAuthCard').style.display='none';
+  const el=document.getElementById('gateCodigoCard');
+  el.style.display='block';
+  document.getElementById('gateCodigoEmailTxt').textContent=email;
+  document.getElementById('gCodigoInput').value='';
+  document.getElementById('errGateCodigo').style.display='none';
+}
+async function confirmarCodigoGate(){
+  const codigo=document.getElementById('gCodigoInput').value.trim();
+  const errEl=document.getElementById('errGateCodigo');
+  errEl.style.display='none';
+  if(!codigo){ errEl.textContent='Digite o código.'; errEl.style.display='block'; return; }
+  try{
+    await api('POST','/api/auth/confirmar-codigo',{codigo});
+    document.getElementById('gateCodigoCard').style.display='none';
+    EMAIL_PENDENTE_CONFIRMACAO=false;
+    toast('E-mail confirmado!','ok');
+    atualizarTotal();
+  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+}
+async function reenviarCodigoGate(){
+  try{ await api('POST','/api/auth/reenviar-verificacao',{}); toast('Novo código enviado!','ok'); }
+  catch(e){ toast(e.message,'err'); }
 }
 async function fazerLoginGate(){
   const email=document.getElementById('gLoginEmail').value.trim();
