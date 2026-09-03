@@ -376,8 +376,7 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   };
   db.users.push(user); saveDB(db);
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
-  const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
-  enviarEmailVerificacao(user, proto, host).catch(() => {});
+  enviarCodigoVerificacao(user).catch(() => {});
   res.status(201).json({ token, user: safe(user) });
 });
 function gerarCodigoIndicacaoUnico() {
@@ -427,17 +426,25 @@ app.post('/api/auth/google', rateLimit(60000, 20), async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erro ao verificar login do Google: ' + e.message }); }
 });
 
-async function enviarEmailVerificacao(user, proto, host) {
-  const verifyToken = jwt.sign({ uid: user.id, tipo: 'verificacao' }, JWT_SECRET, { expiresIn: '3d' });
-  const link = `${proto}://${host}/verificar-email.html?token=${verifyToken}`;
+// Gera um código de 6 dígitos (não um link) — o comprador digita esse código na própria tela do
+// checkout pra confirmar que o e-mail é válido de verdade, antes de conseguir finalizar a compra.
+// Isso existe especificamente pra evitar o problema de alguém digitar o e-mail errado sem perceber
+// e depois não encontrar o ingresso (nem por e-mail, nem em "Meus Ingressos").
+async function enviarCodigoVerificacao(user) {
+  const codigo = String(Math.floor(100000 + Math.random() * 900000));
+  user.emailVerificacaoCodigo = codigo;
+  user.emailVerificacaoExpira = new Date(Date.now() + 15 * 60000).toISOString(); // 15 minutos
+  saveDB(db);
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:20px;"><img src="${proto}://${host}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
+    <div style="margin-bottom:20px;"><img src="${PUBLIC_BASE_URL}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <h2 style="font-size:18px;margin-bottom:12px;">Confirme seu e-mail</h2>
-    <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Clique no botão abaixo para confirmar seu cadastro. O link expira em 3 dias.</p>
-    <a href="${link}" style="display:inline-block;background:#E8961A;color:#18160F;font-weight:800;padding:12px 24px;border-radius:9px;text-decoration:none;font-size:14px;">Confirmar e-mail →</a>
-    <p style="font-size:11px;color:#605848;margin-top:24px;">Se não foi você quem se cadastrou, ignore este e-mail.</p>
+    <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Digite o código abaixo na tela onde você estava comprando o ingresso. Ele vale por 15 minutos.</p>
+    <div style="background:#1E1C18;border:1.5px solid #2A2822;border-radius:12px;padding:20px;text-align:center;margin-bottom:20px;">
+      <span style="font-size:32px;font-weight:900;letter-spacing:8px;color:#E8961A;">${codigo}</span>
+    </div>
+    <p style="font-size:11px;color:#605848;">Se não foi você quem se cadastrou, ignore este e-mail.</p>
     </div></div>`;
-  return enviarEmailGenerico(user.email, '✅ Confirme seu e-mail — Lota', html);
+  return enviarEmailGenerico(user.email, `${codigo} é o seu código de confirmação — Lota`, html);
 }
 
 
@@ -616,23 +623,23 @@ app.get('/api/auth/indicacao', auth, (req, res) => {
   res.json({ codigoIndicacao: req.user.codigoIndicacao, saldoCredito: req.user.saldoCredito || 0, totalIndicados, totalIndicadosComprando });
 });
 
-app.post('/api/auth/verificar-email', rateLimit(60000, 10), (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ error: 'Token ausente.' });
-  let dec;
-  try { dec = jwt.verify(token, JWT_SECRET); } catch(e) { return res.status(400).json({ error: 'Link inválido ou expirado.' }); }
-  if (dec.tipo !== 'verificacao') return res.status(400).json({ error: 'Link inválido.' });
-  const user = db.users.find(u => u.id === dec.uid);
-  if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+app.post('/api/auth/confirmar-codigo', auth, rateLimit(60000, 10), (req, res) => {
+  const user = db.users.find(u => u.id === req.user.id);
+  if (user.emailVerificado) return res.json({ ok: true, jaVerificado: true });
+  const codigo = String(req.body.codigo || '').trim();
+  if (!codigo) return res.status(400).json({ error: 'Digite o código.' });
+  if (!user.emailVerificacaoCodigo || !user.emailVerificacaoExpira) return res.status(400).json({ error: 'Nenhum código pendente. Peça um novo.' });
+  if (new Date(user.emailVerificacaoExpira) < new Date()) return res.status(400).json({ error: 'Esse código expirou. Peça um novo.' });
+  if (codigo !== user.emailVerificacaoCodigo) return res.status(400).json({ error: 'Código incorreto.' });
   user.emailVerificado = true;
+  user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null;
   saveDB(db);
   res.json({ ok: true });
 });
 
 app.post('/api/auth/reenviar-verificacao', auth, rateLimit(60000, 3), async (req, res) => {
   if (req.user.emailVerificado) return res.json({ ok: true, jaVerificado: true });
-  const host = req.get('host'); const proto = req.get('x-forwarded-proto') || 'https';
-  await enviarEmailVerificacao(req.user, proto, host).catch(() => {});
+  await enviarCodigoVerificacao(req.user).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -2215,6 +2222,14 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     let compradorUserId = null;
     const authHeader = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
     if (authHeader) { try { compradorUserId = jwt.verify(authHeader, JWT_SECRET).id; } catch(e) {} }
+    // Bloqueia a compra até o e-mail estar confirmado — evita o problema de alguém digitar o e-mail
+    // errado sem perceber e depois não conseguir encontrar o ingresso (nem por e-mail, nem aqui).
+    if (compradorUserId) {
+      const compradorConta = db.users.find(u => u.id === compradorUserId);
+      if (compradorConta && !compradorConta.emailVerificado) {
+        return res.status(403).json({ error: 'Confirme seu e-mail antes de continuar.', precisaConfirmarEmail: true });
+      }
+    }
     const ticketRef = db.ticketSlugs[slug];
     if (!ticketRef) return res.status(404).json({ error: 'Evento não encontrado.' });
     const ev = EVENTOS.find(e => e.id === ticketRef.eventoId);
