@@ -20,14 +20,14 @@
   --sh:0 4px 16px rgba(0,0,0,.3);--shl:0 12px 32px rgba(0,0,0,.5);
 }
 html[data-theme="light"]{
-  --bg:#EDE7DC;--bg2:#FFFFFF;--bg3:#F3EEE4;--card:#FFFFFF;
-  --border:#DBD0BB;--border2:#C7B99E;
-  --text:#221D15;--text2:#5C5344;--text3:#8C8271;
+  --bg:#F2F3F5;--bg2:#FFFFFF;--bg3:#E9EAEC;--card:#FFFFFF;
+  --border:#E4E6E9;--border2:#D1D5DB;
+  --text:#1F2226;--text2:#6B7280;--text3:#9CA3AF;
   --p:#B36A0E;--p2:#C47B14;--pbg:rgba(180,110,15,.1);--pb:rgba(180,110,15,.3);
   --green:#16A34A;--gbg:rgba(22,163,74,.08);
   --red:#DC2626;--rbg:rgba(220,38,38,.08);
   --blue:#2563EB;--bbg:rgba(37,99,235,.08);
-  --sh:0 2px 8px rgba(40,30,10,.08);--shl:0 12px 28px rgba(40,30,10,.14);
+  --sh:0 2px 8px rgba(20,20,30,.06);--shl:0 12px 28px rgba(20,20,30,.12);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;height:100%;overflow-x:hidden;width:100%;}
@@ -85,6 +85,8 @@ a{color:inherit;}
 .ev-status{display:inline-block;font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;margin-bottom:8px;}
 .ev-status.publicado{background:var(--gbg);color:var(--green);}
 .ev-status.rascunho{background:var(--pbg);color:var(--p2);}
+.ev-status.finalizado{background:var(--bg3);color:var(--text3);}
+.ev-status.cancelado{background:var(--rbg);color:var(--red);}
 .ev-nome{font-size:14px;font-weight:700;margin-bottom:4px;}
 .ev-meta{font-size:11px;color:var(--text3);}
 
@@ -163,8 +165,10 @@ a{color:inherit;}
     <div class="ni" id="navNovo" onclick="gp('novo',this)">✨ Criar Evento</div>
     <div class="sb-sec">Conta</div>
     <div class="ni" id="navSaldo" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
+    <div class="ni" id="navFinanceiro" onclick="gp('financeiro',this)">📊 Financeiro</div>
     <div class="ni" id="navDicas" onclick="gp('dicas',this)">🎓 Dicas</div>
     <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
+    <div class="ni" onclick="gp('seguranca',this)">🔒 Segurança</div>
     <div id="navAdminSec" style="display:none">
       <div class="sb-sec">Plataforma</div>
       <div class="ni" onclick="location.href='/admin.html'">⚙️ Administração</div>
@@ -185,6 +189,7 @@ a{color:inherit;}
   <!-- EVENTOS -->
   <div class="page active" id="page-eventos">
     <div id="eventosAviso"></div>
+    <div class="cat-tabs" id="statusEventoTabs" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap"></div>
     <div class="ev-grid" id="eventosGrid"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
@@ -228,6 +233,11 @@ a{color:inherit;}
     <div id="saldoContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
+  <!-- FINANCEIRO -->
+  <div class="page" id="page-financeiro">
+    <div id="financeiroProdutorContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
   <!-- DICAS -->
   <div class="page" id="page-dicas">
     <div class="card" style="max-width:600px">
@@ -240,6 +250,13 @@ a{color:inherit;}
     <div class="card" style="max-width:480px">
       <div class="ct">Meu Perfil</div>
       <div id="perfilForm"></div>
+    </div>
+  </div>
+
+  <!-- SEGURANÇA -->
+  <div class="page" id="page-seguranca">
+    <div class="card" style="max-width:480px">
+      <div id="segurancaContentProdutor"></div>
     </div>
   </div>
 
@@ -369,7 +386,8 @@ async function api(m,p,b){
 }
 
 // ─── UPLOAD DE IMAGEM (compressão no navegador, sem depender de serviço externo) ──
-function handleImageUpload(fileInput, targetInputId, previewId){
+function handleImageUpload(fileInput, targetInputId, previewId, maxW, qualidade){
+  maxW=maxW||1000; qualidade=qualidade||0.82;
   const file=fileInput.files?.[0];
   if(!file) return;
   if(!file.type.startsWith('image/')){ toast('Selecione um arquivo de imagem.','err'); return; }
@@ -378,13 +396,13 @@ function handleImageUpload(fileInput, targetInputId, previewId){
   reader.onload=function(ev){
     const img=new Image();
     img.onload=function(){
-      const MAX_W=1000;
+      const MAX_W=maxW;
       let w=img.width, h=img.height;
       if(w>MAX_W){ h=Math.round(h*(MAX_W/w)); w=MAX_W; }
       const canvas=document.createElement('canvas');
       canvas.width=w; canvas.height=h;
       canvas.getContext('2d').drawImage(img,0,0,w,h);
-      const dataUrl=canvas.toDataURL('image/jpeg',0.82);
+      const dataUrl=canvas.toDataURL('image/jpeg',qualidade);
       const targetEl=document.getElementById(targetInputId);
       if(targetEl) targetEl.value=dataUrl;
       const prevEl=document.getElementById(previewId);
@@ -405,7 +423,7 @@ function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 
-const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false}};
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},financeiro:{t:'Financeiro',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false},seguranca:{t:'Segurança',bk:false}};
 
 function gp(id,el){
   const prev=document.querySelector('.page.active');
@@ -428,6 +446,8 @@ function gp(id,el){
   if(mobHam) mobHam.style.display = showBack ? 'none' : 'flex';
   if(id==='eventos') carregarEventos();
   if(id==='saldo') carregarSaldo();
+  if(id==='financeiro') carregarFinanceiroProdutor();
+  if(id==='seguranca') carregarSegurancaProdutor();
   if(id==='dicas') carregarDicasProdutor();
   if(id==='perfil') carregarPerfil();
   closeSb();
@@ -497,7 +517,7 @@ let SOMENTE_LEITURA=false;
     SOMENTE_LEITURA=!CU.isOrganizador;
     if(SOMENTE_LEITURA){
       document.body.classList.add('modo-leitura');
-      ['navNovo','navSaldo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+      ['navNovo','navSaldo','navFinanceiro'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
     }
     gp('eventos');
     if(CU.isAdmin){
@@ -507,15 +527,49 @@ let SOMENTE_LEITURA=false;
 })();
 
 // ─── EVENTOS ────────────────────────────────────────────────
+let TODOS_MEUS_EVENTOS=[];
+let ABA_STATUS_EVENTO='ativo';
 async function carregarEventos(){
   const el=document.getElementById('eventosGrid');
   const avisoEl=document.getElementById('eventosAviso');
   if(avisoEl) avisoEl.innerHTML=SOMENTE_LEITURA?'<div style="background:var(--pbg);border:1px solid var(--pb);color:var(--p2);padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px">👁️ Modo somente visualização — você é colaborador(a) desta equipe e não pode editar dados.</div>':'';
   try{
     const d=await api('GET','/api/meus-eventos');
-    if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento ainda.'+(SOMENTE_LEITURA?'':' Crie o primeiro!')+'</p></div>'; return; }
-    el.innerHTML=d.eventos.map(ev=>'<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.status+'">'+(ev.status==='publicado'?'✅ Publicado':'📝 Rascunho')+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'+(SOMENTE_LEITURA?'':'<button class="btn bo btn-sm" style="margin-top:10px" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>')+'</div>').join('');
+    TODOS_MEUS_EVENTOS=d.eventos;
+    renderAbasStatusEvento();
+    renderListaEventosFiltrada();
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderAbasStatusEvento(){
+  // "Rascunho" entra junto com "Ativo" (evento ainda não publicado é tratado como algo em
+  // preparação, não uma categoria própria) — só Finalizado e Cancelado são abas realmente separadas.
+  const contagem={ativo:0,finalizado:0,cancelado:0};
+  TODOS_MEUS_EVENTOS.forEach(ev=>{ const s=ev.statusExibicao==='rascunho'?'ativo':ev.statusExibicao; contagem[s]=(contagem[s]||0)+1; });
+  const abas=[['ativo','🟢 Ativos'],['finalizado','⏹️ Finalizados'],['cancelado','🚫 Cancelados']];
+  document.getElementById('statusEventoTabs').innerHTML=abas.map(([v,l])=>'<div class="tab'+(ABA_STATUS_EVENTO===v?' active':'')+'" style="padding:9px 16px;border-radius:20px;background:'+(ABA_STATUS_EVENTO===v?'var(--p2)':'var(--bg3)')+';color:'+(ABA_STATUS_EVENTO===v?'#18160F':'var(--text2)')+';font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="ABA_STATUS_EVENTO=\''+v+'\';renderAbasStatusEvento();renderListaEventosFiltrada()">'+l+' ('+contagem[v]+')</div>').join('');
+}
+function renderListaEventosFiltrada(){
+  const el=document.getElementById('eventosGrid');
+  const filtrados=TODOS_MEUS_EVENTOS.filter(ev=>(ev.statusExibicao==='rascunho'?'ativo':ev.statusExibicao)===ABA_STATUS_EVENTO);
+  if(!filtrados.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento aqui.'+(ABA_STATUS_EVENTO==='ativo'&&!SOMENTE_LEITURA?' Crie o primeiro!':'')+'</p></div>'; return; }
+  const statusLabel={publicado:'✅ Publicado',rascunho:'📝 Rascunho',finalizado:'⏹️ Finalizado',cancelado:'🚫 Cancelado'};
+  el.innerHTML=filtrados.map(ev=>{
+    const rotulo=ev.statusExibicao==='finalizado'?statusLabel.finalizado:(ev.statusExibicao==='cancelado'?statusLabel.cancelado:statusLabel[ev.status]);
+    const podeCancel=!SOMENTE_LEITURA && ev.statusExibicao!=='cancelado' && ev.statusExibicao!=='finalizado';
+    return '<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.statusExibicao+'">'+rotulo+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'
+      +(SOMENTE_LEITURA?'':'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn bo btn-sm" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>'+(podeCancel?'<button class="btn bdng btn-sm" onclick="event.stopPropagation();cancelarEvento(\''+ev.id+'\')">🚫 Cancelar</button>':'')+'</div>')
+      +'</div>';
+  }).join('');
+}
+async function cancelarEvento(id){
+  if(bloqueiaSomenteLeitura())return;
+  const motivo=prompt('Tem certeza que quer cancelar este evento? Se quiser, descreva o motivo (opcional):');
+  if(motivo===null) return; // cancelou o prompt, não confirma a ação
+  try{
+    await api('PATCH','/api/eventos/'+id+'/cancelar',{motivo});
+    toast('Evento cancelado.','ok');
+    carregarEventos();
+  }catch(e){ toast(e.message,'err'); }
 }
 async function duplicarEvento(id){
   if(bloqueiaSomenteLeitura())return;
@@ -570,6 +624,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
+      <div class="tab" onclick="evTab('mensagens',this)">📩 Mensagens</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'equipe\',this)">👥 Equipe</div>'}
@@ -582,6 +637,7 @@ function renderEventoDetalhe(){
     <div id="evTabPromoters" style="display:none"></div>
     <div id="evTabPixels" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
+    <div id="evTabMensagens" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
     <div id="evTabBar" style="display:none"></div>
     <div id="evTabEquipe" style="display:none"></div>
@@ -591,7 +647,7 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Mensagens','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -601,6 +657,7 @@ function evTab(tab,el){
   if(tab==='promoters') renderTabPromoters();
   if(tab==='pixels') renderTabPixels();
   if(tab==='relatorios') renderTabRelatorios();
+  if(tab==='mensagens') renderTabMensagens();
   if(tab==='checkin') renderTabCheckin();
   if(tab==='bar') renderTabBar();
   if(tab==='equipe') renderTabEquipe();
@@ -638,7 +695,7 @@ function renderTabGeral(){
         <p style="font-size:11px;color:var(--text3);margin-bottom:8px">Se você tiver uma peça de divulgação já pronta (com o nome do evento, artista, data), suba aqui em vez da imagem de capa comum. Tamanho recomendado: <strong style="color:var(--text2)">1600 × 600 pixels</strong> (proporção 8:3). Se subir num tamanho diferente, a imagem é cortada pra se ajustar — pra não perder nada importante, deixe o conteúdo principal centralizado.</p>
         <div style="display:flex;gap:10px;align-items:center">
           <div id="edBannerPreview" style="width:120px;height:45px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;overflow:hidden">${EV_ATUAL.bannerLargo?'<img src="'+esc(EV_ATUAL.bannerLargo)+'" style="width:100%;height:100%;object-fit:cover">':'🖼️'}</div>
-          ${ro?'':'<div style="flex:1;display:flex;gap:8px"><input type="file" accept="image/*" id="edBannerFile" style="display:none" onchange="handleImageUpload(this,\'edBanner\',\'edBannerPreview\')"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'edBannerFile\').click()">🖼️ Escolher banner</button>'+(EV_ATUAL.bannerLargo?'<button type="button" class="btn bdng btn-sm" onclick="document.getElementById(\'edBanner\').value=\'\';document.getElementById(\'edBannerPreview\').innerHTML=\'🖼️\'">Remover</button>':'')+'</div>'}
+          ${ro?'':'<div style="flex:1;display:flex;gap:8px"><input type="file" accept="image/*" id="edBannerFile" style="display:none" onchange="handleImageUpload(this,\'edBanner\',\'edBannerPreview\',1920,0.9)"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'edBannerFile\').click()">🖼️ Escolher banner</button>'+(EV_ATUAL.bannerLargo?'<button type="button" class="btn bdng btn-sm" onclick="document.getElementById(\'edBanner\').value=\'\';document.getElementById(\'edBannerPreview\').innerHTML=\'🖼️\'">Remover</button>':'')+'</div>'}
         </div>
         <input type="hidden" id="edBanner" value="${esc(EV_ATUAL.bannerLargo||'')}">
       </div>
@@ -1098,6 +1155,23 @@ async function solicitarAdiantamentoEvento(){
     renderTabRepasses();
   }catch(e){ toast(e.message,'err'); }
 }
+async function renderTabMensagens(){
+  const el=document.getElementById('evTabMensagens');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/mensagens');
+    if(!d.mensagens.length){ el.innerHTML='<div class="card"><div class="empty" style="padding:20px"><span class="empty-ic">📩</span><p>Nenhuma mensagem recebida sobre este evento ainda.</p></div></div>'; return; }
+    el.innerHTML='<div class="card"><div class="ct">Mensagens sobre este evento</div>'
+      +d.mensagens.map(m=>'<div style="border-bottom:1px solid var(--border);padding:14px 0"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><strong>'+esc(m.nome)+'</strong> <span style="color:var(--text3);font-size:11px">('+esc(m.email)+')</span></div>'
+        +(SOMENTE_LEITURA?'':'<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3);white-space:nowrap;cursor:pointer"><input type="checkbox" '+(m.respondida?'checked':'')+' onchange="marcarMensagemRespondida(\''+m.id+'\',this.checked)"> Respondida</label>')
+        +'</div><p style="font-size:13px;color:var(--text2);margin-top:6px;white-space:pre-wrap">'+esc(m.mensagem)+'</p><div style="font-size:11px;color:var(--text3);margin-top:6px">'+new Date(m.createdAt).toLocaleString('pt-BR')+'</div></div>').join('')
+      +'</div>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+async function marcarMensagemRespondida(id,respondida){
+  try{ await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/mensagens/'+id,{respondida}); }
+  catch(e){ toast(e.message,'err'); }
+}
 async function renderTabEquipe(){
   const el=document.getElementById('evTabEquipe');
   el.innerHTML=`
@@ -1429,6 +1503,97 @@ async function iniciarScanner(){
 }
 
 // ─── SALDO E ADIANTAMENTO ────────────────────────────────────
+let CHART_FIN_MENSAL=null, CHART_FIN_DIARIO=null;
+function carregarSegurancaProdutor(){
+  const el=document.getElementById('segurancaContentProdutor');
+  el.innerHTML=`
+    <div class="ct">Autenticação em Duas Etapas</div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Protege sua conta com um código extra a cada login, gerado por um app como Google Authenticator ou Authy — recomendado, já que sua conta lida com dados bancários e saldo.</p>
+    ${CU.twoFactorAtivo
+      ? '<div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:14px">✅ Ativado</div><div class="fg"><label>Senha atual (pra desativar)</label><input class="fi" id="seg2faSenhaDesativar" type="password" placeholder="••••••••"></div><button class="btn bdng" onclick="desativar2FASeguranca()">Desativar 2FA</button>'
+      : '<button class="btn bp" onclick="iniciar2FASeguranca()">Ativar 2FA →</button><div id="setup2FaAreaSeguranca" style="margin-top:16px"></div>'}
+    <div style="border-top:1px solid var(--border);margin:22px 0 16px"></div>
+    <div class="ct">Minha Conta</div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Pra trocar nome, e-mail ou senha, vai até a aba "👤 Perfil".</p>
+    <button class="btn bo btn-sm" onclick="irParaPerfil()">Ir para o Perfil →</button>`;
+}
+async function iniciar2FASeguranca(){
+  try{
+    const d=await api('POST','/api/auth/2fa/setup');
+    document.getElementById('setup2FaAreaSeguranca').innerHTML=`
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">1. Escaneie este QR Code com seu app autenticador:</div>
+      <img src="${d.qrCode}" style="width:180px;height:180px;border-radius:10px;background:#fff;padding:8px;display:block;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Ou digite manualmente: <code style="color:var(--p2)">${d.secretManual}</code></div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">2. Digite o código de 6 dígitos gerado pelo app:</div>
+      <div class="fg"><input class="fi" id="seg2FaCodigoSeguranca" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:4px;text-align:center;font-size:18px"></div>
+      <button class="btn bp" onclick="confirmarAtivacao2FASeguranca()">Confirmar e Ativar →</button>`;
+  }catch(e){ toast(e.message,'err'); }
+}
+async function confirmarAtivacao2FASeguranca(){
+  const codigo=document.getElementById('seg2FaCodigoSeguranca').value.trim();
+  if(!codigo){ toast('Digite o código.','err'); return; }
+  try{
+    const d=await api('POST','/api/auth/2fa/ativar',{codigo});
+    CU=d.user;
+    toast('Autenticação em duas etapas ativada!','ok');
+    carregarSegurancaProdutor();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function desativar2FASeguranca(){
+  const senha=document.getElementById('seg2faSenhaDesativar').value.trim();
+  if(!senha){ toast('Digite sua senha.','err'); return; }
+  if(!confirm('Tem certeza que quer desativar a autenticação em duas etapas?')) return;
+  try{
+    const d=await api('POST','/api/auth/2fa/desativar',{senha});
+    CU=d.user;
+    toast('2FA desativado.','ok');
+    carregarSegurancaProdutor();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function carregarFinanceiroProdutor(){
+  const el=document.getElementById('financeiroProdutorContent');
+  try{
+    const d=await api('GET','/api/produtor/financeiro');
+    el.innerHTML=`
+      <div class="met-g">
+        <div class="met-c"><div class="met-l">Total Vendido (seu valor líquido)</div><div class="met-v" style="color:var(--green)">R$ ${d.totalReceita.toFixed(2)}</div></div>
+        <div class="met-c"><div class="met-l">Pedidos Pagos</div><div class="met-v">${d.totalPedidos}</div></div>
+      </div>
+      <div class="card">
+        <div class="ct">Evolução — Últimos 12 Meses</div>
+        <div style="position:relative;height:240px"><canvas id="graficoFinMensal"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ct">Evolução — Últimos 30 Dias</div>
+        <div style="position:relative;height:240px"><canvas id="graficoFinDiario"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ct">Por Evento</div>
+        <div class="tw">${d.porEvento.length?'<table class="tbl"><thead><tr><th>Evento</th><th>Pedidos</th><th>Total Vendido</th></tr></thead><tbody>'
+          +d.porEvento.map(e=>'<tr><td>'+esc(e.eventoNome)+'</td><td>'+e.pedidos+'</td><td style="color:var(--green);font-weight:700">R$'+e.receita.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'
+          :'<div class="empty" style="padding:20px"><p>Nenhuma venda registrada ainda.</p></div>'}</div>
+      </div>`;
+    renderGraficosFinanceiroProdutor(d.ultimos12Meses,d.ultimos30Dias);
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderGraficosFinanceiroProdutor(dozeMeses,trintaDias){
+  if(CHART_FIN_MENSAL) CHART_FIN_MENSAL.destroy();
+  if(CHART_FIN_DIARIO) CHART_FIN_DIARIO.destroy();
+  const opcoesComuns={
+    responsive:true,maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    scales:{x:{ticks:{color:'#A09880',maxRotation:0},grid:{color:'#2A2822'}},y:{ticks:{color:'#A09880',callback:v=>'R$'+v},grid:{color:'#2A2822'}}},
+    plugins:{legend:{display:false}}
+  };
+  const mesesFormatados=dozeMeses.map(m=>{ const [ano,mes]=m.mes.split('-'); return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][parseInt(mes)-1]+'/'+ano.slice(2); });
+  CHART_FIN_MENSAL=new Chart(document.getElementById('graficoFinMensal'),{
+    type:'bar', data:{labels:mesesFormatados,datasets:[{label:'Vendido',data:dozeMeses.map(m=>m.receita),backgroundColor:'#4ADE8099'}]}, options:opcoesComuns
+  });
+  const diasFormatados=trintaDias.map(dd=>{ const [,mes,dia]=dd.dia.split('-'); return dia+'/'+mes; });
+  CHART_FIN_DIARIO=new Chart(document.getElementById('graficoFinDiario'),{
+    type:'line', data:{labels:diasFormatados,datasets:[{label:'Vendido',data:trintaDias.map(dd=>dd.receita),borderColor:'#4ADE80',backgroundColor:'#4ADE8033',fill:true,tension:0.3}]}, options:opcoesComuns
+  });
+}
 async function carregarSaldo(){
   const el=document.getElementById('saldoContent');
   try{
