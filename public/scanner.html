@@ -13,6 +13,12 @@
   --p:#C47B14;--p2:#E8961A;--green:#22C55E;--gbg:rgba(34,197,94,.1);
   --red:#EF4444;--rbg:rgba(239,68,68,.1);
 }
+html[data-theme="light"]{
+  --bg:#F2F3F5;--bg2:#FFFFFF;--bg3:#E9EAEC;--card:#FFFFFF;
+  --border:#E4E6E9;--text:#1F2226;--text2:#6B7280;--text3:#9CA3AF;
+  --p:#B36A0E;--p2:#C47B14;--green:#16A34A;--gbg:rgba(22,163,74,.08);
+  --red:#DC2626;--rbg:rgba(220,38,38,.08);
+}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;min-height:100%;}
 .wrap{max-width:480px;margin:0 auto;padding:20px 16px 40px;min-height:100vh;display:flex;flex-direction:column;}
@@ -47,7 +53,7 @@ html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans'
 </head>
 <body>
 <div class="wrap">
-  <div class="logo"><img src="/logo-header.png" alt="Lota"><span>Scanner de Ingressos</span></div>
+  <div class="logo" style="position:relative"><img src="/logo-header.png" alt="Lota"><span>Scanner de Ingressos</span><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="position:absolute;right:0;top:50%;transform:translateY(-50%);background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:32px;height:32px;font-size:13px;cursor:pointer">🌙</button></div>
   <div id="app"></div>
 </div>
 
@@ -56,6 +62,19 @@ let AT=localStorage.getItem('role_token_scanner')||null;
 let CU=null;
 let MEUS_EVENTOS_SCANNER=[];
 let EVENTO_ATUAL=null;
+// ─── TEMA CLARO/ESCURO ───────────────────────────────────────
+function aplicarTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
+}
+(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+function alternarTema(){
+  const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const novo = atual === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lota_tema', novo);
+  aplicarTema(novo);
+}
 
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
 function gv(id){ return (document.getElementById(id)?.value||'').trim(); }
