@@ -8,43 +8,45 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lota — Produtor</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<style>
+<style>:root{--bg:#0F0E0C;--card:#161410;--border:#2A2822;--border2:#383430;--text:#F0EDE8;--text2:#A09880;--text3:#605848;--p:#C47B14;--p2:#E8961A;--green:#4ADE80;--bg-deep:#18160F;--p-dark:#7A4A0C;}
+html[data-theme="light"]{--bg:#F2F3F5;--card:#FFFFFF;--border:#E4E6E9;--border2:#D1D5DB;--text:#1F2226;--text2:#6B7280;--text3:#9CA3AF;--p:#B36A0E;--p2:#C47B14;--green:#16A34A;--bg-deep:#FFFFFF;--p-dark:#D9A15C;}
+
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{background:#0F0E0C;color:#F0EDE8;font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;width:100%;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden;width:100%;}
 a{color:inherit;text-decoration:none;}
-.topbar{padding:14px 20px;border-bottom:1px solid #2A2822;}
-.logo{display:inline-flex;align-items:center;font-size:18px;font-weight:900;color:#E8961A;}
-.banner{width:100%;height:180px;background:linear-gradient(135deg,#C47B14,#7A4A0C);position:relative;}
+.topbar{padding:14px 20px;border-bottom:1px solid var(--border);}
+.logo{display:inline-flex;align-items:center;font-size:18px;font-weight:900;color:var(--p2);}
+.banner{width:100%;height:180px;background:linear-gradient(135deg,var(--p),var(--p-dark));position:relative;}
 .banner img{width:100%;height:100%;object-fit:cover;}
 .wrap{max-width:720px;margin:0 auto;padding:0 20px 60px;}
-.profile-hdr{margin-top:-40px;position:relative;padding-bottom:16px;border-bottom:1px solid #2A2822;}
-.avatar{width:88px;height:88px;border-radius:20px;background:#C47B14;border:4px solid #0F0E0C;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#18160F;}
+.profile-hdr{margin-top:-40px;position:relative;padding-bottom:16px;border-bottom:1px solid var(--border);}
+.avatar{width:88px;height:88px;border-radius:20px;background:var(--p);border:4px solid var(--bg);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:var(--bg-deep);}
 .p-nome{font-size:22px;font-weight:900;margin-top:12px;}
-.p-bio{font-size:13px;color:#A09880;margin-top:6px;line-height:1.6;max-width:500px;}
-.p-stats{display:flex;gap:20px;margin-top:12px;font-size:12px;color:#A09880;}
+.p-bio{font-size:13px;color:var(--text2);margin-top:6px;line-height:1.6;max-width:500px;}
+.p-stats{display:flex;gap:20px;margin-top:12px;font-size:12px;color:var(--text2);}
 .p-stats strong{color:#fff;}
 .btn{padding:10px 20px;border-radius:20px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid;transition:all .2s;margin-top:14px;}
-.bp{background:#E8961A;border-color:#E8961A;color:#18160F;}
-.bo{background:transparent;border-color:#383430;color:#A09880;}
-.bo.seguindo{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3);color:#4ADE80;}
+.bp{background:var(--p2);border-color:var(--p2);color:var(--bg-deep);}
+.bo{background:transparent;border-color:var(--border2);color:var(--text2);}
+.bo.seguindo{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.3);color:var(--green);}
 .section-title{font-size:16px;font-weight:800;margin:26px 0 12px;}
 .event-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
-.event-card{background:#161410;border:1px solid #2A2822;border-radius:12px;overflow:hidden;cursor:pointer;transition:all .2s;}
+.event-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:pointer;transition:all .2s;}
 .event-card:hover{border-color:rgba(196,123,20,.4);}
-.event-img{width:100%;aspect-ratio:16/10;background:linear-gradient(135deg,#C47B14,#7A4A0C);display:flex;align-items:center;justify-content:center;font-size:24px;}
+.event-img{width:100%;aspect-ratio:16/10;background:linear-gradient(135deg,var(--p),var(--p-dark));display:flex;align-items:center;justify-content:center;font-size:24px;}
 .event-img img{width:100%;height:100%;object-fit:cover;}
 .event-body{padding:11px;}
 .event-name{font-size:13px;font-weight:700;line-height:1.3;}
-.event-meta{font-size:10px;color:#605848;margin-top:4px;}
-.feed-item{background:#161410;border:1px solid #2A2822;border-radius:12px;padding:16px;margin-bottom:10px;}
-.feed-time{font-size:11px;color:#605848;margin-bottom:8px;}
+.event-meta{font-size:10px;color:var(--text3);margin-top:4px;}
+.feed-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px;}
+.feed-time{font-size:11px;color:var(--text3);margin-bottom:8px;}
 .feed-text{font-size:13px;line-height:1.6;}
 .feed-img{width:100%;border-radius:10px;margin-top:10px;}
-.empty{text-align:center;padding:30px;color:#605848;font-size:13px;}
+.empty{text-align:center;padding:30px;color:var(--text3);font-size:13px;}
 </style>
 </head>
 <body>
-<div class="topbar"><a href="/" class="logo"><img src="/logo-header.png" alt="Lota" style="height:26px;vertical-align:middle;margin-right:7px">Lota</a></div>
+<div class="topbar"><a href="/" class="logo"><img src="/logo-header.png" alt="Lota" style="height:26px;vertical-align:middle;margin-right:7px">Lota</a><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="float:right;background:var(--card);border:1px solid var(--border);border-radius:20px;width:34px;height:34px;font-size:14px;cursor:pointer">🌙</button></div>
 <div class="banner" id="bannerEl"></div>
 <div class="wrap" id="app"></div>
 <div style="max-width:720px;margin:0 auto;padding:0 20px">
@@ -71,6 +73,19 @@ a{color:inherit;text-decoration:none;}
 const slug=location.pathname.split('/').filter(Boolean).pop();
 let AT=localStorage.getItem('role_token')||null;
 let CU=null;
+// ─── TEMA CLARO/ESCURO ───────────────────────────────────────
+function aplicarTema(tema){
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
+}
+(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+function alternarTema(){
+  const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const novo = atual === 'light' ? 'dark' : 'light';
+  localStorage.setItem('lota_tema', novo);
+  aplicarTema(novo);
+}
 
 async function api(m,p,b){
   const o={method:m,headers:{'Content-Type':'application/json'}};
