@@ -82,7 +82,7 @@ a{color:inherit;text-decoration:none;}
 .event-name{font-size:14px;font-weight:700;line-height:1.3;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px;}
 .event-meta{font-size:11px;color:var(--text3);}
 .event-price{margin-top:8px;font-size:13px;font-weight:800;color:var(--p2);}
-.carrossel-wrap{position:relative;border-radius:18px;overflow:hidden;aspect-ratio:16/6;min-height:200px;background:var(--card);margin-bottom:8px;}
+.carrossel-wrap{position:relative;overflow:hidden;aspect-ratio:21/8;min-height:220px;max-height:520px;background:var(--card);margin-bottom:20px;}
 .carrossel-slide{position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .6s ease;cursor:pointer;}
 .carrossel-slide.active{pointer-events:auto;opacity:1;}
 .carrossel-slide img{width:100%;height:100%;object-fit:cover;}
@@ -169,7 +169,7 @@ a{color:inherit;text-decoration:none;}
 
 <div class="hero">
   <h1>Seu rolê começa aqui</h1>
-  <p>Shows, festas e experiências perto de você — ou crie o seu e venda ingressos com sua comunidade.</p>
+  <p>Shows, festas e experiências perto de você — ou crie o seu e venda ingressos com facilidade.</p>
 </div>
 
 <div class="filters" id="filtros" style="align-items:center">
@@ -178,11 +178,11 @@ a{color:inherit;text-decoration:none;}
   </select>
 </div>
 
-<div class="wrap">
-  <div id="carrosselSection" style="display:none">
-    <div class="carrossel-wrap" id="carrosselWrap"></div>
-  </div>
+<div id="carrosselSection" style="display:none">
+  <div class="carrossel-wrap" id="carrosselWrap"></div>
+</div>
 
+<div class="wrap">
   <div id="destaquesSection" style="display:none">
     <div class="section-title">Eventos em Destaque</div>
     <div class="event-grid" id="destaquesGrid"></div>
@@ -411,7 +411,7 @@ function selecionarTipoCadastro(tipo){
     cliBtn.style.background='transparent'; cliBtn.style.color='var(--text2)';
     nomePublicoWrap.style.display='block';
     docWrap.style.display='grid';
-    sub.textContent='Crie eventos, venda ingressos e monte sua comunidade';
+    sub.textContent='Crie eventos e venda ingressos com facilidade';
     btn.textContent='Criar conta de produtor →';
   }
 }
