@@ -20,11 +20,11 @@
   --bg-deep:#18160F;--blue:#3B9EFF;--gray-occ:#3A3630;
 }
 html[data-theme="light"]{
-  --bg:#EDE7DC;--card:#FFFFFF;--bg3:#F3EEE4;--border:#DBD0BB;
-  --text:#221D15;--text2:#5C5344;--text3:#8C8271;--text-soft:#3A342A;
+  --bg:#F2F3F5;--card:#FFFFFF;--bg3:#E9EAEC;--border:#E4E6E9;
+  --text:#1F2226;--text2:#6B7280;--text3:#9CA3AF;--text-soft:#374151;
   --p:#B36A0E;--p2:#C47B14;--p-dark:#8A5410;
   --green:#16A34A;--green2:#15803D;--red:#DC2626;--red2:#B91C1C;
-  --bg-deep:#18160F;--blue:#2563EB;--gray-occ:#D8CFB9;
+  --bg-deep:#18160F;--blue:#2563EB;--gray-occ:#D1D5DB;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;overflow-x:hidden;width:100%;}
@@ -92,47 +92,10 @@ a{color:inherit;}
 <div class="topbar" style="justify-content:space-between"><a href="/" class="logo"><img src="/logo-header.png" alt="Lota" style="height:26px;vertical-align:middle;margin-right:7px">Lota</a><button id="themeToggle" onclick="alternarTema()" title="Alternar tema" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;width:36px;height:36px;font-size:15px;cursor:pointer">🌙</button></div>
 <div class="wrap" id="app"><div class="spinner"></div></div>
 
-<!-- Botões flutuantes de suporte: FAQ, WhatsApp e formulário de contato -->
+<!-- Botões flutuantes de suporte: envio de mensagem e central de ajuda -->
 <div style="position:fixed;bottom:20px;right:20px;z-index:150;display:flex;flex-direction:column;gap:10px;align-items:flex-end">
-  <a id="btnWhatsappFlutuante" href="#" target="_blank" style="display:none;width:52px;height:52px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;font-size:26px;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Fale conosco pelo WhatsApp">💬</a>
   <button onclick="abrirContato()" style="width:52px;height:52px;border-radius:50%;background:var(--p2);border:none;color:#18160F;font-size:22px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Enviar uma mensagem">✉️</button>
-  <button onclick="abrirFaq()" style="width:52px;height:52px;border-radius:50%;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3)" title="Dúvidas frequentes">❓</button>
-</div>
-
-<!-- MODAL FAQ / SAC -->
-<div id="faqModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:16px">
-  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
-      <h2 style="font-size:18px;font-weight:800">Dúvidas Frequentes</h2>
-      <button onclick="document.getElementById('faqModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer">✕</button>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:16px">
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Quem tem direito a meia-entrada?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Pela lei federal (Lei nº 12.933/2013), têm direito estudantes, jovens de 15 a 29 anos inscritos no CadÚnico (baixa renda), pessoas com deficiência (e um acompanhante) e idosos com 60 anos ou mais. <strong>Professores e demais funcionários da educação</strong> também têm direito em diversos estados e cidades, por leis estaduais/municipais específicas. Algumas cidades e estados podem ter regras próprias adicionais — confira também as condições específicas descritas na página de cada evento.</p>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Qual documento apresentar na entrada?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Pra ingressos de meia-entrada: carteira de estudante (com foto, dentro da validade) para estudantes, documento oficial com foto pra idosos, carteira funcional pra professores/funcionários da educação, ou o documento correspondente ao benefício (CadÚnico, laudo de PCD, etc). Pra qualquer ingresso, é sempre bom levar um documento de identificação com foto e o ingresso em mãos (impresso ou no celular).</p>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Posso cancelar meu ingresso e ser reembolsado?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Sim. Pelo <strong>Código de Defesa do Consumidor (art. 49)</strong>, você tem direito de desistir da compra em até <strong>7 dias corridos</strong> a partir da data da compra, com reembolso integral e sem precisar justificar o motivo — desde que o evento ainda não tenha acontecido. Se o evento acontecer antes de completar os 7 dias, esse prazo passa a valer só até a data do evento. Pra solicitar, entra em contato pelo botão "Fale com a gente" logo abaixo, informando o número do pedido.</p>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">E se o evento for cancelado ou adiado pelo produtor?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Nesse caso, você tem direito ao reembolso integral <strong>independente do prazo de 7 dias</strong> — essa regra específica não se aplica aqui, já que a mudança não foi uma escolha sua. O produtor do evento é responsável por avisar os compradores e viabilizar o reembolso.</p>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Depois dos 7 dias, ainda dá pra cancelar?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Depois desse prazo, o cancelamento fica a critério do produtor de cada evento — que pode aceitar (às vezes com desconto de alguma taxa) ou negar, dependendo da política dele. Fala com a gente que ajudamos a verificar.</p>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Para onde vai meu ingresso depois da compra?</div>
-        <p style="font-size:13px;color:var(--text2);line-height:1.5">Assim que o pagamento é confirmado, o ingresso (com QR Code) é enviado automaticamente pro seu e-mail, e também fica salvo na sua conta, na aba <strong>"Meus Ingressos"</strong> — é só fazer login com a conta usada na compra pra acessar a qualquer momento, mesmo que o e-mail não chegue por algum motivo.</p>
-      </div>
-    </div>
-  </div>
+  <a href="/ajuda.html" target="_blank" style="width:52px;height:52px;border-radius:50%;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;text-decoration:none" title="Central de Ajuda">❓</a>
 </div>
 
 <!-- MODAL FORMULÁRIO DE CONTATO -->
@@ -171,8 +134,8 @@ a{color:inherit;}
   <div style="display:flex;justify-content:center;gap:40px;flex-wrap:wrap;margin-bottom:16px;text-align:left">
     <div>
       <div style="font-weight:700;color:var(--text2);margin-bottom:8px;font-size:11px;letter-spacing:1px">SAC</div>
-      <div style="margin-bottom:4px">WhatsApp: <a href="https://wa.me/5521998579651" style="color:var(--p2);text-decoration:none">+55 21 99857-9651</a></div>
-      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@workamusic.com.br" style="color:var(--p2);text-decoration:none">sac@workamusic.com.br</a></div>
+      <div style="margin-bottom:4px">E-mail: <a href="mailto:sac@lotaticketeria.com.br" style="color:var(--p2);text-decoration:none">sac@lotaticketeria.com.br</a></div>
+      <div style="margin-bottom:4px">Central de Ajuda: <a href="/ajuda.html" style="color:var(--p2);text-decoration:none">ajuda.html</a></div>
       <div>Instagram: <a href="https://instagram.com/lota_evento" target="_blank" style="color:var(--p2);text-decoration:none">@lota_evento</a></div>
     </div>
     <div>
@@ -279,11 +242,6 @@ async function init(){
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
     if(EVENTO.googleClientId) inicializarGoogleLogin();
-    if(EVENTO.suporteWhatsapp){
-      const btnWpp=document.getElementById('btnWhatsappFlutuante');
-      btnWpp.href='https://wa.me/'+EVENTO.suporteWhatsapp+'?text='+encodeURIComponent('Olá! Tenho uma dúvida sobre o evento '+EVENTO.nome);
-      btnWpp.style.display='flex';
-    }
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
   }
@@ -649,7 +607,6 @@ async function aoReceberCredencialGoogle(response){
     await autenticarEContinuar(d.token,d.user);
   }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
-function abrirFaq(){ document.getElementById('faqModal').style.display='flex'; }
 function abrirContato(){
   document.getElementById('contatoModal').style.display='flex';
   document.getElementById('contatoFormArea').style.display='block';
