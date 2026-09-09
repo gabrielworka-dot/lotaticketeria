@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon-192.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Central de Ajuda — Lota</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0F0E0C;--bg2:#161410;--bg3:#1E1C18;--card:#161410;--border:#2A2822;--text:#F0EDE8;--text2:#A09880;--text3:#605848;--p:#C47B14;--p2:#E8961A;}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;}
+a{color:inherit;text-decoration:none;}
+.topbar{padding:14px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+.logo{display:inline-flex;align-items:center;font-size:18px;font-weight:900;color:var(--p2)}
+.logo img{height:26px;margin-right:7px;vertical-align:middle}
+.hero{padding:48px 20px 36px;text-align:center;background:linear-gradient(180deg,rgba(232,150,26,.08),transparent)}
+.hero h1{font-size:clamp(24px,4vw,34px);font-weight:900;margin-bottom:16px}
+.search-box{max-width:560px;margin:0 auto;position:relative}
+.search-box input{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:14px;padding:15px 18px 15px 46px;color:var(--text);font-family:inherit;font-size:15px;outline:none}
+.search-box input:focus{border-color:var(--p)}
+.search-ic{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:17px;opacity:.6}
+.wrap{max-width:920px;margin:0 auto;padding:36px 20px 70px}
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-bottom:44px}
+.cat-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;cursor:pointer;transition:all .2s}
+.cat-card:hover{border-color:var(--p);transform:translateY(-2px)}
+.cat-ic{font-size:26px;margin-bottom:10px}
+.cat-title{font-size:15px;font-weight:800;margin-bottom:4px}
+.cat-count{font-size:12px;color:var(--text3)}
+.section{margin-bottom:36px;scroll-margin-top:70px}
+.section-title{font-size:19px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:9px}
+.qa{border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;background:var(--card)}
+.qa-q{padding:16px 18px;font-weight:700;font-size:14.5px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.qa-q:hover{color:var(--p2)}
+.qa-arrow{transition:transform .2s;flex-shrink:0;color:var(--text3)}
+.qa.open .qa-arrow{transform:rotate(180deg)}
+.qa-a{max-height:0;overflow:hidden;transition:max-height .25s ease}
+.qa.open .qa-a{max-height:600px}
+.qa-a-inner{padding:0 18px 18px;font-size:13.5px;color:var(--text2);line-height:1.7}
+.contact-cta{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;text-align:center;margin-top:10px}
+.contact-cta h3{font-size:17px;font-weight:800;margin-bottom:8px}
+.contact-cta p{font-size:13px;color:var(--text2);margin-bottom:18px}
+.btn-cta{display:inline-block;background:var(--p2);color:#18160F;font-weight:800;padding:12px 26px;border-radius:11px;font-size:14px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="/" class="logo"><img src="/logo-header.png" alt="Lota">Lota</a></div>
+
+<div class="hero">
+  <h1>Como podemos ajudar?</h1>
+  <div class="search-box">
+    <span class="search-ic">🔍</span>
+    <input id="buscaAjuda" placeholder="Busque por uma dúvida, tipo &quot;meia-entrada&quot; ou &quot;cancelar ingresso&quot;" oninput="filtrarAjuda(this.value)">
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="cat-grid" id="catGrid">
+    <div class="cat-card" onclick="irPara('cat-compra')"><div class="cat-ic">🎟️</div><div class="cat-title">Comprando ingressos</div><div class="cat-count">4 artigos</div></div>
+    <div class="cat-card" onclick="irPara('cat-meia')"><div class="cat-ic">🏷️</div><div class="cat-title">Meia-entrada</div><div class="cat-count">2 artigos</div></div>
+    <div class="cat-card" onclick="irPara('cat-cancelamento')"><div class="cat-ic">↩️</div><div class="cat-title">Cancelamento e reembolso</div><div class="cat-count">3 artigos</div></div>
+    <div class="cat-card" onclick="irPara('cat-conta')"><div class="cat-ic">👤</div><div class="cat-title">Minha conta</div><div class="cat-count">2 artigos</div></div>
+    <div class="cat-card" onclick="irPara('cat-produtor')"><div class="cat-ic">🎪</div><div class="cat-title">Sou produtor de eventos</div><div class="cat-count">3 artigos</div></div>
+  </div>
+
+  <div class="section" id="cat-compra">
+    <div class="section-title">🎟️ Comprando ingressos</div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Para onde vai meu ingresso depois da compra? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Assim que o pagamento é confirmado, o ingresso (com QR Code) é enviado automaticamente pro seu e-mail, e também fica salvo na sua conta, na aba <strong>"Meus Ingressos"</strong> — é só fazer login com a conta usada na compra pra acessar a qualquer momento, mesmo que o e-mail não chegue por algum motivo.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Quais formas de pagamento são aceitas? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Aceitamos cartão de crédito (parcelado em até 3x) e PIX, com confirmação instantânea assim que o pagamento é aprovado.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Posso transferir meu ingresso pra outra pessoa? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Sim! Na aba "Meus Ingressos", em cada ingresso ainda não utilizado, tem um botão "Transferir" — digita o nome e e-mail de quem vai receber, e a pessoa recebe o ingresso (com QR Code próprio) direto no e-mail dela.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Comprei um ingresso "Duplo" ou "Quádruplo", como funciona? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Cada pessoa do grupo recebe seu próprio ingresso com QR Code individual — no momento da compra, você preenche o nome de cada acompanhante, e cada um pode entrar separadamente.</div></div></div>
+  </div>
+
+  <div class="section" id="cat-meia">
+    <div class="section-title">🏷️ Meia-entrada</div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Quem tem direito a meia-entrada? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Pela lei federal (Lei nº 12.933/2013), têm direito estudantes, jovens de 15 a 29 anos inscritos no CadÚnico (baixa renda), pessoas com deficiência (e um acompanhante) e idosos com 60 anos ou mais. <strong>Professores e demais funcionários da educação</strong> também têm direito em diversos estados e cidades, por leis estaduais/municipais específicas. Algumas cidades e estados podem ter regras próprias adicionais — confira também as condições específicas descritas na página de cada evento.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Qual documento apresentar na entrada? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Pra ingressos de meia-entrada: carteira de estudante (com foto, dentro da validade) para estudantes, documento oficial com foto pra idosos, carteira funcional pra professores/funcionários da educação, ou o documento correspondente ao benefício (CadÚnico, laudo de PCD, etc). Pra qualquer ingresso, é sempre bom levar um documento de identificação com foto e o ingresso em mãos (impresso ou no celular).</div></div></div>
+  </div>
+
+  <div class="section" id="cat-cancelamento">
+    <div class="section-title">↩️ Cancelamento e reembolso</div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Posso cancelar meu ingresso e ser reembolsado? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Sim. Pelo <strong>Código de Defesa do Consumidor (art. 49)</strong>, você tem direito de desistir da compra em até <strong>7 dias corridos</strong> a partir da data da compra, com reembolso integral e sem precisar justificar o motivo — desde que o evento ainda não tenha acontecido. Se o evento acontecer antes de completar os 7 dias, esse prazo passa a valer só até a data do evento. Pra solicitar, entra em contato pelo formulário logo abaixo, informando o número do pedido.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">E se o evento for cancelado ou adiado pelo produtor? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Nesse caso, você tem direito ao reembolso integral <strong>independente do prazo de 7 dias</strong> — essa regra específica não se aplica aqui, já que a mudança não foi uma escolha sua. O produtor do evento é responsável por avisar os compradores e viabilizar o reembolso.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Depois dos 7 dias, ainda dá pra cancelar? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Depois desse prazo, o cancelamento fica a critério do produtor de cada evento — que pode aceitar (às vezes com desconto de alguma taxa) ou negar, dependendo da política dele. Fala com a gente que ajudamos a verificar.</div></div></div>
+  </div>
+
+  <div class="section" id="cat-conta">
+    <div class="section-title">👤 Minha conta</div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Esqueci minha senha, e agora? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Na tela de login, clica em "Esqueci minha senha" e digita o e-mail da sua conta — você recebe um link pra criar uma senha nova.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Por que preciso confirmar meu e-mail com um código? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Isso existe pra garantir que o ingresso chegue certinho — se o e-mail estiver com erro de digitação, você não conseguiria receber o ingresso nem encontrar ele depois. Confirmando o código, temos certeza que está tudo certo.</div></div></div>
+  </div>
+
+  <div class="section" id="cat-produtor">
+    <div class="section-title">🎪 Sou produtor de eventos</div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Como crio meu primeiro evento? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Entra na sua conta, clica em "Quero vender ingressos também", aceita os Termos de Responsabilidade do Produtor, e você já cai no painel — de lá é só clicar em "Criar Evento".</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Quando eu recebo o dinheiro das vendas? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Você recebe o valor total das suas vendas em até 3 dias úteis após a realização do evento, na chave PIX cadastrada no seu perfil. Produtores com contrato específico também podem solicitar adiantamento antes do evento, dentro da aba "Repasses" de cada evento.</div></div></div>
+    <div class="qa"><div class="qa-q" onclick="toggleQa(this)">Quanto a Lota cobra de comissão? <span class="qa-arrow">▾</span></div><div class="qa-a"><div class="qa-a-inner">Você recebe 100% do valor que definir no ingresso — a taxa administrativa é cobrada à parte, direto do comprador, no momento da compra.</div></div></div>
+  </div>
+
+  <div class="contact-cta">
+    <h3>Não encontrou o que precisava?</h3>
+    <p>Manda sua dúvida direto pra gente — respondemos por e-mail o quanto antes.</p>
+    <a href="mailto:sac@lotaticketeria.com.br" class="btn-cta">Fale com a gente →</a>
+  </div>
+</div>
+
+<script>
+function toggleQa(el){
+  const qa=el.closest('.qa');
+  document.querySelectorAll('.qa.open').forEach(q=>{ if(q!==qa) q.classList.remove('open'); });
+  qa.classList.toggle('open');
+}
+function irPara(id){ document.getElementById(id).scrollIntoView({behavior:'smooth',block:'start'}); }
+function filtrarAjuda(termo){
+  const t=termo.trim().toLowerCase();
+  document.getElementById('catGrid').style.display=t?'none':'grid';
+  document.querySelectorAll('.qa').forEach(qa=>{
+    const texto=qa.textContent.toLowerCase();
+    qa.classList.toggle('hidden', t && !texto.includes(t));
+  });
+  document.querySelectorAll('.section').forEach(sec=>{
+    const temVisivel=[...sec.querySelectorAll('.qa')].some(qa=>!qa.classList.contains('hidden'));
+    sec.classList.toggle('hidden', t && !temVisivel);
+  });
+}
+</script>
+</body>
+</html>
