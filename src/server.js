@@ -157,6 +157,16 @@ function parseDataLocal(dataStr) {
   const [y, m, d] = String(dataStr).split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }
+// Calcula o status "de exibição" pro produtor (Ativo/Finalizado/Cancelado/Rascunho) — NÃO troca o
+// campo ev.status guardado (que continua só rascunho/publicado/cancelado); "Ativo" vs "Finalizado"
+// é sempre calculado na hora, comparando a data do evento com agora. Assim, a transição é sempre
+// automática e imediata, sem depender de nenhum job programado que poderia falhar ou atrasar.
+function statusExibicaoEvento(ev) {
+  if (ev.status === 'cancelado') return 'cancelado';
+  if (ev.status === 'rascunho') return 'rascunho';
+  const fimDoDia = new Date(parseDataLocal(ev.dataEvento).getTime() + 24 * 60 * 60 * 1000);
+  return fimDoDia < new Date() ? 'finalizado' : 'ativo';
+}
 function sanitize(str, maxLen = 500) {
   if (typeof str !== 'string') return '';
   return str.trim().slice(0, maxLen).replace(/<[^>]*>/g, '');
@@ -165,7 +175,10 @@ function sanitize(str, maxLen = 500) {
 function sanitizeImagem(str) {
   if (typeof str !== 'string') return '';
   const v = str.trim();
-  if (v.startsWith('data:image/')) return v.slice(0, 2_000_000); // até ~2MB em base64
+  // Aumentado de 2MB pra 4MB — o banner largo (item novo, resolução mais alta pro carrossel) podia
+  // facilmente passar do limite antigo, e como isso corta a string no meio (não rejeita com erro),
+  // ficaria uma imagem corrompida/quebrada em vez de só uma imagem menor. Com mais folga, evita isso.
+  if (v.startsWith('data:image/')) return v.slice(0, 4_000_000);
   return v.slice(0, 500).replace(/<[^>]*>/g, '');
 }
 function slugify(str) {
@@ -898,21 +911,33 @@ app.post('/api/auth/redefinir-senha', rateLimit(60000, 10), (req, res) => {
 // MEUS INGRESSOS (comprador logado)
 // ════════════════════════════════════════════════════════
 app.get('/api/meus-ingressos', auth, (req, res) => {
-  const meusPedidos = PEDIDOS.filter(p => p.status === 'pago' && (p.compradorUserId === req.user.id || (p.comprador?.email || '').toLowerCase() === req.user.email.toLowerCase()));
-  const comEvento = meusPedidos.map(p => {
+  const emailUsuario = req.user.email.toLowerCase();
+  const meusPedidos = PEDIDOS.filter(p => p.status === 'pago' && (p.compradorUserId === req.user.id || (p.comprador?.email || '').toLowerCase() === emailUsuario));
+  const idsPedidosProprios = new Set(meusPedidos.map(p => p.id));
+  // Bug corrigido: antes, um ingresso TRANSFERIDO pra essa pessoa nunca aparecia aqui — a busca só
+  // olhava quem comprou o pedido originalmente, nunca o titular atual de cada ingresso individual.
+  // Isso significava que quem recebia um ingresso só conseguia acessá-lo pelo e-mail (se chegasse),
+  // nunca fazendo login. Agora também incluímos pedidos de outras pessoas em que algum ingresso
+  // específico foi transferido pra esse e-mail — mas só mostramos ESSE ingresso, não os outros do
+  // mesmo pedido que continuam sendo de outra pessoa.
+  const pedidosComTransferencia = PEDIDOS.filter(p => p.status === 'pago' && !idsPedidosProprios.has(p.id) && (p.tickets || []).some(t => (t.titularEmail || '').toLowerCase() === emailUsuario));
+
+  function montarEntrada(p, ticketsFiltrados, recebidoPorTransferencia) {
     const ev = EVENTOS.find(e => e.id === p.eventoId);
-    // Se o evento tem o sistema de bar ativo, mostra o saldo/conta em aberto de cada ingresso —
-    // assim o comprador acompanha isso sem precisar perguntar pro staff do bar.
-    const tickets = (p.tickets || []).map(t => {
+    const tickets = ticketsFiltrados.map(t => {
       if (ev?.barConfig?.ativo) {
         const conta = calcularContaBar(ev.id, t.codigo);
         return { ...t, barAtivo: true, saldoCashless: conta.saldoCashless, contaAbertaPosPago: conta.contaAbertaPosPago };
       }
       return t;
     });
-    return { pedidoId: p.id, eventoId: p.eventoId, eventoNome: ev?.nome || 'Evento', eventoSlug: ev?.slug || '', dataEvento: ev?.dataEvento || null, imagemCapa: ev?.imagemCapa || '', total: p.total, tickets, createdAt: p.createdAt };
-  }).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json({ pedidos: comEvento });
+    return { pedidoId: p.id, eventoId: p.eventoId, eventoNome: ev?.nome || 'Evento', eventoSlug: ev?.slug || '', dataEvento: ev?.dataEvento || null, imagemCapa: ev?.imagemCapa || '', total: p.total, tickets, createdAt: p.createdAt, recebidoPorTransferencia: !!recebidoPorTransferencia };
+  }
+
+  const comEvento = meusPedidos.map(p => montarEntrada(p, p.tickets || []));
+  const transferidos = pedidosComTransferencia.map(p => montarEntrada(p, (p.tickets || []).filter(t => (t.titularEmail || '').toLowerCase() === emailUsuario), true));
+  const todos = [...comEvento, ...transferidos].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ pedidos: todos });
 });
 
 // Pagamentos agora são recebidos numa ÚNICA conta da plataforma (não mais OAuth por produtor).
@@ -933,7 +958,8 @@ app.get('/api/meus-eventos', auth, organizadorOuColaborador, (req, res) => {
     // produtor a quem ainda está vinculado pelo jeito antigo (compatibilidade com quem já usava isso).
     eventos = EVENTOS.filter(e => (e.colaboradoresIds || []).includes(req.user.id) || (req.user.colaboradorDe && e.organizadorId === req.user.colaboradorDe));
   }
-  res.json({ eventos, modoVisualizacao: !req.user.isOrganizador });
+  const comStatusExibicao = eventos.map(e => ({ ...e, statusExibicao: statusExibicaoEvento(e) }));
+  res.json({ eventos: comStatusExibicao, modoVisualizacao: !req.user.isOrganizador });
 });
 
 app.post('/api/eventos', auth, organizadorOnly, (req, res) => {
@@ -1034,6 +1060,21 @@ app.patch('/api/eventos/:id/publicar', auth, async (req, res) => {
     return;
   }
   persistEventos();
+  res.json({ evento: ev });
+});
+
+// Cancela o evento — diferente de despublicar (rascunho): cancelado é definitivo pro público e some
+// da lista "Ativos" do produtor, indo pra aba "Cancelados". Continua existindo (pedidos/ingressos
+// não são apagados), só não aceita mais vendas novas nem aparece na home.
+app.patch('/api/eventos/:id/cancelar', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  if (ev.status === 'cancelado') return res.json({ evento: ev });
+  ev.status = 'cancelado';
+  ev.motivoCancelamento = sanitize(req.body.motivo || '', 300);
+  ev.updatedAt = new Date().toISOString();
+  persistEventos();
+  registrarAuditoria(req.user, 'cancelou_evento', { eventoId: ev.id, eventoNome: ev.nome });
   res.json({ evento: ev });
 });
 
@@ -1257,6 +1298,24 @@ app.get('/api/eventos/:id/adiantamentos', auth, (req, res) => {
   res.json({ adiantamentos: lista });
 });
 
+// Mensagens do formulário de contato que mencionaram ESSE evento especificamente (o comprador
+// escolhe o evento na hora de mandar a mensagem, ou ela vem do botão flutuante da página do evento).
+app.get('/api/eventos/:id/mensagens', auth, (req, res) => {
+  const ev = eventoVisivelPara(req.params.id, req.user);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const lista = MENSAGENS.filter(m => m.eventoSlug === ev.slug).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ mensagens: lista });
+});
+app.patch('/api/eventos/:id/mensagens/:msgId', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const msg = MENSAGENS.find(m => m.id === req.params.msgId && m.eventoSlug === ev.slug);
+  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+  if (req.body.respondida !== undefined) msg.respondida = !!req.body.respondida;
+  persistMensagens();
+  res.json({ ok: true, mensagem: msg });
+});
+
 // ── ADMIN — processar adiantamentos ──
 app.get('/api/admin/adiantamentos', auth, adminOnly, (req, res) => {
   const lista = ADIANTAMENTOS.map(a => {
@@ -1289,8 +1348,8 @@ app.get('/api/eventos/:id/pedidos', auth, (req, res) => {
 });
 
 // ── CANCELAMENTO / REEMBOLSO DE PEDIDO ──
-app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, async (req, res) => {
-  const ev = req.user.isAdmin ? EVENTOS.find(e => e.id === req.params.id) : eventoDoUsuario(req.params.id, req.user.id);
+app.post('/api/eventos/:id/pedidos/:pedidoId/reembolsar', auth, adminOnly, async (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId && p.eventoId === ev.id);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
@@ -3594,6 +3653,60 @@ app.get('/api/admin/financeiro', auth, adminOnly, (req, res) => {
   }
 
   res.json({ totalReceita, totalComissao, totalPedidos: pedidosPagos.length, porEvento, porMes: porMesTodos, ultimos12Meses, ultimos30Dias });
+});
+
+// Financeiro do PRODUTOR — mesmo formato do financeiro do admin, mas só com os próprios eventos, e
+// mostrando o valor que ELE recebe (valorIngressos) em vez da comissão da plataforma, já que é isso
+// que importa pra ele. Nunca mistura dados de outros produtores.
+app.get('/api/produtor/financeiro', auth, organizadorOnly, (req, res) => {
+  const meusEventosIds = EVENTOS.filter(e => e.organizadorId === req.user.id).map(e => e.id);
+  const pedidosPagos = PEDIDOS.filter(p => p.status === 'pago' && meusEventosIds.includes(p.eventoId));
+  const valorLiquido = p => p.valorIngressos !== undefined ? p.valorIngressos : (p.total - ((p.taxaAdministrativa !== undefined ? p.taxaAdministrativa : (p.marketplaceFee || 0))));
+  const totalReceita = pedidosPagos.reduce((s, p) => s + valorLiquido(p), 0);
+
+  const porEventoMap = {};
+  pedidosPagos.forEach(p => {
+    if (!porEventoMap[p.eventoId]) porEventoMap[p.eventoId] = { receita: 0, pedidos: 0 };
+    porEventoMap[p.eventoId].receita += valorLiquido(p);
+    porEventoMap[p.eventoId].pedidos += 1;
+  });
+  const porEvento = Object.entries(porEventoMap).map(([eventoId, d]) => {
+    const ev = EVENTOS.find(e => e.id === eventoId);
+    return { eventoId, eventoNome: ev?.nome || '—', ...d };
+  }).sort((a, b) => b.receita - a.receita);
+
+  const porMesMap = {};
+  pedidosPagos.forEach(p => {
+    const mes = (p.pagoEm || p.createdAt).slice(0, 7);
+    if (!porMesMap[mes]) porMesMap[mes] = { receita: 0, pedidos: 0 };
+    porMesMap[mes].receita += valorLiquido(p);
+    porMesMap[mes].pedidos += 1;
+  });
+  const dataRef = new Date();
+  const ultimos12Meses = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(dataRef.getFullYear(), dataRef.getMonth() - i, 1);
+    const chave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const encontrado = porMesMap[chave];
+    ultimos12Meses.push({ mes: chave, receita: encontrado?.receita || 0, pedidos: encontrado?.pedidos || 0 });
+  }
+
+  const porDiaMap = {};
+  pedidosPagos.forEach(p => {
+    const dia = (p.pagoEm || p.createdAt).slice(0, 10);
+    if (!porDiaMap[dia]) porDiaMap[dia] = { receita: 0, pedidos: 0 };
+    porDiaMap[dia].receita += valorLiquido(p);
+    porDiaMap[dia].pedidos += 1;
+  });
+  const ultimos30Dias = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(dataRef.getTime() - i * 24 * 60 * 60 * 1000);
+    const chave = d.toISOString().slice(0, 10);
+    const encontrado = porDiaMap[chave];
+    ultimos30Dias.push({ dia: chave, receita: encontrado?.receita || 0, pedidos: encontrado?.pedidos || 0 });
+  }
+
+  res.json({ totalReceita, totalPedidos: pedidosPagos.length, porEvento, ultimos12Meses, ultimos30Dias });
 });
 
 app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
