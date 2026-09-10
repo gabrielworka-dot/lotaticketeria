@@ -287,6 +287,13 @@ function renderEvento(){
       </div>
     </div>
     ${temMapaAssentos?renderMapaAssentosHtml():''}
+    ${EVENTO.mapaVenuePdf?`
+    <div class="card">
+      <div class="card-title">🗺️ Mapa do Local</div>
+      ${EVENTO.mapaVenuePdf.startsWith('data:image')
+        ?'<img src="'+esc(EVENTO.mapaVenuePdf)+'" style="width:100%;border-radius:10px;display:block">'
+        :'<embed src="'+esc(EVENTO.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:420px;border-radius:10px;display:block">'}
+    </div>`:''}
     <div class="card">
       <div class="card-title">${temMapaAssentos&&lotesSemAssento.length?'Outros ingressos':'Escolha seus ingressos'}</div>
       ${lotesHtml}
