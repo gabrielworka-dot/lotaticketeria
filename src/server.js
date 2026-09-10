@@ -1021,6 +1021,22 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
     if (req.body.mapaVenuePdf && req.body.mapaVenuePdf.length > 8_000_000) return res.status(400).json({ error: 'Arquivo do mapa muito grande (máximo ~6MB). Tente comprimir o PDF antes de subir.' });
     if (req.body.mapaVenuePdf && !req.body.mapaVenuePdf.startsWith('data:application/pdf') && !req.body.mapaVenuePdf.startsWith('data:image/')) return res.status(400).json({ error: 'Envie um arquivo PDF ou uma imagem.' });
     ev.mapaVenuePdf = req.body.mapaVenuePdf;
+    if (!req.body.mapaVenuePdf) ev.mapaVenueZonas = []; // removeu o mapa — as zonas clicáveis não fazem mais sentido sozinhas
+  }
+  // Zonas clicáveis desenhadas sobre a imagem do mapa (só funciona com imagem, não com PDF nativo —
+  // clique preciso em coordenadas de um PDF varia demais entre navegadores pra ser confiável).
+  // Cada zona guarda posição/tamanho em PORCENTAGEM da imagem, pra funcionar em qualquer tamanho de tela.
+  if (req.body.mapaVenueZonas !== undefined) {
+    if (!Array.isArray(req.body.mapaVenueZonas)) return res.status(400).json({ error: 'Zonas inválidas.' });
+    const lotesValidos = new Set((ev.lotes || []).map(l => l.id));
+    ev.mapaVenueZonas = req.body.mapaVenueZonas.filter(z => lotesValidos.has(z.loteId)).map(z => ({
+      loteId: z.loteId,
+      x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
+      y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
+      w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
+      h: Math.max(0.5, Math.min(100, parseFloat(z.h) || 1)),
+      label: sanitize(z.label || '', 40)
+    }));
   }
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
@@ -2254,6 +2270,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
     mapaVenuePdf: ev.mapaVenuePdf || '',
+    mapaVenueZonas: ev.mapaVenueZonas || [],
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
   });
