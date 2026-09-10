@@ -799,15 +799,24 @@ function renderTabAssentos(){
   const el=document.getElementById('evTabAssentos');
   const ro=SOMENTE_LEITURA;
   const temMapaPdf=!!EV_ATUAL.mapaVenuePdf;
+  const ehImagem=temMapaPdf&&EV_ATUAL.mapaVenuePdf.startsWith('data:image');
+  _zonasTemp=JSON.parse(JSON.stringify(EV_ATUAL.mapaVenueZonas||[]));
   el.innerHTML=`
     <div class="card">
       <div class="ct">Mapa do Local (PDF ou imagem)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Sobe o mapa de verdade do teatro/casa de show, mostrando os setores (plateia, camarote, frisa, etc). Isso é só uma <strong style="color:var(--text)">referência visual</strong> pro comprador — o preço de cada setor continua sendo definido normalmente na aba "Lotes" (cria um lote pra cada setor do mapa, com o nome parecido, tipo "Camarote", "Plateia", mais um lote "Geral" se quiser um valor único sem setor específico).</p>
-      ${temMapaPdf?(EV_ATUAL.mapaVenuePdf.startsWith('data:image')
-        ?'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3)"><img src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;max-height:400px;object-fit:contain;display:block"></div>'
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Sobe o mapa de verdade do teatro/casa de show, mostrando os setores (plateia, camarote, frisa, etc). O preço de cada setor continua sendo definido normalmente na aba "Lotes" (cria um lote pra cada setor do mapa, com o nome parecido, tipo "Camarote", "Plateia", mais um lote "Geral" se quiser). ${ehImagem?'<strong style="color:var(--text)">Com imagem, dá pra desenhar áreas clicáveis</strong> — o comprador clica no setor no mapa e o lote correspondente já fica selecionado.':'<strong style="color:var(--p2)">Clique nas áreas só funciona com imagem (JPG/PNG), não com PDF</strong> — se quiser essa função, exporta o mapa como imagem em vez de PDF.'}</p>
+      ${temMapaPdf?(ehImagem
+        ?'<div id="mapaVenueImgWrap" style="position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3);cursor:crosshair;user-select:none"><img id="mapaVenueImg" src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;display:block;pointer-events:none"><div id="zonasOverlay" style="position:absolute;inset:0"></div></div>'
         :'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3)"><embed src="'+esc(EV_ATUAL.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:340px;display:block"></div>'
       ):''}
-      ${ro?'':'<div style="display:flex;gap:8px;flex-wrap:wrap"><input type="file" accept="application/pdf,image/*" id="mapaVenueFile" style="display:none" onchange="handleMapaVenueUpload(this)"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'mapaVenueFile\').click()">📄 '+(temMapaPdf?'Trocar arquivo':'Escolher PDF ou imagem')+'</button>'+(temMapaPdf?'<button type="button" class="btn bdng btn-sm" onclick="removerMapaVenue()">Remover</button>':'')+'</div>'}
+      ${ro?'':'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        +'<input type="file" accept="application/pdf,image/*" id="mapaVenueFile" style="display:none" onchange="handleMapaVenueUpload(this)">'
+        +'<button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'mapaVenueFile\').click()">📄 '+(temMapaPdf?'Trocar arquivo':'Escolher PDF ou imagem')+'</button>'
+        +(temMapaPdf?'<button type="button" class="btn bdng btn-sm" onclick="removerMapaVenue()">Remover mapa</button>':'')
+        +(ehImagem&&lotesDisponiveis.length?'<button type="button" class="btn bp btn-sm" id="btnModoDesenho" onclick="toggleModoDesenhoZona()">✏️ Desenhar área clicável</button>':'')
+        +(ehImagem?'<button type="button" class="btn bo btn-sm" onclick="salvarZonasClicaveis()">💾 Salvar áreas</button>':'')
+        +'</div>'}
+      ${ehImagem?'<div id="listaZonasEl" style="margin-top:12px"></div>':''}
     </div>
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -825,6 +834,69 @@ function renderTabAssentos(){
       <div id="previewMapa" style="overflow-x:auto"></div>
     </div>`;
   renderSetoresLista();
+  if(ehImagem){ renderZonasOverlay(); renderListaZonas(); }
+}
+let _zonasTemp=[], MODO_DESENHO_ZONA=false, ZONA_DESENHANDO=null;
+function toggleModoDesenhoZona(){
+  MODO_DESENHO_ZONA=!MODO_DESENHO_ZONA;
+  const btn=document.getElementById('btnModoDesenho');
+  if(btn){ btn.textContent=MODO_DESENHO_ZONA?'✏️ Desenhando... (clique e arraste)':'✏️ Desenhar área clicável'; btn.classList.toggle('bp',!MODO_DESENHO_ZONA); btn.classList.toggle('bgreen',MODO_DESENHO_ZONA); }
+}
+function coordsPercentual(wrap,clientX,clientY){
+  const rect=wrap.getBoundingClientRect();
+  const x=Math.max(0,Math.min(100,((clientX-rect.left)/rect.width)*100));
+  const y=Math.max(0,Math.min(100,((clientY-rect.top)/rect.height)*100));
+  return {x,y};
+}
+document.addEventListener('mousedown',function(e){
+  if(!MODO_DESENHO_ZONA) return;
+  const wrap=document.getElementById('mapaVenueImgWrap');
+  if(!wrap || !wrap.contains(e.target)) return;
+  const p=coordsPercentual(wrap,e.clientX,e.clientY);
+  ZONA_DESENHANDO={x:p.x,y:p.y,w:0,h:0};
+  function onMove(ev){
+    const p2=coordsPercentual(wrap,ev.clientX,ev.clientY);
+    ZONA_DESENHANDO.w=Math.abs(p2.x-ZONA_DESENHANDO.x); ZONA_DESENHANDO.h=Math.abs(p2.y-ZONA_DESENHANDO.y);
+    ZONA_DESENHANDO.x2=Math.min(p2.x,p.x); ZONA_DESENHANDO.y2=Math.min(p2.y,p.y);
+    renderZonasOverlay();
+  }
+  function onUp(){
+    document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
+    if(ZONA_DESENHANDO.w<1 || ZONA_DESENHANDO.h<1){ ZONA_DESENHANDO=null; renderZonasOverlay(); return; }
+    const lotesDisponiveis=EV_ATUAL.lotes||[];
+    const opcoes=lotesDisponiveis.map((l,idx)=>(idx+1)+') '+l.nome).join('\\n');
+    const escolha=prompt('Qual lote essa área representa? Digite o número:\\n\\n'+opcoes);
+    const indice=parseInt(escolha)-1;
+    const lote=lotesDisponiveis[indice];
+    if(escolha!==null && lote){
+      _zonasTemp.push({loteId:lote.id,x:ZONA_DESENHANDO.x2,y:ZONA_DESENHANDO.y2,w:ZONA_DESENHANDO.w,h:ZONA_DESENHANDO.h,label:lote.nome});
+      toast('Área adicionada! Clica em "Salvar áreas" pra confirmar.','ok');
+    }else if(escolha!==null){ toast('Número inválido — tenta de novo.','err'); }
+    ZONA_DESENHANDO=null;
+    toggleModoDesenhoZona();
+    renderZonasOverlay(); renderListaZonas();
+  }
+  document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+});
+function renderZonasOverlay(){
+  const overlay=document.getElementById('zonasOverlay');
+  if(!overlay) return;
+  let html=_zonasTemp.map((z,i)=>'<div style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;background:rgba(232,150,26,.25);border:2px solid var(--p2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8)">'+esc(z.label||'')+'</div>').join('');
+  if(ZONA_DESENHANDO && ZONA_DESENHANDO.w>0) html+='<div style="position:absolute;left:'+(ZONA_DESENHANDO.x2||ZONA_DESENHANDO.x)+'%;top:'+(ZONA_DESENHANDO.y2||ZONA_DESENHANDO.y)+'%;width:'+ZONA_DESENHANDO.w+'%;height:'+ZONA_DESENHANDO.h+'%;background:rgba(232,150,26,.4);border:2px dashed #fff;border-radius:4px"></div>';
+  overlay.innerHTML=html;
+}
+function renderListaZonas(){
+  const el=document.getElementById('listaZonasEl');
+  if(!el) return;
+  if(!_zonasTemp.length){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nenhuma área clicável desenhada ainda.</p>'; return; }
+  el.innerHTML='<div style="font-size:12px;font-weight:700;margin-bottom:6px">Áreas desenhadas:</div>'+_zonasTemp.map((z,i)=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(z.label)+'</span><button class="btn bdng btn-sm" onclick="_zonasTemp.splice('+i+',1);renderZonasOverlay();renderListaZonas()">✕</button></div>').join('');
+}
+async function salvarZonasClicaveis(){
+  try{
+    await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenueZonas:_zonasTemp});
+    EV_ATUAL.mapaVenueZonas=_zonasTemp;
+    toast('Áreas clicáveis salvas!','ok');
+  }catch(e){ toast(e.message,'err'); }
 }
 function handleMapaVenueUpload(fileInput){
   const file=fileInput.files?.[0];
@@ -836,9 +908,10 @@ function handleMapaVenueUpload(fileInput){
   const reader=new FileReader();
   reader.onload=async function(ev){
     try{
-      await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenuePdf:ev.target.result});
+      await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenuePdf:ev.target.result,mapaVenueZonas:[]});
       EV_ATUAL.mapaVenuePdf=ev.target.result;
-      toast('Mapa carregado!','ok');
+      EV_ATUAL.mapaVenueZonas=[];
+      toast('Mapa carregado! Se tinha áreas clicáveis desenhadas antes, elas foram apagadas (o mapa mudou de imagem).','ok');
       renderTabAssentos();
     }catch(e){ toast(e.message,'err'); }
   };
