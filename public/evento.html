@@ -473,11 +473,10 @@ function renderMapaAssentosHtml(){
   const ma=EVENTO.mapaAssentos;
   const ocupados=new Set(EVENTO.assentosOcupados||[]);
   let html='<div class="card"><div class="card-title">Escolha seu assento</div>'
+    +'<p style="font-size:12px;color:var(--text2);margin-bottom:14px">Escolhe o assento primeiro — depois você escolhe qual tipo de ingresso (inteira, meia, etc) quer usar pra ele.</p>'
     +'<div style="text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:var(--text3);font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
   ma.setores.forEach(s=>{
-    const lote=EVENTO.lotes.find(l=>l.id===s.loteId);
-    const preco=lote?lote.preco:0;
-    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+' — R$ '+preco.toFixed(2).replace('.',',')+'</div>';
+    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+'</div>';
     html+='<div style="overflow-x:auto"><div style="display:inline-block">';
     for(let r=0;r<s.linhas;r++){
       const letra=String.fromCharCode(65+r);
@@ -488,7 +487,7 @@ function renderMapaAssentosHtml(){
         const ocupado=ocupados.has(seatCode);
         const selecionado=!!assentosSelecionados[seatCode];
         const cor=ocupado?'var(--gray-occ)':(selecionado?(s.cor||'var(--p)'):'var(--bg3)');
-        html+='<div onclick="'+(ocupado?'':'toggleAssento(\''+seatCode+'\',\''+s.loteId+'\','+preco+',\''+esc(s.nome)+'\')')+'" title="'+seatCode+'" style="width:22px;height:22px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'var(--p)'):'var(--border)')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
+        html+='<div onclick="'+(ocupado?'':'cliqueAssento(\''+seatCode+'\',\''+esc(s.nome)+'\')')+'" title="'+seatCode+(selecionado?' — '+esc(assentosSelecionados[seatCode].nome):'')+'" style="width:22px;height:22px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'var(--p)'):'var(--border)')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
       }
       html+='</div>';
     }
@@ -498,20 +497,45 @@ function renderMapaAssentosHtml(){
   html+='</div>';
   return html;
 }
-function toggleAssento(seatCode,loteId,preco,setorNome){
-  const selecionando=!assentosSelecionados[seatCode]; // true = está escolhendo agora, false = está desmarcando
-  if(assentosSelecionados[seatCode]) delete assentosSelecionados[seatCode];
-  else assentosSelecionados[seatCode]={loteId,preco,nome:setorNome};
+// Clicar num assento: se já tiver um lote escolhido pra ele, desmarca direto (clique de novo pra
+// tirar). Se ainda não tiver, abre a escolha de qual tipo de ingresso (lote) usar naquele assento.
+function cliqueAssento(seatCode,setorNome){
+  if(assentosSelecionados[seatCode]){
+    delete assentosSelecionados[seatCode];
+    renderEvento(); atualizarTotal();
+    return;
+  }
+  abrirEscolhaLotePraAssento(seatCode,setorNome);
+}
+function abrirEscolhaLotePraAssento(seatCode,setorNome){
+  const lotesValidos=getLotesFonte().filter(l=>l.ativo!==false);
+  if(!lotesValidos.length){ alert('Não há tipos de ingresso disponíveis no momento.'); return; }
+  let modal=document.getElementById('modalEscolhaLoteAssento');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalEscolhaLoteAssento';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  modal.innerHTML='<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:380px;max-height:80vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><h3 style="font-size:17px;font-weight:800">Assento '+seatCode.split('-').pop()+'</h3><button onclick="fecharModalEscolhaLote()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button></div>'
+    +'<p style="font-size:12px;color:var(--text3);margin-bottom:16px">Qual tipo de ingresso você quer usar pra esse assento?</p>'
+    +lotesValidos.map(l=>'<button onclick="confirmarLotePraAssento(\''+seatCode+'\',\''+l.id+'\')" style="width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;font-family:inherit;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:14px;color:var(--text)">'+esc(l.nome)+'</span><span style="font-weight:800;font-size:14px;color:var(--p2)">'+(l.cortesia?'Grátis':'R$ '+l.preco.toFixed(2).replace('.',','))+'</span></button>').join('')
+    +'</div>';
+}
+function fecharModalEscolhaLote(){ const m=document.getElementById('modalEscolhaLoteAssento'); if(m) m.style.display='none'; }
+function confirmarLotePraAssento(seatCode,loteId){
+  const lote=getLotesFonte().find(l=>l.id===loteId);
+  if(!lote) return;
+  assentosSelecionados[seatCode]={loteId:lote.id,preco:lote.preco,nome:lote.nome};
+  fecharModalEscolhaLote();
   renderEvento();
   atualizarTotal();
-  // Depois de escolher um assento, pula automaticamente pra área de pagamento — sem precisar
-  // rolar a tela manualmente procurando onde continuar.
-  if(selecionando){
-    setTimeout(()=>{
-      const alvo=document.getElementById('gateAuthCard').style.display!=='none'?document.getElementById('gateAuthCard'):document.getElementById('dadosCard');
-      if(alvo && alvo.style.display!=='none') alvo.scrollIntoView({behavior:'smooth',block:'start'});
-    },100);
-  }
+  setTimeout(()=>{
+    const alvo=document.getElementById('gateAuthCard').style.display!=='none'?document.getElementById('gateAuthCard'):document.getElementById('dadosCard');
+    if(alvo && alvo.style.display!=='none') alvo.scrollIntoView({behavior:'smooth',block:'start'});
+  },100);
 }
 
 let TOTAL_ATUAL=0, SALDO_CREDITO=0;
