@@ -1014,6 +1014,14 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   }
   if (req.body.imagemCapa !== undefined) ev.imagemCapa = sanitizeImagem(req.body.imagemCapa);
   if (req.body.bannerLargo !== undefined) ev.bannerLargo = sanitizeImagem(req.body.bannerLargo);
+  // Mapa do local em PDF (imagem do teatro/casa de show com os setores) — é só uma referência
+  // visual pro comprador ver onde fica cada área; o preço de cada setor continua sendo definido
+  // normalmente pelos Lotes (um lote pra cada setor mostrado no mapa, mais um lote "Geral" se quiser).
+  if (req.body.mapaVenuePdf !== undefined) {
+    if (req.body.mapaVenuePdf && req.body.mapaVenuePdf.length > 8_000_000) return res.status(400).json({ error: 'Arquivo do mapa muito grande (máximo ~6MB). Tente comprimir o PDF antes de subir.' });
+    if (req.body.mapaVenuePdf && !req.body.mapaVenuePdf.startsWith('data:application/pdf') && !req.body.mapaVenuePdf.startsWith('data:image/')) return res.status(400).json({ error: 'Envie um arquivo PDF ou uma imagem.' });
+    ev.mapaVenuePdf = req.body.mapaVenuePdf;
+  }
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
   ev.updatedAt = new Date().toISOString();
@@ -2245,6 +2253,7 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     suporteWhatsapp: SUPORTE_WHATSAPP || undefined,
     provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
+    mapaVenuePdf: ev.mapaVenuePdf || '',
     assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
   });
