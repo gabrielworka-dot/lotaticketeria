@@ -863,15 +863,11 @@ document.addEventListener('mousedown',function(e){
   function onUp(){
     document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
     if(ZONA_DESENHANDO.w<1 || ZONA_DESENHANDO.h<1){ ZONA_DESENHANDO=null; renderZonasOverlay(); return; }
-    const lotesDisponiveis=EV_ATUAL.lotes||[];
-    const opcoes=lotesDisponiveis.map((l,idx)=>(idx+1)+') '+l.nome).join('\\n');
-    const escolha=prompt('Qual lote essa área representa? Digite o número:\\n\\n'+opcoes);
-    const indice=parseInt(escolha)-1;
-    const lote=lotesDisponiveis[indice];
-    if(escolha!==null && lote){
-      _zonasTemp.push({loteId:lote.id,x:ZONA_DESENHANDO.x2,y:ZONA_DESENHANDO.y2,w:ZONA_DESENHANDO.w,h:ZONA_DESENHANDO.h,label:lote.nome});
+    const nomeArea=prompt('Qual o nome dessa área? (ex: "Camarote", "Plateia", "Pista VIP")');
+    if(nomeArea && nomeArea.trim()){
+      _zonasTemp.push({x:ZONA_DESENHANDO.x2,y:ZONA_DESENHANDO.y2,w:ZONA_DESENHANDO.w,h:ZONA_DESENHANDO.h,label:nomeArea.trim()});
       toast('Área adicionada! Clica em "Salvar áreas" pra confirmar.','ok');
-    }else if(escolha!==null){ toast('Número inválido — tenta de novo.','err'); }
+    }
     ZONA_DESENHANDO=null;
     toggleModoDesenhoZona();
     renderZonasOverlay(); renderListaZonas();
