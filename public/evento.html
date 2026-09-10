@@ -499,10 +499,19 @@ function renderMapaAssentosHtml(){
   return html;
 }
 function toggleAssento(seatCode,loteId,preco,setorNome){
+  const selecionando=!assentosSelecionados[seatCode]; // true = está escolhendo agora, false = está desmarcando
   if(assentosSelecionados[seatCode]) delete assentosSelecionados[seatCode];
   else assentosSelecionados[seatCode]={loteId,preco,nome:setorNome};
   renderEvento();
   atualizarTotal();
+  // Depois de escolher um assento, pula automaticamente pra área de pagamento — sem precisar
+  // rolar a tela manualmente procurando onde continuar.
+  if(selecionando){
+    setTimeout(()=>{
+      const alvo=document.getElementById('gateAuthCard').style.display!=='none'?document.getElementById('gateAuthCard'):document.getElementById('dadosCard');
+      if(alvo && alvo.style.display!=='none') alvo.scrollIntoView({behavior:'smooth',block:'start'});
+    },100);
+  }
 }
 
 let TOTAL_ATUAL=0, SALDO_CREDITO=0;
