@@ -1026,17 +1026,17 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   // Zonas clicáveis desenhadas sobre a imagem do mapa (só funciona com imagem, não com PDF nativo —
   // clique preciso em coordenadas de um PDF varia demais entre navegadores pra ser confiável).
   // Cada zona guarda posição/tamanho em PORCENTAGEM da imagem, pra funcionar em qualquer tamanho de tela.
+  // A zona NÃO fica mais vinculada a um lote fixo — é só uma área com nome; o comprador escolhe qual
+  // lote (tipo de ingresso) quer usar depois de clicar nela, igual já funciona no mapa de assentos.
   if (req.body.mapaVenueZonas !== undefined) {
     if (!Array.isArray(req.body.mapaVenueZonas)) return res.status(400).json({ error: 'Zonas inválidas.' });
-    const lotesValidos = new Set((ev.lotes || []).map(l => l.id));
-    ev.mapaVenueZonas = req.body.mapaVenueZonas.filter(z => lotesValidos.has(z.loteId)).map(z => ({
-      loteId: z.loteId,
+    ev.mapaVenueZonas = req.body.mapaVenueZonas.map(z => ({
       x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
       y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
       w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
       h: Math.max(0.5, Math.min(100, parseFloat(z.h) || 1)),
       label: sanitize(z.label || '', 40)
-    }));
+    })).filter(z => z.label);
   }
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
