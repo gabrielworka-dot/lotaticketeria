@@ -798,7 +798,17 @@ function renderTabAssentos(){
   const lotesDisponiveis=EV_ATUAL.lotes||[];
   const el=document.getElementById('evTabAssentos');
   const ro=SOMENTE_LEITURA;
+  const temMapaPdf=!!EV_ATUAL.mapaVenuePdf;
   el.innerHTML=`
+    <div class="card">
+      <div class="ct">Mapa do Local (PDF ou imagem)</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Sobe o mapa de verdade do teatro/casa de show, mostrando os setores (plateia, camarote, frisa, etc). Isso é só uma <strong style="color:var(--text)">referência visual</strong> pro comprador — o preço de cada setor continua sendo definido normalmente na aba "Lotes" (cria um lote pra cada setor do mapa, com o nome parecido, tipo "Camarote", "Plateia", mais um lote "Geral" se quiser um valor único sem setor específico).</p>
+      ${temMapaPdf?(EV_ATUAL.mapaVenuePdf.startsWith('data:image')
+        ?'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3)"><img src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;max-height:400px;object-fit:contain;display:block"></div>'
+        :'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3)"><embed src="'+esc(EV_ATUAL.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:340px;display:block"></div>'
+      ):''}
+      ${ro?'':'<div style="display:flex;gap:8px;flex-wrap:wrap"><input type="file" accept="application/pdf,image/*" id="mapaVenueFile" style="display:none" onchange="handleMapaVenueUpload(this)"><button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'mapaVenueFile\').click()">📄 '+(temMapaPdf?'Trocar arquivo':'Escolher PDF ou imagem')+'</button>'+(temMapaPdf?'<button type="button" class="btn bdng btn-sm" onclick="removerMapaVenue()">Remover</button>':'')+'</div>'}
+    </div>
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div class="ct" style="margin-bottom:0">Mapa de Assentos Marcados</div>
@@ -815,6 +825,33 @@ function renderTabAssentos(){
       <div id="previewMapa" style="overflow-x:auto"></div>
     </div>`;
   renderSetoresLista();
+}
+function handleMapaVenueUpload(fileInput){
+  const file=fileInput.files?.[0];
+  if(!file) return;
+  const ehPdf=file.type==='application/pdf';
+  const ehImagem=file.type.startsWith('image/');
+  if(!ehPdf && !ehImagem){ toast('Envie um arquivo PDF ou uma imagem.','err'); return; }
+  if(file.size>6*1024*1024){ toast('Arquivo muito grande (máx 6MB). Tente comprimir o PDF antes de subir.','err'); return; }
+  const reader=new FileReader();
+  reader.onload=async function(ev){
+    try{
+      await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenuePdf:ev.target.result});
+      EV_ATUAL.mapaVenuePdf=ev.target.result;
+      toast('Mapa carregado!','ok');
+      renderTabAssentos();
+    }catch(e){ toast(e.message,'err'); }
+  };
+  reader.readAsDataURL(file);
+}
+async function removerMapaVenue(){
+  if(!confirm('Remover o mapa do local?')) return;
+  try{
+    await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenuePdf:''});
+    EV_ATUAL.mapaVenuePdf='';
+    toast('Mapa removido.','ok');
+    renderTabAssentos();
+  }catch(e){ toast(e.message,'err'); }
 }
 function renderSetoresLista(){
   const el=document.getElementById('setoresListEl');
