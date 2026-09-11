@@ -1030,7 +1030,11 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   // lote (tipo de ingresso) quer usar depois de clicar nela, igual já funciona no mapa de assentos.
   if (req.body.mapaVenueZonas !== undefined) {
     if (!Array.isArray(req.body.mapaVenueZonas)) return res.status(400).json({ error: 'Zonas inválidas.' });
+    // Cada zona agora representa um ASSENTO INDIVIDUAL (não mais um setor inteiro) — recebe um
+    // código único (mantém o antigo se já existia, pra não perder o vínculo de assentos já vendidos
+    // quando o produtor edita/adiciona outras zonas).
     ev.mapaVenueZonas = req.body.mapaVenueZonas.map(z => ({
+      id: (z.id && /^[a-zA-Z0-9_-]{1,60}$/.test(z.id)) ? z.id : uuidv4(),
       x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
       y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
       w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
