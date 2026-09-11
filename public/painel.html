@@ -804,7 +804,8 @@ function renderTabAssentos(){
   el.innerHTML=`
     <div class="card">
       <div class="ct">Mapa do Local (PDF ou imagem)</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Sobe o mapa de verdade do teatro/casa de show, mostrando os setores (plateia, camarote, frisa, etc). O preço de cada setor continua sendo definido normalmente na aba "Lotes" (cria um lote pra cada setor do mapa, com o nome parecido, tipo "Camarote", "Plateia", mais um lote "Geral" se quiser). ${ehImagem?'<strong style="color:var(--text)">Com imagem, dá pra desenhar áreas clicáveis</strong> — o comprador clica no setor no mapa e o lote correspondente já fica selecionado.':'<strong style="color:var(--p2)">Clique nas áreas só funciona com imagem (JPG/PNG), não com PDF</strong> — se quiser essa função, exporta o mapa como imagem em vez de PDF.'}</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Sobe o mapa de verdade do teatro/casa de show. ${ehImagem?'<strong style="color:var(--text)">Desenha uma área pequena em cima de CADA assento/lugar da imagem</strong> — cada área vira um assento individual de verdade, com ocupação em tempo real (fica cinza pros outros compradores assim que alguém compra, mesmo a imagem sendo fixa). Ao clicar, o comprador escolhe o tipo de ingresso entre os lotes com nome parecido com o texto que você der pra área (ex: área "Plateia" mostra lotes com "Plateia" no nome).':'<strong style="color:var(--p2)">Áreas clicáveis só funcionam com imagem (JPG/PNG), não com PDF</strong> — se quiser essa função, exporta o mapa como imagem em vez de PDF.'}</p>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:14px">💡 Isso dá mais trabalho que desenhar um retângulo grande por setor (é uma área por lugar), mas garante que a ocupação apareça certinha assento por assento, mesmo usando uma foto/imagem do mapa real do local.</p>
       ${temMapaPdf?(ehImagem
         ?'<div id="mapaVenueImgWrap" style="position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3);cursor:crosshair;user-select:none"><img id="mapaVenueImg" src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;display:block;pointer-events:none"><div id="zonasOverlay" style="position:absolute;inset:0"></div></div>'
         :'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--bg3)"><embed src="'+esc(EV_ATUAL.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:340px;display:block"></div>'
@@ -863,7 +864,7 @@ document.addEventListener('mousedown',function(e){
   function onUp(){
     document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
     if(ZONA_DESENHANDO.w<1 || ZONA_DESENHANDO.h<1){ ZONA_DESENHANDO=null; renderZonasOverlay(); return; }
-    const nomeArea=prompt('Qual o nome dessa área? (ex: "Camarote", "Plateia", "Pista VIP")');
+    const nomeArea=prompt('Esse assento é de qual setor? (ex: "Plateia", "Mezanino") — vai ser usado pra filtrar os lotes mostrados pro comprador');
     if(nomeArea && nomeArea.trim()){
       _zonasTemp.push({x:ZONA_DESENHANDO.x2,y:ZONA_DESENHANDO.y2,w:ZONA_DESENHANDO.w,h:ZONA_DESENHANDO.h,label:nomeArea.trim()});
       toast('Área adicionada! Clica em "Salvar áreas" pra confirmar.','ok');
