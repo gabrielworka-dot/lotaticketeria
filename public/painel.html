@@ -624,6 +624,7 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('promoters',this)">🤝 Promoters</div>
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
+      <div class="tab" onclick="evTab('pedidos',this)">📦 Pedidos</div>
       <div class="tab" onclick="evTab('mensagens',this)">📩 Mensagens</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
@@ -637,6 +638,7 @@ function renderEventoDetalhe(){
     <div id="evTabPromoters" style="display:none"></div>
     <div id="evTabPixels" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
+    <div id="evTabPedidos" style="display:none"></div>
     <div id="evTabMensagens" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
     <div id="evTabBar" style="display:none"></div>
@@ -647,7 +649,7 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Mensagens','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Pedidos','Mensagens','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -657,6 +659,7 @@ function evTab(tab,el){
   if(tab==='promoters') renderTabPromoters();
   if(tab==='pixels') renderTabPixels();
   if(tab==='relatorios') renderTabRelatorios();
+  if(tab==='pedidos') renderTabPedidos();
   if(tab==='mensagens') renderTabMensagens();
   if(tab==='checkin') renderTabCheckin();
   if(tab==='bar') renderTabBar();
@@ -1261,6 +1264,23 @@ async function solicitarAdiantamentoEvento(){
     toast('Solicitação enviada!','ok');
     renderTabRepasses();
   }catch(e){ toast(e.message,'err'); }
+}
+async function renderTabPedidos(){
+  const el=document.getElementById('evTabPedidos');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/pedidos');
+    const pedidosPagos=d.pedidos.filter(p=>p.status==='pago').sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+    if(!pedidosPagos.length){ el.innerHTML='<div class="card"><div class="empty" style="padding:20px"><span class="empty-ic">📦</span><p>Nenhum pedido pago ainda.</p></div></div>'; return; }
+    el.innerHTML='<div class="card"><div class="ct">Pedidos ('+pedidosPagos.length+')</div>'
+      +'<p style="font-size:11px;color:var(--text3);margin-bottom:14px">💡 Se algum ingresso for de assento marcado, o lugar aparece aqui — útil pra tirar dúvida no dia do evento.</p>'
+      +'<div class="tw"><table class="tbl"><thead><tr><th>Comprador</th><th>Ingressos</th><th>Assento</th><th>Data</th></tr></thead><tbody>'
+      +pedidosPagos.map(p=>{
+        const assentosTexto=(p.tickets||[]).filter(t=>t.assento).map(t=>esc(t.assentoLabel||t.assento)).join('<br>')||'—';
+        const qtd=(p.tickets||[]).length;
+        return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td style="font-size:12px">'+assentosTexto+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td></tr>';
+      }).join('')+'</tbody></table></div></div>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function renderTabMensagens(){
   const el=document.getElementById('evTabMensagens');
