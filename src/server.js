@@ -205,6 +205,25 @@ function pessoasPorUnidadeLote(nomeLote) {
   if (/\bduplo\b|\bdupla\b/.test(nome)) return 2;
   return 1;
 }
+// O código interno de um assento (seja do mapa em grade ou das zonas desenhadas sobre imagem) é
+// baseado em UUID por baixo dos panos — não faz sentido nenhum mostrar isso pro comprador ou pro
+// produtor. Essa função traduz o código interno pra um texto legível tipo "Plateia — Fileira A,
+// Assento 3" (grade) ou "Plateia — Assento 3" (zona), calculado uma única vez na hora de gerar o
+// ingresso e guardado junto, pra nunca precisar recalcular depois (mesmo que o mapa mude).
+function assentoParaExibicao(codigoAssento, ev) {
+  if (!codigoAssento) return '';
+  const zona = (ev.mapaVenueZonas || []).find(z => z.id === codigoAssento);
+  if (zona) return `${zona.label} — Assento ${zona.numero}`;
+  const ultimoSegmento = codigoAssento.split('-').pop();
+  if (/^[A-Za-z]\d+$/.test(ultimoSegmento)) {
+    const setorId = codigoAssento.slice(0, codigoAssento.length - ultimoSegmento.length - 1);
+    const setor = (ev.mapaAssentos?.setores || []).find(s => s.id === setorId);
+    const fileira = ultimoSegmento[0];
+    const numero = ultimoSegmento.slice(1);
+    return setor ? `${setor.nome} — Fileira ${fileira}, Assento ${numero}` : `Fileira ${fileira}, Assento ${numero}`;
+  }
+  return codigoAssento; // fallback — não deveria acontecer, mas evita mostrar vazio
+}
 function gerarCodigoPromoter() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -1032,15 +1051,28 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
     if (!Array.isArray(req.body.mapaVenueZonas)) return res.status(400).json({ error: 'Zonas inválidas.' });
     // Cada zona agora representa um ASSENTO INDIVIDUAL (não mais um setor inteiro) — recebe um
     // código único (mantém o antigo se já existia, pra não perder o vínculo de assentos já vendidos
-    // quando o produtor edita/adiciona outras zonas).
-    ev.mapaVenueZonas = req.body.mapaVenueZonas.map(z => ({
-      id: (z.id && /^[a-zA-Z0-9_-]{1,60}$/.test(z.id)) ? z.id : uuidv4(),
-      x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
-      y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
-      w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
-      h: Math.max(0.5, Math.min(100, parseFloat(z.h) || 1)),
-      label: sanitize(z.label || '', 40)
-    })).filter(z => z.label);
+    // quando o produtor edita/adiciona outras zonas). Também recebe um NÚMERO legível dentro do
+    // próprio setor (ex: "Plateia 3") — só é calculado na primeira vez, depois fica fixo pra sempre
+    // (mesmo editando o mapa depois), senão o número no ingresso de quem já comprou ficaria errado.
+    const contadorPorSetor = {};
+    ev.mapaVenueZonas = req.body.mapaVenueZonas.map(z => {
+      const label = sanitize(z.label || '', 40);
+      let numero = parseInt(z.numero) || null;
+      if (!numero) {
+        contadorPorSetor[label] = (contadorPorSetor[label] || 0) + 1;
+        numero = contadorPorSetor[label];
+      } else {
+        contadorPorSetor[label] = Math.max(contadorPorSetor[label] || 0, numero);
+      }
+      return {
+        id: (z.id && /^[a-zA-Z0-9_-]{1,60}$/.test(z.id)) ? z.id : uuidv4(),
+        x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
+        y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
+        w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
+        h: Math.max(0.5, Math.min(100, parseFloat(z.h) || 1)),
+        label, numero
+      };
+    }).filter(z => z.label);
   }
   if (req.body.videoUrl !== undefined) ev.videoUrl = req.body.videoUrl && extrairYoutubeId(req.body.videoUrl) ? sanitize(req.body.videoUrl, 200) : '';
   if (req.body.cores) ev.cores = req.body.cores;
@@ -2648,7 +2680,7 @@ function gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj) {
   // (ver rota de checkout), não incrementamos de novo aqui — só geramos os códigos dos ingressos.
   for (const it of pedido.itens) {
     if (it.assento) {
-      pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
+      pedido.tickets.push({ codigo: gerarCodigoTicket(), loteNome: it.loteNome, assento: it.assento, assentoLabel: assentoParaExibicao(it.assento, ev), usado: false, usadoEm: null, titularNome: pedido.comprador?.nome || '', titularEmail: pedido.comprador?.email || '' });
     } else {
       // Lotes "Duplo"/"Quádruplo" geram um ingresso PRA CADA PESSOA (com QR Code próprio), não um
       // só pra unidade comprada. O comprador leva o dele automaticamente; os nomes das demais
@@ -2746,7 +2778,7 @@ async function gerarPdfIngressos(pedido, ev) {
     doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(t.titularNome || pedido.comprador?.nome || '', padX, iy + 13);
     iy += 42;
     doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('LOTE', padX, iy, { characterSpacing: 1 });
-    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(`${t.loteNome || ''}${t.assento ? '  •  Assento ' + t.assento : ''}`, padX, iy + 13, { width: infoColW - 40 });
+    doc.fillColor(ESCURO).fontSize(13).font('Helvetica-Bold').text(`${t.loteNome || ''}${t.assento ? '  •  ' + (t.assentoLabel || assentoParaExibicao(t.assento, ev)) : ''}`, padX, iy + 13, { width: infoColW - 40 });
     iy += 42;
     doc.fillColor(CINZA_CLARO).fontSize(9).font('Helvetica-Bold').text('CÓDIGO DO INGRESSO', padX, iy, { characterSpacing: 1 });
     doc.fillColor(LARANJA).fontSize(15).font('Helvetica-Bold').text(t.codigo, padX, iy + 13);
@@ -2778,7 +2810,7 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
   const ticketsHtml = (pedido.tickets || []).map(t => `
     <div style="border:1px solid #2A2822;border-radius:10px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:16px;background:#161410;">
       <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(t.codigo)}" width="90" height="90" style="border-radius:8px;background:#fff;padding:4px" />
-      <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · Assento '+esc(t.assento):''}</div></div>
+      <div><div style="font-family:monospace;font-weight:700;color:#C47B14;font-size:14px;">${t.codigo}</div><div style="font-size:12px;color:#A09880;margin-top:2px;">${esc(t.loteNome)}${t.assento?' · '+esc(t.assentoLabel||assentoParaExibicao(t.assento,ev)):''}</div></div>
     </div>`).join('');
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
     <div style="margin-bottom:4px;"><img src="${baseUrl}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
