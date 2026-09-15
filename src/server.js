@@ -3571,6 +3571,46 @@ app.post('/api/admin/pedidos/:pedidoId/vincular-conta', auth, adminOnly, (req, r
   res.json({ vinculado: true, contaEmail: conta.email });
 });
 
+// Gera uma cortesia direto no painel do produtor — sem o convidado precisar passar pelo checkout.
+// Só funciona com lotes marcados como cortesia (preço R$0) — por segurança, nunca aceita gerar
+// "de graça" um lote que na verdade é pago, mesmo que o produtor tente forçar isso na requisição.
+app.post('/api/eventos/:id/gerar-cortesia', auth, async (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { loteId, nome, email } = req.body;
+  const nomeLimpo = sanitize(nome || '', 100);
+  const emailLimpo = sanitize(email || '', 150).toLowerCase();
+  if (!nomeLimpo || !emailLimpo) return res.status(400).json({ error: 'Nome e e-mail do convidado são obrigatórios.' });
+  const lote = ev.lotes.find(l => l.id === loteId);
+  if (!lote) return res.status(400).json({ error: 'Lote não encontrado.' });
+  if (!lote.cortesia) return res.status(400).json({ error: `"${lote.nome}" não é um lote de cortesia. Crie um lote marcado como cortesia na aba Lotes primeiro.` });
+  if (lote.vendidos >= lote.qtdTotal) return res.status(400).json({ error: `Esse lote de cortesia já esgotou (${lote.qtdTotal} disponíveis).` });
+
+  const pedido = {
+    id: uuidv4(), eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
+    comprador: { nome: nomeLimpo, email: emailLimpo, telefone: '', cpf: '' },
+    compradorUserId: (db.users.find(u => u.email.toLowerCase() === emailLimpo)?.id) || null,
+    provedorPagamento: 'cortesia',
+    itens: [{ loteId: lote.id, qtd: 1, precoUnit: 0, loteNome: lote.nome }],
+    subtotal: 0, desconto: 0, valorIngressos: 0, taxaAdministrativa: 0, creditoAplicado: 0, total: 0,
+    cupomUsado: null, promoterRef: null,
+    mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString(),
+    geradoPeloProdutor: true
+  };
+  lote.vendidos = (lote.vendidos || 0) + pessoasPorUnidadeLote(lote.nome);
+  gerarTicketsEAtualizar(ev, pedido, null, null);
+  PEDIDOS.push(pedido);
+  persistPedidos(); persistEventos();
+
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  enviarEmailIngressos(pedido, ev, baseUrl).catch(e => console.error('Erro ao enviar e-mail da cortesia gerada:', e.message));
+
+  registrarAuditoria(req.user, 'gerou_cortesia', { pedidoId: pedido.id, eventoId: ev.id, loteNome: lote.nome, convidadoEmail: emailLimpo });
+  res.status(201).json({ ok: true, pedidoId: pedido.id });
+});
+
+
 app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
