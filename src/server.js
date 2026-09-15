@@ -3577,27 +3577,33 @@ app.post('/api/admin/pedidos/:pedidoId/vincular-conta', auth, adminOnly, (req, r
 app.post('/api/eventos/:id/gerar-cortesia', auth, async (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
-  const { loteId, nome, email } = req.body;
+  const { loteId, nome, email, quantidade, nomesAdicionais } = req.body;
   const nomeLimpo = sanitize(nome || '', 100);
   const emailLimpo = sanitize(email || '', 150).toLowerCase();
+  const qtd = Math.max(1, Math.min(200, parseInt(quantidade) || 1)); // limite de 200 por leva, só por segurança
   if (!nomeLimpo || !emailLimpo) return res.status(400).json({ error: 'Nome e e-mail do convidado são obrigatórios.' });
   const lote = ev.lotes.find(l => l.id === loteId);
   if (!lote) return res.status(400).json({ error: 'Lote não encontrado.' });
   if (!lote.cortesia) return res.status(400).json({ error: `"${lote.nome}" não é um lote de cortesia. Crie um lote marcado como cortesia na aba Lotes primeiro.` });
-  if (lote.vendidos >= lote.qtdTotal) return res.status(400).json({ error: `Esse lote de cortesia já esgotou (${lote.qtdTotal} disponíveis).` });
+  const pessoasUnidade = pessoasPorUnidadeLote(lote.nome);
+  const totalPessoas = qtd * pessoasUnidade;
+  if (lote.vendidos + totalPessoas > lote.qtdTotal) return res.status(400).json({ error: `Esse lote de cortesia só tem ${lote.qtdTotal - lote.vendidos} vaga(s) disponível(is), e você pediu ${totalPessoas}.` });
+  // Nomes individuais pra cada ingresso extra (o primeiro sempre usa o nome do convidado principal)
+  // — mesmo esquema já usado pra ingresso Duplo/Quádruplo, só que aqui é opcional.
+  const nomesLimpos = Array.isArray(nomesAdicionais) ? nomesAdicionais.slice(0, totalPessoas - 1).map(n => sanitize(n || '', 100)) : [];
 
   const pedido = {
     id: uuidv4(), eventoId: ev.id, status: 'pago', pagoEm: new Date().toISOString(),
     comprador: { nome: nomeLimpo, email: emailLimpo, telefone: '', cpf: '' },
     compradorUserId: (db.users.find(u => u.email.toLowerCase() === emailLimpo)?.id) || null,
     provedorPagamento: 'cortesia',
-    itens: [{ loteId: lote.id, qtd: 1, precoUnit: 0, loteNome: lote.nome }],
+    itens: [{ loteId: lote.id, qtd, precoUnit: 0, loteNome: lote.nome, nomesAdicionais: nomesLimpos }],
     subtotal: 0, desconto: 0, valorIngressos: 0, taxaAdministrativa: 0, creditoAplicado: 0, total: 0,
     cupomUsado: null, promoterRef: null,
     mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString(),
     geradoPeloProdutor: true
   };
-  lote.vendidos = (lote.vendidos || 0) + pessoasPorUnidadeLote(lote.nome);
+  lote.vendidos = (lote.vendidos || 0) + totalPessoas;
   gerarTicketsEAtualizar(ev, pedido, null, null);
   PEDIDOS.push(pedido);
   persistPedidos(); persistEventos();
