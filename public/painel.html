@@ -737,24 +737,45 @@ function renderTabLotes(){
   el.innerHTML='<div class="card"><div class="ct">Lotes de Ingressos</div>'+avisoCapacidade+'<div id="lotesListEl"></div>'+botoes+'</div>'
     +(SOMENTE_LEITURA?'':'<div class="card">'
       +'<div class="ct">🎁 Gerar Cortesia</div>'
-      +(lotesCortesia.length?'<p style="font-size:12px;color:var(--text2);margin-bottom:14px">Gera o ingresso na hora e já baixa o PDF pra você enviar pro convidado — sem ele precisar passar pelo checkout. Pode gerar quantas cortesias quiser, uma de cada vez.</p>'
+      +(lotesCortesia.length?'<p style="font-size:12px;color:var(--text2);margin-bottom:14px">Gera os ingressos na hora e já baixa tudo <strong style="color:var(--text)">num único PDF</strong> — sem o convidado precisar passar pelo checkout. Pode gerar quantas cortesias quiser, de uma vez ou repetindo o processo.</p>'
         +'<div class="fg"><label>Qual lote de cortesia usar?</label><select class="fs" id="cortesiaLoteSelect">'+lotesCortesia.map(l=>'<option value="'+l.id+'">'+esc(l.nome)+' ('+l.vendidos+'/'+l.qtdTotal+' usadas)</option>').join('')+'</select></div>'
-        +'<div class="fg2"><div class="fg"><label>Nome do convidado</label><input class="fi" id="cortesiaNome" placeholder="Nome completo"></div><div class="fg"><label>E-mail do convidado</label><input class="fi" id="cortesiaEmail" type="email" placeholder="email@convidado.com"></div></div>'
+        +'<div class="fg2"><div class="fg"><label>Nome do convidado principal</label><input class="fi" id="cortesiaNome" placeholder="Nome completo"></div><div class="fg"><label>E-mail do convidado principal</label><input class="fi" id="cortesiaEmail" type="email" placeholder="email@convidado.com"></div></div>'
+        +'<div class="fg" style="max-width:160px"><label>Quantidade</label><input class="fi" type="number" id="cortesiaQtd" min="1" max="200" value="1" oninput="renderCamposNomesCortesia()"></div>'
+        +'<div id="camposNomesCortesiaExtra"></div>'
         +'<button class="btn bp" onclick="gerarCortesiaEBaixar()">🎟️ Gerar e baixar PDF</button>'
         :'<p style="font-size:12px;color:var(--text2)">Você ainda não tem nenhum lote marcado como "Cortesia" — cria um lote acima e marca a caixinha "Cortesia (gratuito)" pra poder gerar convites.</p>')
       +'</div>');
   renderLotesLista();
+  renderCamposNomesCortesia();
+}
+// Mostra um campo de nome pra cada cortesia ADICIONAL (além da principal) — opcional, só preenche
+// quem quiser identificar cada convidado individualmente. Se deixar em branco, usa o nome principal.
+function renderCamposNomesCortesia(){
+  const el=document.getElementById('camposNomesCortesiaExtra');
+  if(!el) return;
+  const qtd=Math.max(1,Math.min(200,parseInt(gv('cortesiaQtd'))||1));
+  const extras=qtd-1;
+  if(extras<=0){ el.innerHTML=''; return; }
+  let html='<p style="font-size:11px;color:var(--text3);margin:10px 0 8px">Nomes dos demais convidados (opcional — se deixar em branco, usa o nome principal em todos):</p>';
+  for(let i=0;i<extras;i++){
+    html+='<input class="fi" style="margin-bottom:8px" id="cortesiaNomeExtra'+i+'" placeholder="Nome do convidado '+(i+2)+'">';
+  }
+  el.innerHTML=html;
 }
 async function gerarCortesiaEBaixar(){
   const loteId=gv('cortesiaLoteSelect')||document.getElementById('cortesiaLoteSelect').value;
   const nome=gv('cortesiaNome'), email=gv('cortesiaEmail');
-  if(!nome||!email){ toast('Preencha nome e e-mail do convidado.','err'); return; }
+  const quantidade=Math.max(1,Math.min(200,parseInt(gv('cortesiaQtd'))||1));
+  if(!nome||!email){ toast('Preencha nome e e-mail do convidado principal.','err'); return; }
+  const nomesAdicionais=[];
+  for(let i=0;i<quantidade-1;i++){ nomesAdicionais.push(gv('cortesiaNomeExtra'+i)); }
   try{
-    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/gerar-cortesia',{loteId,nome,email});
-    toast('Cortesia gerada! Baixando o PDF...','ok');
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/gerar-cortesia',{loteId,nome,email,quantidade,nomesAdicionais});
+    toast(quantidade>1?quantidade+' cortesias geradas! Baixando o PDF com todas juntas...':'Cortesia gerada! Baixando o PDF...','ok');
     window.open('/api/public/pedido/'+d.pedidoId+'/pdf','_blank');
     document.getElementById('cortesiaNome').value='';
     document.getElementById('cortesiaEmail').value='';
+    document.getElementById('cortesiaQtd').value='1';
     const d2=await api('GET','/api/eventos/'+EV_ATUAL.id);
     EV_ATUAL=d2.evento;
     renderTabLotes();
