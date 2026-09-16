@@ -61,6 +61,7 @@ a{color:inherit;}
 .fi{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;}
 .fi:focus{border-color:var(--p2);}
 .fs{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;}
+.badge-mini{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text2);}
 .fta{width:100%;background:var(--bg3);border:1.5px solid var(--border);border-radius:9px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:14px;outline:none;resize:vertical;min-height:80px;}
 .fg2{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
 .fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px;}
@@ -166,6 +167,7 @@ a{color:inherit;}
     <div class="sb-sec">Conta</div>
     <div class="ni" id="navSaldo" onclick="gp('saldo',this)">💰 Saldo e Adiantamento</div>
     <div class="ni" id="navFinanceiro" onclick="gp('financeiro',this)">📊 Financeiro</div>
+    <div class="ni" id="navPlanos" onclick="gp('planos',this)">🎫 Clube de Assinantes</div>
     <div class="ni" id="navDicas" onclick="gp('dicas',this)">🎓 Dicas</div>
     <div class="ni" id="navPerfil" onclick="gp('perfil',this)">👤 Perfil</div>
     <div class="ni" onclick="gp('seguranca',this)">🔒 Segurança</div>
@@ -236,6 +238,11 @@ a{color:inherit;}
   <!-- FINANCEIRO -->
   <div class="page" id="page-financeiro">
     <div id="financeiroProdutorContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+
+  <!-- CLUBE DE ASSINANTES -->
+  <div class="page" id="page-planos">
+    <div id="planosContent"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
   </div>
 
   <!-- DICAS -->
@@ -423,7 +430,7 @@ function gv(id){return document.getElementById(id)?.value?.trim()||'';}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
 
-const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},financeiro:{t:'Financeiro',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false},seguranca:{t:'Segurança',bk:false}};
+const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},financeiro:{t:'Financeiro',bk:false},planos:{t:'Clube de Assinantes',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false},seguranca:{t:'Segurança',bk:false}};
 
 function gp(id,el){
   const prev=document.querySelector('.page.active');
@@ -447,6 +454,7 @@ function gp(id,el){
   if(id==='eventos') carregarEventos();
   if(id==='saldo') carregarSaldo();
   if(id==='financeiro') carregarFinanceiroProdutor();
+  if(id==='planos') carregarPlanos();
   if(id==='seguranca') carregarSegurancaProdutor();
   if(id==='dicas') carregarDicasProdutor();
   if(id==='perfil') carregarPerfil();
@@ -517,7 +525,7 @@ let SOMENTE_LEITURA=false;
     SOMENTE_LEITURA=!CU.isOrganizador;
     if(SOMENTE_LEITURA){
       document.body.classList.add('modo-leitura');
-      ['navNovo','navSaldo','navFinanceiro'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+      ['navNovo','navSaldo','navFinanceiro','navPlanos'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
     }
     gp('eventos');
     if(CU.isAdmin){
@@ -1676,6 +1684,92 @@ async function iniciarScanner(){
 
 // ─── SALDO E ADIANTAMENTO ────────────────────────────────────
 let CHART_FIN_MENSAL=null, CHART_FIN_DIARIO=null;
+let _planosCache=[];
+let _beneficiosTemp=[];
+async function carregarPlanos(){
+  const el=document.getElementById('planosContent');
+  try{
+    const d=await api('GET','/api/produtor/planos');
+    _planosCache=d.planos;
+    el.innerHTML='<div class="card">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="ct" style="margin-bottom:0">Seus Planos</div><button class="btn bp btn-sm" onclick="abrirNovoPlano()">+ Criar Plano</button></div>'
+      +'<p style="font-size:12px;color:var(--text2);margin-bottom:16px">Um clube de assinantes é do <strong style="color:var(--text)">seu perfil</strong>, não de um evento específico — vale pra todos os seus eventos. Fãs pagam mensalmente e recebem benefícios como cortesia, desconto e acesso antecipado.</p>'
+      +(d.planos.length?'':'<div class="empty" style="padding:20px"><span class="empty-ic">🎫</span><p>Nenhum plano criado ainda.</p></div>')
+      +d.planos.map(p=>renderCardPlano(p)).join('')
+      +'</div>';
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderCardPlano(p){
+  return '<div style="border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px;'+(p.ativo?'':'opacity:.6')+'">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+    +'<div><div style="font-weight:800;font-size:16px">'+esc(p.nome)+(p.ativo?'':' <span style="font-size:11px;color:var(--text3)">(inativo)</span>')+'</div><div style="font-size:20px;font-weight:900;color:var(--p2);margin-top:2px">R$'+p.preco.toFixed(2).replace('.',',')+'<span style="font-size:12px;color:var(--text3);font-weight:600">/mês</span></div></div>'
+    +'<div style="display:flex;gap:6px"><button class="btn bo btn-sm" onclick="abrirEditarPlano(\''+p.id+'\')">Editar</button><button class="btn bdng btn-sm" onclick="excluirPlano(\''+p.id+'\')">Excluir</button></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
+    +(p.cortesiasPorCiclo>0?'<span class="badge-mini">🎁 '+p.cortesiasPorCiclo+' cortesia(s)/mês</span>':'')
+    +(p.descontoPercentual>0?'<span class="badge-mini">🏷️ '+p.descontoPercentual+'% de desconto</span>':'')
+    +(p.acessoAntecipado?'<span class="badge-mini">⏰ Acesso antecipado ('+p.antecedenciaHoras+'h antes)</span>':'')
+    +'</div>'
+    +(p.beneficios?.length?'<ul style="margin:12px 0 0 18px;font-size:12.5px;color:var(--text2);line-height:1.6">'+p.beneficios.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul>':'')
+    +'</div>';
+}
+function abrirNovoPlano(){
+  _beneficiosTemp=[];
+  abrirModalPlano(null);
+}
+function abrirEditarPlano(id){
+  const plano=_planosCache.find(p=>p.id===id);
+  if(!plano) return;
+  _beneficiosTemp=[...(plano.beneficios||[])];
+  abrirModalPlano(plano);
+}
+function abrirModalPlano(plano){
+  let modal=document.getElementById('modalPlano');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalPlano';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  modal.innerHTML='<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:440px;max-height:88vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><h3 style="font-size:18px;font-weight:800">'+(plano?'Editar Plano':'Criar Plano')+'</h3><button onclick="document.getElementById(\'modalPlano\').style.display=\'none\'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button></div>'
+    +'<div class="fg"><label>Nome do plano</label><input class="fi" id="planoNome" placeholder="Ex: Solo, Dueto, Orquestra" value="'+esc(plano?.nome||'')+'"></div>'
+    +'<div class="fg"><label>Valor mensal (R$)</label><input class="fi" type="number" step="0.01" id="planoPreco" placeholder="50.00" value="'+(plano?.preco||'')+'"></div>'
+    +'<div class="fg2"><div class="fg"><label>Cortesias por mês</label><input class="fi" type="number" min="0" id="planoCortesias" value="'+(plano?.cortesiasPorCiclo??0)+'"></div><div class="fg"><label>Desconto em ingressos (%)</label><input class="fi" type="number" min="0" max="100" id="planoDesconto" value="'+(plano?.descontoPercentual??0)+'"></div></div>'
+    +'<div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="planoAcessoAntecipado" '+(plano?.acessoAntecipado?'checked':'')+' onchange="document.getElementById(\'antecedenciaWrap\').style.display=this.checked?\'block\':\'none\'"> Dá acesso antecipado pra comprar ingresso</label></div>'
+    +'<div class="fg" id="antecedenciaWrap" style="display:'+(plano?.acessoAntecipado?'block':'none')+'"><label>Quantas horas antes do público geral?</label><input class="fi" type="number" min="0" id="planoAntecedencia" value="'+(plano?.antecedenciaHoras??24)+'"></div>'
+    +'<div class="fg"><label>Benefícios extras (texto livre — aniversário, prioridade de mesa, etc)</label><div id="listaBeneficiosTemp"></div><button type="button" class="btn bo btn-sm" onclick="adicionarCampoBeneficio()" style="margin-top:6px">+ Adicionar benefício</button></div>'
+    +'<button class="btn bp" style="margin-top:16px" onclick="salvarPlano(\''+(plano?.id||'')+'\')">💾 '+(plano?'Salvar alterações':'Criar plano')+'</button>'
+    +'</div>';
+  renderListaBeneficiosTemp();
+}
+function renderListaBeneficiosTemp(){
+  const el=document.getElementById('listaBeneficiosTemp');
+  el.innerHTML=_beneficiosTemp.map((b,i)=>'<div style="display:flex;gap:6px;margin-bottom:6px"><input class="fi" value="'+esc(b)+'" oninput="_beneficiosTemp['+i+']=this.value"><button type="button" class="btn bdng btn-sm" onclick="_beneficiosTemp.splice('+i+',1);renderListaBeneficiosTemp()">✕</button></div>').join('');
+}
+function adicionarCampoBeneficio(){ _beneficiosTemp.push(''); renderListaBeneficiosTemp(); }
+async function salvarPlano(id){
+  const body={
+    nome:gv('planoNome'), preco:gv('planoPreco'),
+    cortesiasPorCiclo:gv('planoCortesias'), descontoPercentual:gv('planoDesconto'),
+    acessoAntecipado:document.getElementById('planoAcessoAntecipado').checked,
+    antecedenciaHoras:gv('planoAntecedencia'),
+    beneficios:_beneficiosTemp.filter(b=>b.trim())
+  };
+  try{
+    if(id) await api('PATCH','/api/produtor/planos/'+id,body);
+    else await api('POST','/api/produtor/planos',body);
+    toast(id?'Plano atualizado!':'Plano criado!','ok');
+    document.getElementById('modalPlano').style.display='none';
+    carregarPlanos();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function excluirPlano(id){
+  if(!confirm('Tem certeza que quer excluir este plano?')) return;
+  try{ await api('DELETE','/api/produtor/planos/'+id); toast('Plano excluído.','ok'); carregarPlanos(); }
+  catch(e){ toast(e.message,'err'); }
+}
 function carregarSegurancaProdutor(){
   const el=document.getElementById('segurancaContentProdutor');
   el.innerHTML=`
