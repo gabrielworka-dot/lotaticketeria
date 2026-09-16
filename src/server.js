@@ -304,10 +304,16 @@ function registrarAuditoria(user, acao, detalhes) {
 function persistMensagens() { saveColecao('mensagens', MENSAGENS); }
 let FOLLOWS  = loadColecao('follows');
 let ADIANTAMENTOS = loadColecao('adiantamentos');
+// Clube de assinantes — planos mensais com benefícios (cortesia por mês, desconto, acesso
+// antecipado), inspirado no modelo usado por casas de show/artistas com clube de fãs.
+let PLANOS = loadColecao('planos');
+let ASSINATURAS = loadColecao('assinaturas');
 function persistEventos() { saveColecao('eventos', EVENTOS); }
 function persistPedidos() { saveColecao('pedidos', cifrarCpfPedidos(PEDIDOS)); }
 function persistFollows() { saveColecao('follows', FOLLOWS); }
 function persistAdiantamentos() { saveColecao('adiantamentos', ADIANTAMENTOS); }
+function persistPlanos() { saveColecao('planos', PLANOS); }
+function persistAssinaturas() { saveColecao('assinaturas', ASSINATURAS); }
 
 // ── Auth helpers ──────────────────────────────────────────
 function auth(req, res, next) {
@@ -2284,6 +2290,24 @@ app.get('/api/public/eventos/:slug/imagem', (req, res) => {
   res.send(Buffer.from(base64Data, 'base64'));
 });
 
+// Consulta se o comprador logado tem assinatura ATIVA com o produtor desse evento — usado na tela
+// de compra pra oferecer o desconto/cortesia do plano, se ele tiver e quiser usar.
+app.get('/api/public/eventos/:slug/minha-assinatura', auth, (req, res) => {
+  const ref = db.ticketSlugs[req.params.slug];
+  if (!ref) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const ev = EVENTOS.find(e => e.id === ref.eventoId);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const meusPlanosDoProdutor = new Set(PLANOS.filter(p => p.produtorId === ev.organizadorId).map(p => p.id));
+  const assinatura = ASSINATURAS.find(a => a.assinanteUserId === req.user.id && a.status === 'ativa' && meusPlanosDoProdutor.has(a.planoId));
+  if (!assinatura) return res.json({ temAssinatura: false });
+  const plano = PLANOS.find(p => p.id === assinatura.planoId);
+  res.json({
+    temAssinatura: true, planoNome: plano.nome,
+    descontoPercentual: plano.descontoPercentual,
+    cortesiasDisponiveis: Math.max(0, plano.cortesiasPorCiclo - (assinatura.cortesiasUsadasNesteCiclo || 0))
+  });
+});
+
 app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   const ref = db.ticketSlugs[req.params.slug];
   if (!ref) return res.status(404).json({ error: 'Evento não encontrado.' });
@@ -2414,6 +2438,30 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       desconto = cupomObj.tipo === 'fixo' ? cupomObj.valor : Math.round(subtotal * (cupomObj.valor/100) * 100) / 100;
       desconto = Math.min(desconto, subtotal);
     }
+    // Benefícios do Clube de Assinantes — só aplica se o comprador estiver logado, tiver assinatura
+    // ATIVA com esse produtor especificamente, e tiver optado por usar o benefício nessa compra.
+    let assinaturaAtivaDoProdutor = null;
+    if (compradorUserId) {
+      const meusPlanosDoProdutor = new Set(PLANOS.filter(p => p.produtorId === ev.organizadorId).map(p => p.id));
+      assinaturaAtivaDoProdutor = ASSINATURAS.find(a => a.assinanteUserId === compradorUserId && a.status === 'ativa' && meusPlanosDoProdutor.has(a.planoId));
+    }
+    const planoDaAssinatura = assinaturaAtivaDoProdutor ? PLANOS.find(p => p.id === assinaturaAtivaDoProdutor.planoId) : null;
+    if (planoDaAssinatura && req.body.usarDescontoAssinatura && planoDaAssinatura.descontoPercentual > 0) {
+      // O desconto da assinatura substitui o cupom (não soma) — evita empilhar dois descontos e
+      // fica mais simples de explicar pro comprador qual desconto está sendo usado.
+      const descontoAssinatura = Math.round(subtotal * (planoDaAssinatura.descontoPercentual/100) * 100) / 100;
+      if (descontoAssinatura > desconto) { desconto = descontoAssinatura; cupomObj = null; }
+    }
+    let cortesiaAssinaturaUsada = false;
+    if (planoDaAssinatura && req.body.usarCortesiaAssinatura
+        && assinaturaAtivaDoProdutor.cortesiasUsadasNesteCiclo < planoDaAssinatura.cortesiasPorCiclo
+        && itensDetalhados.length) {
+      // Usa a cortesia no item mais barato do carrinho (só uma unidade dele) — assim o comprador
+      // aproveita o benefício sem precisar escolher manualmente qual ingresso vai ficar grátis.
+      const itemMaisBarato = itensDetalhados.reduce((menor, it) => it.precoUnit < menor.precoUnit ? it : menor, itensDetalhados[0]);
+      desconto = Math.min(desconto + itemMaisBarato.precoUnit, subtotal);
+      cortesiaAssinaturaUsada = true;
+    }
     // valorIngressos é o que o produtor recebe integralmente (100%).
     // A taxa administrativa é cobrada À PARTE, como acréscimo pago pelo comprador — não sai do valor do produtor.
     const valorIngressos = Math.round((subtotal - desconto) * 100) / 100;
@@ -2441,10 +2489,18 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         comprador: { nome: sanitize(comprador.nome,100), email: comprador.email, telefone: sanitize(comprador.telefone||'',30) },
         compradorUserId,
         itens: itensDetalhados, subtotal, desconto, valorIngressos: 0, taxaAdministrativa: 0, total: 0, cupomUsado: cupomObj?.codigo || null,
-        promoterRef: promoterObj?.id || null, mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString()
+        promoterRef: promoterObj?.id || null, mpPaymentId: 'CORTESIA', tickets: [], createdAt: new Date().toISOString(),
+        assinaturaBeneficioId: assinaturaAtivaDoProdutor?.id || null, cortesiaAssinaturaUsada, cortesiaAssinaturaDebitada: false
       };
       gerarTicketsEAtualizar(ev, pedido, cupomObj, promoterObj);
       PEDIDOS.push(pedido); persistPedidos(); persistEventos();
+      // Como esse pedido já nasce pago (não passa por confirmação de pagamento depois), debitamos
+      // a cortesia da assinatura imediatamente.
+      if (cortesiaAssinaturaUsada && assinaturaAtivaDoProdutor && !pedido.cortesiaAssinaturaDebitada) {
+        assinaturaAtivaDoProdutor.cortesiasUsadasNesteCiclo = (assinaturaAtivaDoProdutor.cortesiasUsadasNesteCiclo || 0) + 1;
+        pedido.cortesiaAssinaturaDebitada = true;
+        persistAssinaturas();
+      }
       pedido.emailEnviado = await enviarEmailIngressos(pedido, ev, baseUrl);
       persistPedidos();
       return res.json({ ok: true, pedidoId, cortesia: true });
@@ -2469,6 +2525,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       compradorUserId, provedorPagamento: db.provedorPagamento,
       itens: itensDetalhados, subtotal, desconto, valorIngressos, taxaAdministrativa, creditoAplicado, total, cupomUsado: cupomObj?.codigo || null, promoterRef: promoterObj?.id || null,
       mpPaymentId: null, tickets: [], createdAt: new Date().toISOString(),
+      assinaturaBeneficioId: assinaturaAtivaDoProdutor?.id || null, cortesiaAssinaturaUsada, cortesiaAssinaturaDebitada: false,
       // Se o pagamento não for confirmado até esse horário, a reserva do ingresso/assento é liberada
       // automaticamente (ver job de limpeza mais abaixo) — evita que tentativas abandonadas travem
       // vagas pra sempre num evento concorrido.
@@ -2840,6 +2897,16 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
 async function processarPagamentoAprovado(pedido, paymentId, baseUrl) {
   if (pedido.status === 'pago') return;
   pedido.status = 'pago'; pedido.pagoEm = new Date().toISOString();
+  // Debita a cortesia da assinatura só agora que o pagamento foi confirmado de verdade (nunca na
+  // hora da reserva) — evita descontar cortesia de compras que acabam não sendo pagas.
+  if (pedido.cortesiaAssinaturaUsada && !pedido.cortesiaAssinaturaDebitada && pedido.assinaturaBeneficioId) {
+    const assinaturaBeneficio = ASSINATURAS.find(a => a.id === pedido.assinaturaBeneficioId);
+    if (assinaturaBeneficio) {
+      assinaturaBeneficio.cortesiasUsadasNesteCiclo = (assinaturaBeneficio.cortesiasUsadasNesteCiclo || 0) + 1;
+      persistAssinaturas();
+    }
+    pedido.cortesiaAssinaturaDebitada = true;
+  }
   const checkoutIdOriginal = String(paymentId);
   pedido.mpPaymentId = checkoutIdOriginal;
   // No Asaas, o "paymentId" que chega aqui (do webhook de Checkout ou da consulta de status) é o
@@ -2914,6 +2981,44 @@ async function concederCreditoIndicacao(compradorUserId, baseUrl) {
 
 app.post('/api/mp/webhook', async (req, res) => {
   try {
+    // Notificações de ASSINATURA (clube de assinantes) — vêm com type diferente de "payment",
+    // então tratamos ANTES do webhook de pagamento normal ignorar essas notificações.
+    const tipoNotif = req.body?.type || req.query.type;
+    if (tipoNotif === 'subscription_preapproval') {
+      const idAssinaturaMp = req.body?.data?.id || req.query['data.id'];
+      const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === idAssinaturaMp);
+      if (assinatura && MP_PLATFORM_TOKEN) {
+        const consulta = await fetch(`${MP_API}/preapproval/${idAssinaturaMp}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
+        const dados = await consulta.json();
+        if (consulta.ok) {
+          if (dados.status === 'authorized' && assinatura.status !== 'ativa') {
+            assinatura.status = 'ativa';
+            assinatura.cicloAtualInicio = new Date().toISOString();
+            assinatura.cicloAtualFim = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+            assinatura.cortesiasUsadasNesteCiclo = 0;
+            persistAssinaturas();
+          } else if (['cancelled', 'paused'].includes(dados.status)) {
+            assinatura.status = 'cancelada'; assinatura.canceladoEm = new Date().toISOString();
+            persistAssinaturas();
+          }
+        }
+      }
+      return res.sendStatus(200);
+    }
+    if (tipoNotif === 'subscription_authorized_payment') {
+      // Cada cobrança mensal aprovada renova o ciclo — zera as cortesias usadas, pra contar de novo.
+      const idAssinaturaMp = req.body?.data?.preapproval_id;
+      const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === idAssinaturaMp);
+      if (assinatura) {
+        assinatura.status = 'ativa';
+        assinatura.cicloAtualInicio = new Date().toISOString();
+        assinatura.cicloAtualFim = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+        assinatura.cortesiasUsadasNesteCiclo = 0;
+        persistAssinaturas();
+      }
+      return res.sendStatus(200);
+    }
+
     // O Mercado Pago pode notificar em dois formatos diferentes:
     // novo:  type=payment  & data.id=X   (no corpo JSON ou na query)
     // antigo (IPN): topic=payment & id=X (só na query)
@@ -2986,6 +3091,24 @@ app.post('/api/asaas/webhook', async (req, res) => {
     // usado quando a cobrança nasce do Asaas Checkout (nosso caso, desde a migração pro checkout
     // hospedado com opção de parcelamento).
     if (checkout && checkout.externalReference) {
+      // Clube de assinantes — identificado pelo prefixo "assinatura:" no externalReference
+      if (checkout.externalReference.startsWith('assinatura:')) {
+        const assinaturaId = checkout.externalReference.slice('assinatura:'.length);
+        const assinatura = ASSINATURAS.find(a => a.id === assinaturaId);
+        if (assinatura && (evento === 'CHECKOUT_PAID' || evento === 'PAYMENT_CONFIRMED' || evento === 'PAYMENT_RECEIVED')) {
+          // Toda cobrança aprovada (a primeira e cada renovação seguinte) reinicia o ciclo de
+          // benefícios — zera as cortesias usadas, pra contar de novo a partir desse pagamento.
+          assinatura.status = 'ativa';
+          assinatura.idExternoAssinatura = payment?.subscription || assinatura.idExternoAssinatura;
+          assinatura.cicloAtualInicio = new Date().toISOString();
+          assinatura.cicloAtualFim = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+          assinatura.cortesiasUsadasNesteCiclo = 0;
+          persistAssinaturas();
+        } else if (!assinatura) {
+          console.error(`[Webhook Asaas] Assinatura "${assinaturaId}" não encontrada (evento: ${evento}).`);
+        }
+        return res.sendStatus(200);
+      }
       // Recarga de saldo do bar — identificada pelo prefixo "recarga:" no externalReference
       if (checkout.externalReference.startsWith('recarga:')) {
         const recargaId = checkout.externalReference.slice('recarga:'.length);
@@ -3025,6 +3148,23 @@ app.post('/api/asaas/webhook', async (req, res) => {
     }
 
     if (!payment) { console.log('[Webhook Asaas] Evento recebido sem payment (evento:', evento, ') — ignorado.'); return res.sendStatus(200); }
+    // Renovação de assinatura (a partir do 2º mês) — vem como pagamento normal, com o campo
+    // "subscription" preenchido, sem passar de novo pelo checkout (só a primeira cobrança passa
+    // pelo checkout; as seguintes o Asaas gera e cobra automaticamente).
+    if (payment.subscription) {
+      const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === payment.subscription);
+      if (assinatura && ['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento)) {
+        assinatura.status = 'ativa';
+        assinatura.cicloAtualInicio = new Date().toISOString();
+        assinatura.cicloAtualFim = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+        assinatura.cortesiasUsadasNesteCiclo = 0;
+        persistAssinaturas();
+      } else if (assinatura && evento === 'PAYMENT_OVERDUE') {
+        assinatura.status = 'inadimplente';
+        persistAssinaturas();
+      }
+      return res.sendStatus(200);
+    }
     // Em alguns casos o Asaas manda o pagamento com "externalReference" nulo (mesmo vindo de um
     // Checkout que tinha isso preenchido) — quando isso acontece, usamos o "checkoutSession" como
     // identificador alternativo, já que é o ID do checkout que guardamos em pedido.mpPaymentId
@@ -3815,6 +3955,166 @@ app.get('/api/produtor/financeiro', auth, organizadorOnly, (req, res) => {
   }
 
   res.json({ totalReceita, totalPedidos: pedidosPagos.length, porEvento, ultimos12Meses, ultimos30Dias });
+});
+
+// ── CLUBE DE ASSINANTES — planos mensais com benefícios ──────────────────────
+// Um plano é do PRODUTOR (não de um evento específico) — funciona pra todos os eventos dele, igual
+// o modelo usado por casas de show/artistas com clube de fãs (cortesia mensal, desconto, acesso
+// antecipado). O pagamento recorrente em si (Mercado Pago/Asaas) entra numa etapa seguinte — por
+// agora, essas rotas cuidam só de criar/editar/listar os planos.
+app.get('/api/produtor/planos', auth, organizadorOnly, (req, res) => {
+  const meusPlanos = PLANOS.filter(p => p.produtorId === req.user.id);
+  res.json({ planos: meusPlanos });
+});
+app.post('/api/produtor/planos', auth, organizadorOnly, (req, res) => {
+  const { nome, preco, cortesiasPorCiclo, descontoPercentual, acessoAntecipado, antecedenciaHoras, beneficios } = req.body;
+  const nomeLimpo = sanitize(nome || '', 60);
+  const precoNum = Math.max(1, parseFloat(preco) || 0);
+  if (!nomeLimpo) return res.status(400).json({ error: 'Dê um nome ao plano (ex: "Solo", "Dueto").' });
+  if (precoNum <= 0) return res.status(400).json({ error: 'Informe o valor mensal do plano.' });
+  const beneficiosLimpos = Array.isArray(beneficios) ? beneficios.map(b => sanitize(b || '', 200)).filter(Boolean).slice(0, 20) : [];
+  const plano = {
+    id: uuidv4(), produtorId: req.user.id, nome: nomeLimpo, preco: precoNum,
+    cortesiasPorCiclo: Math.max(0, parseInt(cortesiasPorCiclo) || 0),
+    descontoPercentual: Math.max(0, Math.min(100, parseInt(descontoPercentual) || 0)),
+    acessoAntecipado: !!acessoAntecipado,
+    antecedenciaHoras: Math.max(0, parseInt(antecedenciaHoras) || 24),
+    beneficios: beneficiosLimpos, ativo: true, createdAt: new Date().toISOString(),
+    idPlanoMercadoPago: null, idPlanoAsaas: null
+  };
+  PLANOS.push(plano);
+  persistPlanos();
+  res.status(201).json({ plano });
+});
+app.patch('/api/produtor/planos/:id', auth, organizadorOnly, (req, res) => {
+  const plano = PLANOS.find(p => p.id === req.params.id && p.produtorId === req.user.id);
+  if (!plano) return res.status(404).json({ error: 'Plano não encontrado.' });
+  const { nome, preco, cortesiasPorCiclo, descontoPercentual, acessoAntecipado, antecedenciaHoras, beneficios, ativo } = req.body;
+  if (nome !== undefined) plano.nome = sanitize(nome, 60);
+  if (preco !== undefined) plano.preco = Math.max(1, parseFloat(preco) || plano.preco);
+  if (cortesiasPorCiclo !== undefined) plano.cortesiasPorCiclo = Math.max(0, parseInt(cortesiasPorCiclo) || 0);
+  if (descontoPercentual !== undefined) plano.descontoPercentual = Math.max(0, Math.min(100, parseInt(descontoPercentual) || 0));
+  if (acessoAntecipado !== undefined) plano.acessoAntecipado = !!acessoAntecipado;
+  if (antecedenciaHoras !== undefined) plano.antecedenciaHoras = Math.max(0, parseInt(antecedenciaHoras) || 24);
+  if (Array.isArray(beneficios)) plano.beneficios = beneficios.map(b => sanitize(b || '', 200)).filter(Boolean).slice(0, 20);
+  // Desativar um plano NÃO cancela quem já é assinante — só impede gente nova de assinar.
+  if (ativo !== undefined) plano.ativo = !!ativo;
+  persistPlanos();
+  res.json({ plano });
+});
+app.delete('/api/produtor/planos/:id', auth, organizadorOnly, (req, res) => {
+  const plano = PLANOS.find(p => p.id === req.params.id && p.produtorId === req.user.id);
+  if (!plano) return res.status(404).json({ error: 'Plano não encontrado.' });
+  const temAssinantesAtivos = ASSINATURAS.some(a => a.planoId === plano.id && a.status === 'ativa');
+  if (temAssinantesAtivos) return res.status(400).json({ error: 'Esse plano tem assinantes ativos — desative em vez de excluir, ou cancele as assinaturas primeiro.' });
+  PLANOS = PLANOS.filter(p => p.id !== plano.id);
+  persistPlanos();
+  res.json({ ok: true });
+});
+
+// Lista pública dos planos ATIVOS de um produtor — usado na tela onde o fã escolhe assinar.
+app.get('/api/public/organizadores/:slug/planos', (req, res) => {
+  const produtor = db.users.find(u => u.organizadorSlug === req.params.slug && u.isOrganizador);
+  if (!produtor) return res.status(404).json({ error: 'Produtor não encontrado.' });
+  const planosAtivos = PLANOS.filter(p => p.produtorId === produtor.id && p.ativo);
+  res.json({ produtorNome: produtor.nomePublico || produtor.nome, planos: planosAtivos });
+});
+
+// Cria a assinatura de verdade — o fã escolhe o provedor (o mesmo configurado pelo admin pra
+// pagamentos normais já indica qual usar, mas aceitamos escolher explicitamente também).
+app.post('/api/public/planos/:planoId/assinar', auth, async (req, res) => {
+  const plano = PLANOS.find(p => p.id === req.params.planoId && p.ativo);
+  if (!plano) return res.status(404).json({ error: 'Plano não encontrado ou não está mais disponível.' });
+  const jaAssina = ASSINATURAS.find(a => a.planoId === plano.id && a.assinanteUserId === req.user.id && ['ativa', 'pendente'].includes(a.status));
+  if (jaAssina) return res.status(400).json({ error: 'Você já tem uma assinatura ativa (ou pendente) pra esse plano.' });
+
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const baseUrl = `${proto}://${req.get('host')}`;
+  const provedor = db.provedorPagamento || 'mercadopago';
+
+  try {
+    if (provedor === 'asaas') {
+      if (!ASAAS_API_KEY) return res.status(500).json({ error: 'Assinaturas indisponíveis no momento (Asaas não configurado).' });
+      const assinaturaIdPreGerado = uuidv4();
+      const checkoutBody = {
+        billingTypes: ['CREDIT_CARD'],
+        chargeTypes: ['RECURRENT'],
+        minutesToExpire: 60,
+        callback: {
+          successUrl: `${baseUrl}/assinatura-sucesso.html`,
+          cancelUrl: `${baseUrl}/assinar.html`,
+          expiredUrl: `${baseUrl}/assinar.html`
+        },
+        items: [{ description: `Assinatura ${plano.nome}`, name: plano.nome, quantity: 1, value: plano.preco }],
+        customerData: { name: req.user.nome, email: req.user.email, cpfCnpj: (req.user.cpf || '').replace(/[^\d]/g, '') || undefined },
+        subscription: { cycle: 'MONTHLY', nextDueDate: new Date().toISOString().slice(0, 10) },
+        externalReference: `assinatura:${assinaturaIdPreGerado}`
+      };
+      const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
+      if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar assinatura no Asaas.' });
+
+      const assinatura = {
+        id: assinaturaIdPreGerado, planoId: plano.id, produtorId: plano.produtorId,
+        assinanteUserId: req.user.id, assinanteEmail: req.user.email, assinanteNome: req.user.nome,
+        status: 'pendente', provedorPagamento: 'asaas', idExternoAssinatura: null, idCheckoutAsaas: criacao.data.id,
+        cicloAtualInicio: null, cicloAtualFim: null, cortesiasUsadasNesteCiclo: 0,
+        createdAt: new Date().toISOString(), canceladoEm: null
+      };
+      ASSINATURAS.push(assinatura);
+      persistAssinaturas();
+      return res.json({ redirectUrl: criacao.data.link });
+    }
+
+    // Mercado Pago — cria (ou reaproveita) o plano de assinatura, depois vincula esse assinante a ele.
+    if (!MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Assinaturas indisponíveis no momento (Mercado Pago não configurado).' });
+    let idPlanoMp = plano.idPlanoMercadoPago;
+    if (!idPlanoMp) {
+      const criaPlano = await fetch(`${MP_API}/preapproval_plan`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: `Assinatura ${plano.nome}`,
+          auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: plano.preco, currency_id: 'BRL' },
+          back_url: `${baseUrl}/assinatura-sucesso.html`
+        })
+      });
+      const dadosPlano = await criaPlano.json();
+      if (!criaPlano.ok) return res.status(400).json({ error: dadosPlano.message || 'Erro ao criar plano de assinatura no Mercado Pago.' });
+      idPlanoMp = dadosPlano.id;
+      plano.idPlanoMercadoPago = idPlanoMp;
+      persistPlanos();
+    }
+    const criaAssinatura = await fetch(`${MP_API}/preapproval`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preapproval_plan_id: idPlanoMp, payer_email: req.user.email, back_url: `${baseUrl}/assinatura-sucesso.html` })
+    });
+    const dadosAssinatura = await criaAssinatura.json();
+    if (!criaAssinatura.ok) return res.status(400).json({ error: dadosAssinatura.message || 'Erro ao criar assinatura no Mercado Pago.' });
+
+    const assinatura = {
+      id: uuidv4(), planoId: plano.id, produtorId: plano.produtorId,
+      assinanteUserId: req.user.id, assinanteEmail: req.user.email, assinanteNome: req.user.nome,
+      status: 'pendente', provedorPagamento: 'mercadopago', idExternoAssinatura: dadosAssinatura.id, idCheckoutAsaas: null,
+      cicloAtualInicio: null, cicloAtualFim: null, cortesiasUsadasNesteCiclo: 0,
+      createdAt: new Date().toISOString(), canceladoEm: null
+    };
+    ASSINATURAS.push(assinatura);
+    persistAssinaturas();
+    res.json({ redirectUrl: dadosAssinatura.init_point });
+  } catch (e) {
+    console.error('Erro ao criar assinatura:', e.message);
+    res.status(500).json({ error: 'Erro ao processar a assinatura. Tente novamente.' });
+  }
+});
+
+// Lista as assinaturas do fã logado, e as do produtor (assinantes do seu clube).
+app.get('/api/auth/minhas-assinaturas', auth, (req, res) => {
+  const minhas = ASSINATURAS.filter(a => a.assinanteUserId === req.user.id).map(a => ({ ...a, plano: PLANOS.find(p => p.id === a.planoId) }));
+  res.json({ assinaturas: minhas });
+});
+app.get('/api/produtor/assinantes', auth, organizadorOnly, (req, res) => {
+  const meusPlanosIds = new Set(PLANOS.filter(p => p.produtorId === req.user.id).map(p => p.id));
+  const assinantes = ASSINATURAS.filter(a => meusPlanosIds.has(a.planoId)).map(a => ({ ...a, plano: PLANOS.find(p => p.id === a.planoId) }));
+  res.json({ assinantes });
 });
 
 app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
