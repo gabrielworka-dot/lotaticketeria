@@ -103,19 +103,39 @@ async function init(){
   if(AT){ try{ const d=await api('GET','/api/auth/me'); CU=d.user; }catch(e){ AT=null; } }
   try{
     const d=await api('GET','/api/organizadores/'+slug);
-    render(d);
+    let planosData={planos:[]};
+    try{ planosData=await api('GET','/api/public/organizadores/'+slug+'/planos'); }catch(e){}
+    render(d,planosData.planos);
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty">'+esc(e.message)+'</div>';
   }
 }
 
 let ORGANIZADOR_ID=null;
-function render(d){
+function render(d,planos){
   const org=d.organizador;
   ORGANIZADOR_ID=org.id;
   if(org.bannerUrl) document.getElementById('bannerEl').innerHTML='<img src="'+esc(org.bannerUrl)+'">';
   const jaLogado=!!CU;
   const ehEuMesmo=CU&&CU.organizadorSlug===slug;
+  const planosHtml=(planos&&planos.length)?`
+    <div class="section-title">🎫 Torne-se membro</div>
+    <p style="font-size:13px;color:var(--text2,#A09880);margin-bottom:16px;padding:0 20px">Assine um plano e ganhe cortesias mensais, desconto em ingressos e acesso antecipado aos eventos de ${esc(org.nome)}.</p>
+    <div style="display:flex;flex-direction:column;gap:14px;padding:0 20px 20px">
+      ${planos.map(p=>`
+        <div style="background:var(--card,#161410);border:1px solid var(--border,#2A2822);border-radius:14px;padding:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><div style="font-weight:800;font-size:17px">${esc(p.nome)}</div><div style="font-size:22px;font-weight:900;color:var(--p2,#E8961A)">R$${p.preco.toFixed(2).replace('.',',')}<span style="font-size:12px;color:var(--text3,#605848);font-weight:600">/mês</span></div></div>
+            <button class="btn bp" style="white-space:nowrap" onclick="assinarPlano('${p.id}')">Assinar</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            ${p.cortesiasPorCiclo>0?'<span style="background:var(--bg3,#1E1C18);border:1px solid var(--border,#2A2822);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text2,#A09880)">🎁 '+p.cortesiasPorCiclo+' cortesia(s)/mês</span>':''}
+            ${p.descontoPercentual>0?'<span style="background:var(--bg3,#1E1C18);border:1px solid var(--border,#2A2822);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text2,#A09880)">🏷️ '+p.descontoPercentual+'% de desconto</span>':''}
+            ${p.acessoAntecipado?'<span style="background:var(--bg3,#1E1C18);border:1px solid var(--border,#2A2822);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text2,#A09880)">⏰ Acesso antecipado</span>':''}
+          </div>
+          ${p.beneficios?.length?'<ul style="margin:12px 0 0 18px;font-size:12.5px;color:var(--text2,#A09880);line-height:1.6">'+p.beneficios.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul>':''}
+        </div>`).join('')}
+    </div>`:'';
   document.getElementById('app').innerHTML=`
     <div class="profile-hdr">
       <div class="avatar">${org.avatarUrl?'<img src="'+esc(org.avatarUrl)+'" style="width:100%;height:100%;object-fit:cover;border-radius:16px">':esc(org.nome.charAt(0).toUpperCase())}</div>
@@ -124,6 +144,7 @@ function render(d){
       <div class="p-stats"><span><strong>${org.seguidores}</strong> seguidores</span><span><strong>${d.eventos.length}</strong> eventos</span></div>
       ${!ehEuMesmo?'<button class="btn '+(org.jaSegue?'bo seguindo':'bo')+'" id="btnSeguir" onclick="toggleSeguir()">'+(jaLogado?(org.jaSegue?'✓ Seguindo':'+ Seguir'):'Entre para seguir')+'</button>':''}
     </div>
+    ${planosHtml}
     <div class="section-title">Próximos eventos</div>
     <div class="event-grid" id="eventosGrid">${d.eventos.length?d.eventos.map(e=>`
       <div class="event-card" onclick="location.href='/e/${e.slug}'">
@@ -131,6 +152,14 @@ function render(d){
         <div class="event-body"><div class="event-name">${esc(e.nome)}</div><div class="event-meta">${parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')} · ${esc(e.cidade||'')}</div></div>
       </div>`).join(''):'<div class="empty">Nenhum evento publicado ainda.</div>'}</div>
   `;
+}
+async function assinarPlano(planoId){
+  if(!CU){ alert('Você precisa estar logado pra assinar um plano. Faça login e tente novamente.'); location.href='/'; return; }
+  if(!confirm('Confirma a assinatura? Você será redirecionado pra finalizar o pagamento — a cobrança se repete todo mês até você cancelar.')) return;
+  try{
+    const d=await api('POST','/api/public/planos/'+planoId+'/assinar',{});
+    location.href=d.redirectUrl;
+  }catch(e){ alert(e.message); }
 }
 
 async function toggleSeguir(){
