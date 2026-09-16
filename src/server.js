@@ -1071,7 +1071,11 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
         contadorPorSetor[label] = Math.max(contadorPorSetor[label] || 0, numero);
       }
       return {
-        id: (z.id && /^[a-zA-Z0-9_-]{1,60}$/.test(z.id)) ? z.id : uuidv4(),
+        // Corrigido: um bug em algum ponto anterior deixava passar a PALAVRA "undefined" como se
+        // fosse um ID válido (ela bate com o padrão de letras/números da regex) — isso fazia várias
+        // áreas sem ID de verdade colapsarem pro mesmo identificador, aparecendo todas como ocupadas
+        // ao mesmo tempo pra qualquer comprador. Agora rejeitamos essas palavras explicitamente.
+        id: (z.id && !['undefined', 'null', 'nan'].includes(String(z.id).toLowerCase()) && /^[a-zA-Z0-9_-]{1,60}$/.test(z.id)) ? z.id : uuidv4(),
         x: Math.max(0, Math.min(100, parseFloat(z.x) || 0)),
         y: Math.max(0, Math.min(100, parseFloat(z.y) || 0)),
         w: Math.max(0.5, Math.min(100, parseFloat(z.w) || 1)),
@@ -2392,6 +2396,13 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       const lote = ev.lotes.find(l => l.id === it.loteId);
       if (!lote || !lote.ativo) return res.status(400).json({ error: 'Lote indisponível.' });
       if (it.assento) {
+        // Blindagem: nunca aceita um código de assento que seja literalmente a palavra "undefined"
+        // (ou "null"/"nan") — isso indica um bug no frontend enviando um valor que não existe de
+        // verdade, e se deixasse passar, várias áreas sem ID colapsariam pro mesmo identificador
+        // corrompido, fazendo tudo aparecer como ocupado pra qualquer comprador depois.
+        if (['undefined', 'null', 'nan', ''].includes(String(it.assento).toLowerCase())) {
+          return res.status(400).json({ error: 'Não foi possível identificar esse assento — atualize a página e escolha de novo.' });
+        }
         // Compra com assento marcado — cada assento é único, sem quantidade agregada
         if (assentosOcupadosAtuais.includes(it.assento) || assentosSelecionadosNestePedido.includes(it.assento)) {
           return res.status(400).json({ error: `O assento ${it.assento} já foi vendido ou está reservado por outra pessoa. Escolha outro.` });
@@ -4115,6 +4126,34 @@ app.get('/api/produtor/assinantes', auth, organizadorOnly, (req, res) => {
   const meusPlanosIds = new Set(PLANOS.filter(p => p.produtorId === req.user.id).map(p => p.id));
   const assinantes = ASSINATURAS.filter(a => meusPlanosIds.has(a.planoId)).map(a => ({ ...a, plano: PLANOS.find(p => p.id === a.planoId) }));
   res.json({ assinantes });
+});
+
+// Corrige o bug do assento "undefined" — limpa entradas corrompidas de assentosOcupados e
+// regenera o ID de qualquer zona que tenha ficado com esse valor quebrado. Roda uma vez só,
+// em todos os eventos, e diz exatamente o que corrigiu em cada um.
+app.post('/api/admin/limpar-assentos-corrompidos', auth, adminOnly, (req, res) => {
+  const VALORES_INVALIDOS = ['undefined', 'null', 'nan', ''];
+  const relatorio = [];
+  for (const ev of EVENTOS) {
+    let mudou = false;
+    const antesOcupados = (ev.assentosOcupados || []).length;
+    if (ev.assentosOcupados) {
+      ev.assentosOcupados = ev.assentosOcupados.filter(a => !VALORES_INVALIDOS.includes(String(a).toLowerCase()));
+      if (ev.assentosOcupados.length !== antesOcupados) mudou = true;
+    }
+    let zonasCorrigidas = 0;
+    if (ev.mapaVenueZonas) {
+      ev.mapaVenueZonas.forEach(z => {
+        if (VALORES_INVALIDOS.includes(String(z.id).toLowerCase())) { z.id = uuidv4(); zonasCorrigidas++; mudou = true; }
+      });
+    }
+    if (mudou) {
+      relatorio.push({ eventoId: ev.id, eventoNome: ev.nome, assentosRemovidos: antesOcupados - (ev.assentosOcupados || []).length, zonasCorrigidas });
+    }
+  }
+  if (relatorio.length) persistEventos();
+  registrarAuditoria(req.user, 'limpou_assentos_corrompidos', { eventosAfetados: relatorio.length });
+  res.json({ ok: true, eventosCorrigidos: relatorio });
 });
 
 app.get('/api/admin/financeiro.csv', auth, adminOnly, (req, res) => {
