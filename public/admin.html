@@ -859,9 +859,15 @@ async function carregarMensagens(){
           <button class="btn ${m.respondida?'bo':'bp'} btn-sm" onclick="marcarMensagem('${m.id}',${!m.respondida})">${m.respondida?'Marcar como pendente':'Marcar como respondida'}</button>
         </div>
         <p style="font-size:13px;color:var(--text2);margin-top:10px;white-space:pre-wrap">${esc(m.mensagem)}</p>
-        <a href="mailto:${esc(m.email)}" class="btn bo btn-sm" style="margin-top:8px;display:inline-block">✉️ Responder por e-mail</a>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <a href="mailto:${esc(m.email)}" class="btn bo btn-sm" style="display:inline-block">✉️ Responder por e-mail</a>
+          <button class="btn bo btn-sm" onclick="copiarEmailMensagem('${esc(m.email)}')">📋 Copiar e-mail</button>
+        </div>
       </div>`).join('');
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function copiarEmailMensagem(email){
+  navigator.clipboard?.writeText(email).then(()=>toast('E-mail copiado! Cola no Titan Webmail.','ok')).catch(()=>toast('Não foi possível copiar.','err'));
 }
 async function marcarMensagem(id,respondida){
   try{ await api('PATCH','/api/admin/mensagens/'+id,{respondida}); carregarMensagens(); }
