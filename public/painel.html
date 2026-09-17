@@ -633,7 +633,6 @@ function renderEventoDetalhe(){
       <div class="tab" onclick="evTab('pixels',this)">📊 Pixels/Analytics</div>
       <div class="tab" onclick="evTab('relatorios',this)">📈 Relatórios</div>
       <div class="tab" onclick="evTab('pedidos',this)">📦 Pedidos</div>
-      <div class="tab" onclick="evTab('mensagens',this)">📩 Mensagens</div>
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'checkin\',this)">🚪 Check-in</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'bar\',this)">🍹 Bar</div>'}
       ${SOMENTE_LEITURA?'':'<div class="tab" onclick="evTab(\'equipe\',this)">👥 Equipe</div>'}
@@ -647,7 +646,6 @@ function renderEventoDetalhe(){
     <div id="evTabPixels" style="display:none"></div>
     <div id="evTabRelatorios" style="display:none"></div>
     <div id="evTabPedidos" style="display:none"></div>
-    <div id="evTabMensagens" style="display:none"></div>
     <div id="evTabCheckin" style="display:none"></div>
     <div id="evTabBar" style="display:none"></div>
     <div id="evTabEquipe" style="display:none"></div>
@@ -657,7 +655,7 @@ function renderEventoDetalhe(){
 }
 
 function evTab(tab,el){
-  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Pedidos','Mensagens','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
+  ['Geral','Lotes','Assentos','Cupons','Promoters','Pixels','Relatorios','Pedidos','Checkin','Bar','Equipe','Repasses'].forEach(t=>{const e=document.getElementById('evTab'+t);if(e)e.style.display='none';});
   document.getElementById('evTab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='block';
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -668,7 +666,6 @@ function evTab(tab,el){
   if(tab==='pixels') renderTabPixels();
   if(tab==='relatorios') renderTabRelatorios();
   if(tab==='pedidos') renderTabPedidos();
-  if(tab==='mensagens') renderTabMensagens();
   if(tab==='checkin') renderTabCheckin();
   if(tab==='bar') renderTabBar();
   if(tab==='equipe') renderTabEquipe();
@@ -1334,23 +1331,6 @@ async function renderTabPedidos(){
         return '<tr><td>'+esc(p.comprador?.nome||'—')+'<br><span style="font-size:10px;color:var(--text3)">'+esc(p.comprador?.email||'')+'</span></td><td>'+qtd+' ingresso(s)</td><td style="font-size:12px">'+assentosTexto+'</td><td>'+new Date(p.createdAt).toLocaleDateString('pt-BR')+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
-}
-async function renderTabMensagens(){
-  const el=document.getElementById('evTabMensagens');
-  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
-  try{
-    const d=await api('GET','/api/eventos/'+EV_ATUAL.id+'/mensagens');
-    if(!d.mensagens.length){ el.innerHTML='<div class="card"><div class="empty" style="padding:20px"><span class="empty-ic">📩</span><p>Nenhuma mensagem recebida sobre este evento ainda.</p></div></div>'; return; }
-    el.innerHTML='<div class="card"><div class="ct">Mensagens sobre este evento</div>'
-      +d.mensagens.map(m=>'<div style="border-bottom:1px solid var(--border);padding:14px 0"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><strong>'+esc(m.nome)+'</strong> <span style="color:var(--text3);font-size:11px">('+esc(m.email)+')</span></div>'
-        +(SOMENTE_LEITURA?'':'<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3);white-space:nowrap;cursor:pointer"><input type="checkbox" '+(m.respondida?'checked':'')+' onchange="marcarMensagemRespondida(\''+m.id+'\',this.checked)"> Respondida</label>')
-        +'</div><p style="font-size:13px;color:var(--text2);margin-top:6px;white-space:pre-wrap">'+esc(m.mensagem)+'</p><div style="font-size:11px;color:var(--text3);margin-top:6px">'+new Date(m.createdAt).toLocaleString('pt-BR')+'</div></div>').join('')
-      +'</div>';
-  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
-}
-async function marcarMensagemRespondida(id,respondida){
-  try{ await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/mensagens/'+id,{respondida}); }
-  catch(e){ toast(e.message,'err'); }
 }
 async function renderTabEquipe(){
   const el=document.getElementById('evTabEquipe');
