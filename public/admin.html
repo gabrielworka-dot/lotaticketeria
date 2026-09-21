@@ -292,6 +292,18 @@ a{color:inherit;}
   </div>
 </div>
 
+<!-- MODAL DE BORDERÔ — fechamento financeiro do evento, edição restrita ao admin -->
+<div id="borderoModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <h2 id="borderoModalTitulo" style="font-size:18px;font-weight:800">Borderô</h2>
+      <button onclick="document.getElementById('borderoModal').style.display='none'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px">Documento de fechamento financeiro do evento — o resumo de vendas vem automático (não editável); despesas e observações são preenchidas na hora de fechar as contas.</p>
+    <div id="borderoModalConteudo"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
+  </div>
+</div>
+
 <!-- MODAL DE RECUPERAÇÃO MANUAL DE PEDIDO -->
 <div id="recuperarModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:250;align-items:center;justify-content:center;padding:16px">
   <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto">
@@ -609,7 +621,7 @@ async function carregarEventos(){
     const d=await api('GET','/api/admin/eventos');
     if(!d.eventos.length){ el.innerHTML='<div class="empty"><span class="empty-ic">🎪</span><p>Nenhum evento criado ainda.</p></div>'; return; }
     el.innerHTML='<table class="tbl"><thead><tr><th>Evento</th><th>Produtor</th><th>Status</th><th>Data</th><th>Ingressos</th><th>Receita</th><th>Comissão</th><th></th></tr></thead><tbody>'
-      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+(e.destaque?' <span style="color:var(--p2)" title="Em destaque na home">⭐</span>':'')+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn '+(e.destaque?'bp':'bo')+' btn-sm" onclick="toggleDestaque(\''+e.id+'\','+!e.destaque+')">⭐ '+(e.destaque?'Remover destaque':'Destacar')+'</button><button class="btn bp btn-sm" onclick="abrirPedidosEvento(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📋 Pedidos</button><button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
+      +d.eventos.map(e=>'<tr><td>'+esc(e.nome)+(e.destaque?' <span style="color:var(--p2)" title="Em destaque na home">⭐</span>':'')+'</td><td>'+esc(e.organizadorNome)+'<br><span style="font-size:10px;color:var(--text3)">'+esc(e.organizadorEmail)+'</span></td><td>'+(e.status==='publicado'?'<span class="st-on">✅ Publicado</span>':'📝 Rascunho')+'</td><td>'+parseDataLocal(e.dataEvento).toLocaleDateString('pt-BR')+'</td><td>'+e.ingressos+'</td><td>R$'+e.receita.toFixed(2)+'</td><td style="color:var(--p2)">R$'+e.comissao.toFixed(2)+'</td><td style="display:flex;gap:6px;flex-wrap:wrap">'+(e.slug?'<a href="/e/'+esc(e.slug)+'" target="_blank" class="btn bo btn-sm">Ver →</a>':'')+'<button class="btn '+(e.destaque?'bp':'bo')+' btn-sm" onclick="toggleDestaque(\''+e.id+'\','+!e.destaque+')">⭐ '+(e.destaque?'Remover destaque':'Destacar')+'</button><button class="btn bp btn-sm" onclick="abrirPedidosEvento(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📋 Pedidos</button><button class="btn bo btn-sm" onclick="abrirBordero(\''+e.id+'\',\''+esc(e.nome).replace(/'/g,"\\'")+'\')">📑 Borderô</button><button class="btn bo btn-sm" onclick="baixarEmailsEvento(\''+e.id+'\',\''+esc(e.slug||e.id)+'\')">📥 E-mails</button></td></tr>').join('')+'</tbody></table>';
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
 async function baixarCsv(url, nomeArquivo){
@@ -628,6 +640,70 @@ function baixarEmailsEvento(id,slug){ baixarCsv('/api/admin/eventos/'+id+'/parti
 let PEDIDOS_EVENTO_ID=null;
 let PEDIDOS_CACHE=[];
 let MOSTRAR_RECUSADOS_EXPIRADOS=false;
+let BORDERO_EVENTO_ID=null, BORDERO_DESPESAS_TEMP=[], BORDERO_RECEITA_LIQUIDA=0;
+async function abrirBordero(eventoId,nomeEvento){
+  BORDERO_EVENTO_ID=eventoId;
+  document.getElementById('borderoModalTitulo').textContent='Borderô — '+nomeEvento;
+  document.getElementById('borderoModal').style.display='flex';
+  await renderBordero();
+}
+async function renderBordero(){
+  const el=document.getElementById('borderoModalConteudo');
+  el.innerHTML='<div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div>';
+  try{
+    const d=await api('GET','/api/admin/eventos/'+BORDERO_EVENTO_ID+'/bordero');
+    BORDERO_DESPESAS_TEMP=JSON.parse(JSON.stringify(d.despesas||[]));
+    const r=d.resumoVendas;
+    BORDERO_RECEITA_LIQUIDA=r.receitaLiquidaProdutor;
+    el.innerHTML=`
+      <div style="background:var(--bg3);border-radius:12px;padding:16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Resumo de vendas (automático)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+          <div>Ingressos vendidos: <strong>${r.totalIngressos}</strong></div>
+          <div>Cortesias: <strong>${r.cortesias}</strong></div>
+          <div>Pagantes: <strong>${r.pagantes}</strong></div>
+          <div>Receita bruta: <strong>R$${r.receitaBruta.toFixed(2)}</strong></div>
+          <div>Comissão da Lota: <strong style="color:var(--p2)">R$${r.comissaoPlataforma.toFixed(2)}</strong></div>
+          <div>Valor líquido (produtor): <strong style="color:var(--green)">R$${r.receitaLiquidaProdutor.toFixed(2)}</strong></div>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Despesas do evento (editável)</div>
+      <div id="listaDespesasBorderoEl"></div>
+      <button class="btn bo btn-sm" style="margin-top:8px" onclick="adicionarDespesaBordero()">+ Adicionar despesa</button>
+      <div class="fg" style="margin-top:16px"><label>Observações</label><textarea class="fi" id="borderoObservacoes" rows="3" style="resize:vertical">${esc(d.observacoes||'')}</textarea></div>
+      <div style="background:var(--bg3);border-radius:12px;padding:16px;margin-top:16px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700">Valor final pro produtor</span>
+        <span id="borderoValorFinalEl" style="font-size:20px;font-weight:900;color:var(--green)">R$${d.valorFinalProdutor.toFixed(2)}</span>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer;font-size:13px"><input type="checkbox" id="borderoFechado" ${d.fechado?'checked':''}> Marcar borderô como fechado</label>
+      <button class="btn bp" style="margin-top:16px" onclick="salvarBordero()">💾 Salvar Borderô</button>
+    `;
+    renderListaDespesasBordero();
+  }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderListaDespesasBordero(){
+  const el=document.getElementById('listaDespesasBorderoEl');
+  el.innerHTML=BORDERO_DESPESAS_TEMP.length?BORDERO_DESPESAS_TEMP.map((desp,i)=>
+    '<div style="display:flex;gap:8px;margin-bottom:8px"><input class="fi" placeholder="Descrição (ex: Som e luz)" value="'+esc(desp.descricao)+'" oninput="BORDERO_DESPESAS_TEMP['+i+'].descricao=this.value" style="flex:2"><input class="fi" type="number" placeholder="0.00" value="'+(desp.valor||'')+'" oninput="BORDERO_DESPESAS_TEMP['+i+'].valor=parseFloat(this.value)||0;atualizarValorFinalBordero()" style="flex:1"><button class="btn bdng btn-sm" onclick="BORDERO_DESPESAS_TEMP.splice('+i+',1);renderListaDespesasBordero();atualizarValorFinalBordero()">✕</button></div>'
+  ).join(''):'<p style="font-size:12px;color:var(--text3)">Nenhuma despesa adicionada.</p>';
+}
+function adicionarDespesaBordero(){
+  BORDERO_DESPESAS_TEMP.push({descricao:'',valor:0});
+  renderListaDespesasBordero();
+  atualizarValorFinalBordero();
+}
+function atualizarValorFinalBordero(){
+  const totalDespesas=BORDERO_DESPESAS_TEMP.reduce((s,d)=>s+(d.valor||0),0);
+  document.getElementById('borderoValorFinalEl').textContent='R$'+(BORDERO_RECEITA_LIQUIDA-totalDespesas).toFixed(2);
+}
+async function salvarBordero(){
+  const observacoes=document.getElementById('borderoObservacoes').value;
+  const fechado=document.getElementById('borderoFechado').checked;
+  try{
+    await api('PUT','/api/admin/eventos/'+BORDERO_EVENTO_ID+'/bordero',{despesas:BORDERO_DESPESAS_TEMP,observacoes,fechado});
+    toast('Borderô salvo!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
 async function abrirPedidosEvento(eventoId,nomeEvento){
   PEDIDOS_EVENTO_ID=eventoId;
   MOSTRAR_RECUSADOS_EXPIRADOS=false;
