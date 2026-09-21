@@ -306,8 +306,15 @@ function renderEvento(){
           +(temZonasClicaveis?'<div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.7);color:#fff;font-size:11px;padding:5px 10px;border-radius:20px;pointer-events:none">👆 Clique num assento livre</div>':'')
           +'</div>'
         :'<embed src="'+esc(EVENTO.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:420px;border-radius:10px;display:block">'}
-      ${temZonasClicaveis?'<div style="display:flex;gap:14px;font-size:11px;color:var(--text2);margin-top:10px"><span><span style="display:inline-block;width:9px;height:9px;background:var(--p);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-block;width:9px;height:9px;background:var(--gray-occ);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Ocupado</span></div>':''}
+      ${temZonasClicaveis?'<div style="display:flex;gap:14px;font-size:12px;color:var(--text2);margin-top:10px;flex-wrap:wrap"><span><span style="display:inline-block;width:11px;height:11px;background:rgba(232,150,26,.16);border:1.5px solid rgba(232,150,26,.7);border-radius:3px;margin-right:5px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;background:var(--p);border-radius:3px;margin-right:5px;vertical-align:middle;color:#fff;font-size:8px;font-weight:900">✓</span>Selecionado</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;background:var(--gray-occ);border-radius:3px;margin-right:5px;vertical-align:middle;color:var(--text3);font-size:8px;font-weight:900">✕</span>Ocupado</span></div>':''}
     </div>`:''}
+    <!-- Lista clara dos assentos escolhidos, separada do mapa — pra não depender só de olhar a cor
+         no mapa (mais difícil em telas pequenas ou pra quem tem dificuldade de visão). Cada linha
+         tem um botão grande de remover, do mesmo jeito que a Sympla faz. -->
+    <div class="card" id="cardAssentosSelecionados" style="display:none">
+      <div class="card-title">🎫 Assentos selecionados</div>
+      <div id="listaAssentosSelecionadosEl"></div>
+    </div>
     <div class="card" id="cardListaIngressos" style="${lotesHtml?'':'display:none'}">
       <div class="card-title">${temMapaAssentos||temZonasClicaveis?'Outros ingressos':'Escolha seus ingressos'}</div>
       ${lotesHtml}
@@ -367,6 +374,7 @@ function renderEvento(){
       <button class="btn" type="button" onclick="confirmarCodigoGate()">Confirmar →</button>
       <button type="button" onclick="reenviarCodigoGate()" style="background:none;border:none;color:var(--text3);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:12px;width:100%;text-align:center">Não recebi — reenviar código</button>
     </div>
+    <div class="card" id="assinaturaBeneficioCard" style="display:none"></div>
     <div class="card" id="dadosCard" style="display:none">
       <div class="card-title">Seus dados</div>
       <div class="err" id="errMsg"></div>
@@ -471,6 +479,43 @@ function getLotesFonte(){ return PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
 
 // ── MAPA DE ASSENTOS ──
 let assentosSelecionados={}; // { seatCode: { loteId, preco, nome } }
+// Mostra os assentos escolhidos numa lista clara e separada do mapa — cada linha grande, com nome
+// do assento + tipo de ingresso escolhido, e um botão bem visível pra remover. Isso ajuda muito
+// quem tem dificuldade de ver o mapa pequeno ou perceber a mudança de cor nele.
+function renderListaAssentosSelecionados(){
+  const card=document.getElementById('cardAssentosSelecionados');
+  const lista=document.getElementById('listaAssentosSelecionadosEl');
+  if(!card||!lista) return;
+  const codigos=Object.keys(assentosSelecionados);
+  if(!codigos.length){ card.style.display='none'; return; }
+  card.style.display='block';
+  lista.innerHTML=codigos.map(codigo=>{
+    const info=assentosSelecionados[codigo];
+    const rotulo=rotuloAssentoParaExibicao(codigo);
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)">'
+      +'<div><div style="font-weight:700;font-size:14px">'+esc(rotulo)+'</div><div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(info.nome)+' — R$ '+info.preco.toFixed(2).replace('.',',')+'</div></div>'
+      +'<button onclick="removerAssentoSelecionado(\''+codigo+'\')" style="background:var(--rbg,rgba(239,68,68,.1));border:1.5px solid var(--red,#EF4444);color:var(--red,#EF4444);border-radius:9px;padding:9px 14px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;margin-left:10px">🗑️ Remover</button>'
+      +'</div>';
+  }).join('');
+}
+// Traduz o código interno do assento pra um texto legível, igual já fazemos no backend pro PDF —
+// aqui é só pra mostrar na lista, então usa o nome do setor (já temos guardado na seleção).
+function rotuloAssentoParaExibicao(codigo){
+  const info=assentosSelecionados[codigo];
+  const zona=(EVENTO.mapaVenueZonas||[]).find(z=>z.id===codigo);
+  if(zona) return zona.label+' — Assento '+zona.numero;
+  const ultimoSegmento=codigo.split('-').pop();
+  if(/^[A-Za-z]\d+$/.test(ultimoSegmento)){
+    const setor=(EVENTO.mapaAssentos?.setores||[]).find(s=>codigo.startsWith(s.id+'-'));
+    return setor?setor.nome+' — Fileira '+ultimoSegmento[0]+', Assento '+ultimoSegmento.slice(1):codigo;
+  }
+  return codigo;
+}
+function removerAssentoSelecionado(codigo){
+  delete assentosSelecionados[codigo];
+  renderEvento();
+  atualizarTotal();
+}
 function renderMapaAssentosHtml(){
   const ma=EVENTO.mapaAssentos;
   let html='<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">Escolha seu assento<button onclick="abrirMapaAmpliado(\'grade\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:6px 12px;font-size:12px;font-family:inherit;cursor:pointer">🔍 Ampliar</button></div>'
@@ -485,28 +530,33 @@ function renderMapaAssentosHtml(){
 function renderConteudoMapaGrade(ampliado){
   const ma=EVENTO.mapaAssentos;
   const ocupados=new Set(EVENTO.assentosOcupados||[]);
-  const tam=ampliado?36:22;
+  const tam=ampliado?42:34;
   let html='<div style="text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:var(--text3);font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
   ma.setores.forEach(s=>{
-    html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+'</div>';
+    html+='<div style="margin-bottom:18px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+'</div>';
     html+='<div style="overflow-x:auto"><div style="display:inline-block">';
     for(let r=0;r<s.linhas;r++){
       const letra=String.fromCharCode(65+r);
-      html+='<div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">';
-      html+='<span style="font-size:9px;color:var(--text3);width:16px;text-align:center">'+letra+'</span>';
+      html+='<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">';
+      html+='<span style="font-size:11px;color:var(--text3);width:18px;text-align:center;font-weight:700">'+letra+'</span>';
       for(let c=1;c<=s.assentosPorLinha;c++){
         const seatCode=s.id+'-'+letra+c;
         const ocupado=ocupados.has(seatCode);
         const selecionado=!!assentosSelecionados[seatCode];
         const cor=ocupado?'var(--gray-occ)':(selecionado?(s.cor||'var(--p)'):'var(--bg3)');
         const acaoClique=ocupado?'':(ampliado?'fecharMapaAmpliadoEClicar(function(){cliqueAssento(\''+seatCode+'\',\''+esc(s.nome).replace(/'/g,"\\'")+'\')})':'cliqueAssento(\''+seatCode+'\',\''+esc(s.nome).replace(/'/g,"\\'")+'\')');
-        html+='<div onclick="'+acaoClique+'" title="'+seatCode+(selecionado?' — '+esc(assentosSelecionados[seatCode].nome):'')+'" style="width:'+tam+'px;height:'+tam+'px;border-radius:4px;background:'+cor+';border:1px solid '+(selecionado?(s.cor||'var(--p)'):'var(--border)')+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0"></div>';
+        // Além da cor, mostra um ✓ (selecionado) ou ✕ (ocupado) dentro do quadradinho — não depende
+        // só de perceber diferença de cor, o que é bem mais difícil em telas pequenas ou pra quem
+        // tem dificuldade de visão.
+        const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
+        const corIcone=ocupado?'var(--text3)':'#fff';
+        html+='<div onclick="'+acaoClique+'" title="'+seatCode+(selecionado?' — '+esc(assentosSelecionados[seatCode].nome):'')+'" style="width:'+tam+'px;height:'+tam+'px;border-radius:6px;background:'+cor+';border:2px solid '+(selecionado?(s.cor||'var(--p)'):(ocupado?'var(--gray-occ)':'var(--border)'))+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:'+(ampliado?'18px':'15px')+';font-weight:900;color:'+corIcone+'">'+conteudoIcone+'</div>';
       }
       html+='</div>';
     }
     html+='</div></div></div>';
   });
-  html+='<div style="display:flex;gap:16px;font-size:11px;color:var(--text2);margin-top:8px"><span><span style="display:inline-block;width:10px;height:10px;background:var(--bg3);border:1px solid var(--border);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--p);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--gray-occ);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Ocupado</span></div>';
+  html+='<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-top:8px;flex-wrap:wrap"><span><span style="display:inline-block;width:12px;height:12px;background:var(--bg3);border:1.5px solid var(--border);border-radius:3px;margin-right:5px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--p);border-radius:3px;margin-right:5px;vertical-align:middle;color:#fff;font-size:9px;font-weight:900">✓</span>Selecionado</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--gray-occ);border-radius:3px;margin-right:5px;vertical-align:middle;color:var(--text3);font-size:9px;font-weight:900">✕</span>Ocupado</span></div>';
   return html;
 }
 // Clicar num assento: se já tiver um lote escolhido pra ele, desmarca direto (clique de novo pra
@@ -529,9 +579,10 @@ function abrirMapaAmpliado(tipo){
       +(EVENTO.mapaVenueZonas||[]).map(z=>{
         const ocupado=ocupados.has(z.id);
         const selecionado=!!assentosSelecionados[z.id];
-        const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'transparent');
-        const opacidade=ocupado||selecionado?'.65':'0';
-        return '<div onclick="'+(ocupado?'':'fecharMapaAmpliadoEClicar(function(){cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')})')+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';opacity:'+opacidade+';border:2px solid '+(selecionado?'var(--p)':'transparent')+'"></div>';
+        const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
+        const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
+        const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
+        return '<div onclick="'+(ocupado?'':'fecharMapaAmpliadoEClicar(function(){cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')})')+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
       }).join('')
       +'</div>';
   }
@@ -564,9 +615,14 @@ function renderZonasOverlayComprador(){
   return '<div style="position:absolute;inset:0">'+EVENTO.mapaVenueZonas.map(z=>{
     const ocupado=ocupados.has(z.id);
     const selecionado=!!assentosSelecionados[z.id];
-    const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'transparent');
-    const opacidade=ocupado||selecionado?'.65':'0';
-    return '<div onclick="'+(ocupado?'':'cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')')+'" title="'+esc(z.label||'')+(ocupado?' — ocupado':(selecionado?' — selecionado ('+esc(assentosSelecionados[z.id].nome)+')':' — clique pra escolher'))+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';opacity:'+opacidade+';transition:opacity .15s;border:1.5px solid '+(selecionado?'var(--p)':'transparent')+'" '+(ocupado||selecionado?'':'onmouseover="this.style.opacity=\'.4\';this.style.background=\'var(--p)\'" onmouseout="this.style.opacity=\'0\'"')+'></div>';
+    // Corrigido: no celular não existe "passar o mouse" — antes, uma área disponível ficava com
+    // opacidade ZERO até passar o mouse por cima, o que no touch nunca acontece. Ou seja, no celular
+    // as áreas clicáveis eram INVISÍVEIS, e a pessoa tinha que adivinhar onde tocar. Agora toda área
+    // disponível já aparece com um contorno visível sempre, em qualquer dispositivo.
+    const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
+    const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
+    const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
+    return '<div onclick="'+(ocupado?'':'cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')')+'" title="'+esc(z.label||'')+(ocupado?' — ocupado':(selecionado?' — selecionado ('+esc(assentosSelecionados[z.id].nome)+')':' — clique pra escolher'))+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';transition:background .15s;border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:60%;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box" '+(ocupado||selecionado?'':'onmouseover="this.style.background=\'var(--p)\'" onmouseout="this.style.background=\'rgba(232,150,26,.16)\'"')+'>'+conteudoIcone+'</div>';
   }).join('')+'</div>';
 }
 // Clicar num assento desenhado sobre a imagem do mapa: mesmo comportamento do mapa em grade — se já
@@ -631,7 +687,24 @@ async function carregarSaldoCredito(){
 }
 carregarSaldoCredito();
 
+let BENEFICIO_ASSINATURA=null;
+async function carregarBeneficioAssinatura(){
+  const card=document.getElementById('assinaturaBeneficioCard');
+  if(!AT_COMPRADOR){ card.style.display='none'; return; }
+  try{
+    const d=await api('GET','/api/public/eventos/'+slug+'/minha-assinatura');
+    if(!d.temAssinatura){ card.style.display='none'; return; }
+    BENEFICIO_ASSINATURA=d;
+    card.style.display='block';
+    card.innerHTML='<div class="card-title">🎫 Você é assinante do plano "'+esc(d.planoNome)+'"!</div>'
+      +(d.descontoPercentual>0?'<label style="display:flex;align-items:center;gap:10px;padding:10px 0;cursor:pointer;font-size:13px"><input type="checkbox" id="usarDescontoAssinaturaChk" onchange="atualizarTotal()"> Usar meu desconto de <strong>'+d.descontoPercentual+'%</strong> nessa compra</label>':'')
+      +(d.cortesiasDisponiveis>0?'<label style="display:flex;align-items:center;gap:10px;padding:10px 0;cursor:pointer;font-size:13px"><input type="checkbox" id="usarCortesiaAssinaturaChk" onchange="atualizarTotal()"> Usar 1 cortesia disponível (<strong>'+d.cortesiasDisponiveis+' restante(s) este mês</strong>)</label>':'<p style="font-size:12px;color:var(--text3)">Sem cortesias disponíveis este mês.</p>');
+  }catch(e){ card.style.display='none'; }
+}
+carregarBeneficioAssinatura();
+
 function atualizarTotal(){
+  renderListaAssentosSelecionados();
   renderNomesAdicionais();
   let subtotal=0, temItem=false;
   const lotes=getLotesFonte();
@@ -787,6 +860,7 @@ function selecionarAbaGate(aba){
 async function autenticarEContinuar(token,usuario){
   AT_COMPRADOR=token;
   localStorage.setItem('role_token',token);
+  carregarBeneficioAssinatura();
   // Pré-preenche nome/e-mail com os dados da conta, pra não pedir de novo
   if(usuario){
     const campoNome=document.getElementById('cNome'); if(campoNome) campoNome.value=usuario.nome||'';
@@ -898,6 +972,8 @@ async function processarSubmitAsaas(){
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
   if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
+  if(document.getElementById('usarDescontoAssinaturaChk')?.checked) bodyBase.usarDescontoAssinatura=true;
+  if(document.getElementById('usarCortesiaAssinaturaChk')?.checked) bodyBase.usarCortesiaAssinatura=true;
 
   try{
     if(TOTAL_ATUAL<=0){
@@ -1055,6 +1131,8 @@ function montarBodyBase(dados){
   if(cupomAplicado) bodyBase.cupom=cupomAplicado.codigo;
   if(refParam) bodyBase.ref=refParam;
   if(document.getElementById('usarCreditoCheck')?.checked) bodyBase.usarCredito=true;
+  if(document.getElementById('usarDescontoAssinaturaChk')?.checked) bodyBase.usarDescontoAssinatura=true;
+  if(document.getElementById('usarCortesiaAssinaturaChk')?.checked) bodyBase.usarCortesiaAssinatura=true;
   // Device ID: o SDK do Mercado Pago já captura isso sozinho quando carrega — enviar isso
   // junto do pagamento ajuda MUITO a reduzir recusas por segurança (cc_rejected_high_risk).
   if(window.MP_DEVICE_SESSION_ID) bodyBase.deviceId=window.MP_DEVICE_SESSION_ID;
