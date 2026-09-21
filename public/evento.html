@@ -257,13 +257,21 @@ function renderEvento(){
   const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
   const loteIdsComAssento=temMapaAssentos?new Set(EVENTO.mapaAssentos.setores.map(s=>s.loteId)):new Set();
   const lotesFonte=PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
-  // Zonas desenhadas sobre a imagem do mapa também contam como "tem mapa de assento" — cada zona é
-  // um assento individual, então os lotes ligados a elas (pelo nome do setor) não aparecem soltos
-  // na lista de baixo, igual já acontecia com o mapa em grade.
+  // Zonas desenhadas sobre a imagem do mapa: cada lote ligado a um setor (pelo nome) agora aparece
+  // NORMALMENTE na lista de ingressos — só que em vez de +/- de quantidade, mostra um botão "Escolher
+  // assento", que abre o mapa em tela cheia FILTRADO só pras zonas daquele setor. Isso deixa a lista
+  // de ingressos mais familiar (igual evento sem mapa) e só mostra o mapa no momento certo.
   const temZonasClicaveis=!!(EVENTO.mapaVenuePdf && EVENTO.mapaVenueZonas && EVENTO.mapaVenueZonas.length);
-  const nomesSetoresZona=temZonasClicaveis?new Set(EVENTO.mapaVenueZonas.map(z=>(z.label||'').toLowerCase())):new Set();
-  let lotesSemAssento=lotesFonte.filter(l=>!loteIdsComAssento.has(l.id) && !(temZonasClicaveis && [...nomesSetoresZona].some(nome=>l.nome.toLowerCase().includes(nome))));
-  const lotesHtml=lotesSemAssento.length?lotesSemAssento.map(l=>`
+  function zonasDoLote(lote){
+    if(!temZonasClicaveis) return [];
+    return EVENTO.mapaVenueZonas.filter(z=>lote.nome.toLowerCase().includes((z.label||'').toLowerCase()));
+  }
+  const lotesSemAssento=lotesFonte.filter(l=>!loteIdsComAssento.has(l.id));
+  const lotesHtml=lotesSemAssento.length?lotesSemAssento.map(l=>{
+    const zonasLote=zonasDoLote(l);
+    const temSetor=zonasLote.length>0;
+    const qtdEscolhidaDesseLote=Object.values(assentosSelecionados).filter(a=>a.loteId===l.id).length;
+    return `
     <div class="lote" id="lote-linha-${l.id}">
       ${l.imagemUrl?`<img src="${esc(l.imagemUrl)}" style="width:48px;height:48px;border-radius:8px;object-fit:cover;flex-shrink:0;margin-right:10px">`:''}
       <div class="lote-info">
@@ -271,12 +279,15 @@ function renderEvento(){
         <div class="lote-preco ${l.cortesia?'gratis':''}">${l.cortesia?'Cortesia':'R$ '+l.preco.toFixed(2).replace('.',',')}</div>
         ${!l.cortesia?'<div style="font-size:10px;color:var(--text3);margin-top:1px">Pague em até 3x</div>':''}
       </div>
-      <div class="qtd-ctrl">
+      ${temSetor
+        ?'<button onclick="abrirMapaParaLote(\''+l.id+'\',\''+esc(l.nome).replace(/'/g,"\\'")+'\')" style="background:var(--p2);border:none;color:#18160F;font-weight:800;font-size:12px;padding:10px 14px;border-radius:9px;font-family:inherit;cursor:pointer;flex-shrink:0;white-space:nowrap">🪑 '+(qtdEscolhidaDesseLote>0?qtdEscolhidaDesseLote+' escolhido(s)':'Escolher assento')+'</button>'
+        :`<div class="qtd-ctrl">
         <button class="qtd-btn" onclick="alterarQtd('${l.id}',-1)">−</button>
         <span class="qtd-val" id="qtd-${l.id}">0</span>
         <button class="qtd-btn" onclick="alterarQtd('${l.id}',1,${l.disponivel})">+</button>
-      </div>
-    </div>`).join(''):((temMapaAssentos||temZonasClicaveis)?'':'<div class="empty">Nenhum lote disponível.</div>');
+      </div>`}
+    </div>`;
+  }).join(''):(temMapaAssentos?'':'<div class="empty">Nenhum lote disponível.</div>');
 
   document.getElementById('app').innerHTML=`
     ${EVENTO.testMode?'<div style="background:var(--p);color:var(--bg-deep);font-weight:700;font-size:12px;text-align:center;padding:8px;border-radius:8px;margin-bottom:12px">🧪 MODO TESTE — nenhuma cobrança real será feita</div>':''}
@@ -297,17 +308,6 @@ function renderEvento(){
       </div>
     </div>
     ${temMapaAssentos?renderMapaAssentosHtml():''}
-    ${EVENTO.mapaVenuePdf?`
-    <div class="card">
-      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">🗺️ Mapa do Local<button onclick="abrirMapaAmpliado('imagem')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:6px 12px;font-size:12px;font-family:inherit;cursor:pointer">🔍 Ampliar</button></div>
-      ${EVENTO.mapaVenuePdf.startsWith('data:image')
-        ?'<div style="position:relative;border-radius:10px;overflow:hidden"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="width:100%;display:block">'
-          +renderZonasOverlayComprador()
-          +(temZonasClicaveis?'<div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.7);color:#fff;font-size:11px;padding:5px 10px;border-radius:20px;pointer-events:none">👆 Clique num assento livre</div>':'')
-          +'</div>'
-        :'<embed src="'+esc(EVENTO.mapaVenuePdf)+'" type="application/pdf" style="width:100%;height:420px;border-radius:10px;display:block">'}
-      ${temZonasClicaveis?'<div style="display:flex;gap:14px;font-size:12px;color:var(--text2);margin-top:10px;flex-wrap:wrap"><span><span style="display:inline-block;width:11px;height:11px;background:rgba(232,150,26,.16);border:1.5px solid rgba(232,150,26,.7);border-radius:3px;margin-right:5px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;background:var(--p);border-radius:3px;margin-right:5px;vertical-align:middle;color:#fff;font-size:8px;font-weight:900">✓</span>Selecionado</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;background:var(--gray-occ);border-radius:3px;margin-right:5px;vertical-align:middle;color:var(--text3);font-size:8px;font-weight:900">✕</span>Ocupado</span></div>':''}
-    </div>`:''}
     <!-- Lista clara dos assentos escolhidos, separada do mapa — pra não depender só de olhar a cor
          no mapa (mais difícil em telas pequenas ou pra quem tem dificuldade de visão). Cada linha
          tem um botão grande de remover, do mesmo jeito que a Sympla faz. -->
@@ -561,6 +561,49 @@ function renderConteudoMapaGrade(ampliado){
 }
 // Clicar num assento: se já tiver um lote escolhido pra ele, desmarca direto (clique de novo pra
 // tirar). Se ainda não tiver, abre a escolha de qual tipo de ingresso (lote) usar naquele assento.
+// Abre o mapa em tela cheia JÁ FILTRADO pro setor daquele lote específico — o comprador escolhe o
+// lote primeiro (na lista normal de ingressos), e só então vê o mapa, já sabendo o que vai comprar.
+// Ao tocar num assento livre, atribui direto pra esse lote (sem abrir outro popup no meio).
+function abrirMapaParaLote(loteId,loteNome){
+  const zonasDoSetor=(EVENTO.mapaVenueZonas||[]).filter(z=>loteNome.toLowerCase().includes((z.label||'').toLowerCase()));
+  if(!zonasDoSetor.length){ alert('Não encontramos assentos configurados pra esse tipo de ingresso.'); return; }
+  let modal=document.getElementById('modalMapaAmpliado');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalMapaAmpliado';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:400;flex-direction:column';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  const ocupados=new Set(EVENTO.assentosOcupados||[]);
+  const conteudoInterno='<div style="position:relative;display:inline-block"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="display:block;max-width:none;height:85vh">'
+    +zonasDoSetor.map(z=>{
+      const ocupado=ocupados.has(z.id);
+      const selecionado=!!assentosSelecionados[z.id];
+      const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
+      const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
+      const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
+      const acao=ocupado?'':'confirmarAssentoParaLoteEscolhido(\''+z.id+'\',\''+loteId+'\',\''+esc(loteNome).replace(/'/g,"\\'")+'\')';
+      return '<div onclick="'+acao+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
+    }).join('')
+    +'</div>';
+  modal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;flex-shrink:0"><span style="color:#fff;font-size:13px;font-weight:700">'+esc(loteNome)+' — toque num assento livre</span><button onclick="document.getElementById(\'modalMapaAmpliado\').style.display=\'none\'" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer">✕</button></div>'
+    +'<div id="mapaZoomViewport" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;align-items:flex-start;justify-content:center;padding:10px"><div id="mapaZoomConteudo" style="transform-origin:top center">'+conteudoInterno+'</div></div>'
+    +'<div style="display:flex;justify-content:center;gap:10px;padding:14px;flex-shrink:0"><button onclick="ajustarZoomMapa(-0.2)" style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:20px;cursor:pointer">−</button><button onclick="ajustarZoomMapa(0.2)" style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:20px;cursor:pointer">+</button></div>';
+  NIVEL_ZOOM_MAPA=1;
+}
+function confirmarAssentoParaLoteEscolhido(seatId,loteId,loteNome){
+  const lote=getLotesFonte().find(l=>l.id===loteId);
+  if(!lote) return;
+  assentosSelecionados[seatId]={loteId:lote.id,preco:lote.preco,nome:loteNome};
+  document.getElementById('modalMapaAmpliado').style.display='none';
+  renderEvento();
+  atualizarTotal();
+  setTimeout(()=>{
+    const alvo=document.getElementById('gateAuthCard').style.display!=='none'?document.getElementById('gateAuthCard'):document.getElementById('dadosCard');
+    if(alvo && alvo.style.display!=='none') alvo.scrollIntoView({behavior:'smooth',block:'start'});
+  },100);
+}
 function abrirMapaAmpliado(tipo){
   let modal=document.getElementById('modalMapaAmpliado');
   if(!modal){
