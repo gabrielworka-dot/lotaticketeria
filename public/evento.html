@@ -576,7 +576,7 @@ function abrirMapaParaLote(loteId,loteNome){
   }
   modal.style.display='flex';
   const ocupados=new Set(EVENTO.assentosOcupados||[]);
-  const conteudoInterno='<div style="position:relative;display:inline-block"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="display:block;max-width:none;height:85vh">'
+  const conteudoInterno='<div id="mapaImgWrap" style="position:relative;display:inline-block;max-width:100%"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="display:block;max-width:100%;max-height:85vh;width:auto;height:auto">'
     +zonasDoSetor.map(z=>{
       const ocupado=ocupados.has(z.id);
       const selecionado=!!assentosSelecionados[z.id];
@@ -618,7 +618,7 @@ function abrirMapaAmpliado(tipo){
     conteudoInterno=renderConteudoMapaGrade(true);
   }else{
     const ocupados=new Set(EVENTO.assentosOcupados||[]);
-    conteudoInterno='<div style="position:relative;display:inline-block"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="display:block;max-width:none;height:80vh">'
+    conteudoInterno='<div id="mapaImgWrap" style="position:relative;display:inline-block;max-width:100%"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="display:block;max-width:100%;max-height:85vh;width:auto;height:auto">'
       +(EVENTO.mapaVenueZonas||[]).map(z=>{
         const ocupado=ocupados.has(z.id);
         const selecionado=!!assentosSelecionados[z.id];
