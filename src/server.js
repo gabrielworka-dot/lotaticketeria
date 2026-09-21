@@ -3824,6 +3824,46 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
   res.json({ ok: true, pedidoId: pedido.id, ticketsGerados: pedido.tickets.length });
 });
 
+// ── BORDERÔ — documento de fechamento financeiro do evento (acesso e edição só pelo admin) ──
+// Traz o resumo de vendas calculado automaticamente (não editável, vem direto dos pedidos pagos),
+// mais uma parte editável (despesas do evento e observações) que o admin preenche na hora de
+// fechar as contas com o produtor.
+app.get('/api/admin/eventos/:id/bordero', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const pedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
+  const totalIngressos = pedidosPagos.reduce((s, p) => s + (p.tickets || []).length, 0);
+  const cortesias = pedidosPagos.reduce((s, p) => s + (p.tickets || []).filter(t => (p.mpPaymentId === 'CORTESIA') || p.geradoPeloProdutor).length, 0);
+  const receitaBruta = pedidosPagos.reduce((s, p) => s + p.total, 0);
+  const receitaLiquidaProdutor = pedidosPagos.reduce((s, p) => s + (p.valorIngressos !== undefined ? p.valorIngressos : p.total), 0);
+  const comissaoPlataforma = pedidosPagos.reduce((s, p) => s + (p.taxaAdministrativa || 0), 0);
+  const bordero = ev.bordero || { despesas: [], observacoes: '', fechado: false };
+  const totalDespesas = (bordero.despesas || []).reduce((s, d) => s + (d.valor || 0), 0);
+  res.json({
+    resumoVendas: { totalIngressos, cortesias, pagantes: totalIngressos - cortesias, receitaBruta, receitaLiquidaProdutor, comissaoPlataforma },
+    despesas: bordero.despesas || [], observacoes: bordero.observacoes || '', fechado: !!bordero.fechado,
+    valorFinalProdutor: Math.round((receitaLiquidaProdutor - totalDespesas) * 100) / 100
+  });
+});
+app.put('/api/admin/eventos/:id/bordero', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { despesas, observacoes, fechado } = req.body;
+  const despesasLimpas = Array.isArray(despesas) ? despesas.map(d => ({
+    descricao: sanitize(d.descricao || '', 100),
+    valor: Math.max(0, parseFloat(d.valor) || 0)
+  })).filter(d => d.descricao).slice(0, 50) : [];
+  ev.bordero = {
+    despesas: despesasLimpas,
+    observacoes: sanitize(observacoes || '', 1000),
+    fechado: !!fechado,
+    editadoPor: req.user.nome, editadoEm: new Date().toISOString()
+  };
+  persistEventos();
+  registrarAuditoria(req.user, 'editou_bordero', { eventoId: ev.id, eventoNome: ev.nome, fechado: ev.bordero.fechado });
+  res.json({ ok: true });
+});
+
 // ── DOWNLOAD DE E-MAILS (participantes de um evento) — acesso irrestrito de admin ──
 app.get('/api/admin/eventos/:id/participantes.csv', auth, adminOnly, (req, res) => {
   const ev = EVENTOS.find(e => e.id === req.params.id);
