@@ -868,8 +868,10 @@ function renderTabAssentos(){
         +'<button type="button" class="btn bo btn-sm" onclick="document.getElementById(\'mapaVenueFile\').click()">📄 '+(temMapaPdf?'Trocar arquivo':'Escolher PDF ou imagem')+'</button>'
         +(temMapaPdf?'<button type="button" class="btn bdng btn-sm" onclick="removerMapaVenue()">Remover mapa</button>':'')
         +(ehImagem&&lotesDisponiveis.length?'<button type="button" class="btn bp btn-sm" id="btnModoDesenho" onclick="toggleModoDesenhoZona()">✏️ Desenhar área clicável</button>':'')
+        +(ehImagem?'<button type="button" class="btn bgreen btn-sm" onclick="abrirDeteccaoAutomatica()">🤖 Detectar assentos automaticamente</button>':'')
         +(ehImagem?'<button type="button" class="btn bo btn-sm" onclick="salvarZonasClicaveis()">💾 Salvar áreas</button>':'')
         +'</div>'}
+      ${ehImagem?'<p style="font-size:11px;color:var(--text3);margin-top:8px">💡 Se o mapa já tem bolinhas coloridas marcando cada lugar (como as imagens de referência de casas de show), use "Detectar automaticamente" em vez de desenhar na mão — é bem mais rápido e preciso.</p>':''}
       ${ehImagem?'<div id="listaZonasEl" style="margin-top:12px"></div>':''}
     </div>
     <div class="card">
@@ -946,6 +948,82 @@ async function salvarZonasClicaveis(){
     await api('PATCH','/api/eventos/'+EV_ATUAL.id,{mapaVenueZonas:_zonasTemp});
     EV_ATUAL.mapaVenueZonas=_zonasTemp;
     toast('Áreas clicáveis salvas!','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+// ── DETECÇÃO AUTOMÁTICA DE ASSENTOS ──────────────────────────────────────
+// Em vez de desenhar cada área na mão (risco de desalinhamento), o produtor clica numa bolinha de
+// cada cor pra "ensinar" o sistema qual cor representa qual setor — o resto é automático.
+let SETORES_DETECCAO_TEMP=[];
+function abrirDeteccaoAutomatica(){
+  SETORES_DETECCAO_TEMP=[];
+  let modal=document.getElementById('modalDeteccaoAutomatica');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalDeteccaoAutomatica';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:350;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  modal.innerHTML='<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><h3 style="font-size:17px;font-weight:800">🤖 Detectar assentos automaticamente</h3><button onclick="document.getElementById(\'modalDeteccaoAutomatica\').style.display=\'none\'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button></div>'
+    +'<p style="font-size:12px;color:var(--text3);margin-bottom:14px">Clica numa bolinha de cada cor na imagem abaixo e dá um nome pra ela (ex: "Plateia"). Repete pra cada cor diferente que existir no mapa. Depois clica em "Detectar".</p>'
+    +'<div id="deteccaoImgWrap" style="position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px;cursor:crosshair"><img id="deteccaoImg" src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;display:block" crossorigin="anonymous"></div>'
+    +'<div id="listaSetoresDeteccaoEl" style="margin-bottom:14px"></div>'
+    +'<button class="btn bp" onclick="rodarDeteccaoAutomatica()">🔍 Detectar assentos</button>'
+    +'<div id="resultadoDeteccaoEl" style="margin-top:16px"></div>'
+    +'</div>';
+  const imgEl=document.getElementById('deteccaoImg');
+  imgEl.onclick=(e)=>{
+    const rect=imgEl.getBoundingClientRect();
+    const xRel=(e.clientX-rect.left)/rect.width;
+    const yRel=(e.clientY-rect.top)/rect.height;
+    // Lê a cor exata do pixel clicado desenhando a imagem (em resolução real) num canvas invisível.
+    const canvas=document.createElement('canvas');
+    canvas.width=imgEl.naturalWidth; canvas.height=imgEl.naturalHeight;
+    const ctx=canvas.getContext('2d');
+    try{
+      ctx.drawImage(imgEl,0,0);
+      const px=ctx.getImageData(Math.floor(xRel*canvas.width),Math.floor(yRel*canvas.height),1,1).data;
+      const nome=prompt('Que nome dar pra esse setor? (ex: "Plateia", "Camarote")');
+      if(nome && nome.trim()){
+        SETORES_DETECCAO_TEMP.push({label:nome.trim(),cor:[px[0],px[1],px[2]]});
+        renderListaSetoresDeteccao();
+      }
+    }catch(err){ toast('Não foi possível ler a cor — tenta de novo.','err'); }
+  };
+}
+function renderListaSetoresDeteccao(){
+  const el=document.getElementById('listaSetoresDeteccaoEl');
+  if(!SETORES_DETECCAO_TEMP.length){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nenhum setor marcado ainda.</p>'; return; }
+  el.innerHTML='<div style="font-size:12px;font-weight:700;margin-bottom:6px">Setores marcados:</div>'
+    +SETORES_DETECCAO_TEMP.map((s,i)=>'<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="width:16px;height:16px;border-radius:50%;background:rgb('+s.cor.join(',')+');border:1px solid var(--border);flex-shrink:0"></span><span style="flex:1">'+esc(s.label)+'</span><button class="btn bdng btn-sm" onclick="SETORES_DETECCAO_TEMP.splice('+i+',1);renderListaSetoresDeteccao()">✕</button></div>').join('');
+}
+async function rodarDeteccaoAutomatica(){
+  if(!SETORES_DETECCAO_TEMP.length){ toast('Marca pelo menos um setor primeiro.','err'); return; }
+  const el=document.getElementById('resultadoDeteccaoEl');
+  el.innerHTML='<div class="empty" style="padding:12px"><span class="empty-ic">⏳</span><p>Analisando a imagem, pode levar alguns segundos...</p></div>';
+  try{
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/detectar-assentos',{setores:SETORES_DETECCAO_TEMP});
+    window._resultadoDeteccaoAtual=d.resultado;
+    const total=Object.values(d.resultado).reduce((s,arr)=>s+arr.length,0);
+    el.innerHTML='<div style="background:var(--bg3);border-radius:10px;padding:14px;margin-bottom:14px">'
+      +'<div style="font-weight:700;margin-bottom:8px">Total encontrado: '+total+' assento(s)</div>'
+      +Object.entries(d.resultado).map(([label,pontos])=>'<div style="font-size:13px;padding:4px 0">'+esc(label)+': <strong>'+pontos.length+'</strong></div>').join('')
+      +'</div>'
+      +'<p style="font-size:11px;color:var(--text3);margin-bottom:12px">⚠️ Confere se os números fazem sentido — se algum setor tiver 1 ou 2 de mais/menos, pode ter pego a bolinha da legenda por engano (nesse caso, edita manualmente depois na aba "Desenhar área clicável").</p>'
+      +'<button class="btn bp" onclick="confirmarDeteccaoAutomatica()">✅ Confirmar e salvar esses assentos</button>';
+  }catch(e){ el.innerHTML='<p style="font-size:13px;color:var(--red)">'+esc(e.message)+'</p>'; }
+}
+async function confirmarDeteccaoAutomatica(){
+  if(!window._resultadoDeteccaoAtual) return;
+  if(!confirm('Isso vai substituir qualquer área clicável já configurada nesse mapa. Continuar?')) return;
+  try{
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/confirmar-assentos-detectados',{resultado:window._resultadoDeteccaoAtual});
+    toast(d.totalAssentos+' assentos detectados e salvos!','ok');
+    document.getElementById('modalDeteccaoAutomatica').style.display='none';
+    const d2=await api('GET','/api/eventos/'+EV_ATUAL.id);
+    EV_ATUAL=d2.evento;
+    renderTabAssentos();
   }catch(e){ toast(e.message,'err'); }
 }
 function handleMapaVenueUpload(fileInput){
