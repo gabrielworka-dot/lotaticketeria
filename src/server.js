@@ -3869,9 +3869,10 @@ app.get('/api/admin/eventos/:id/participantes.csv', auth, adminOnly, (req, res) 
   const ev = EVENTOS.find(e => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const pedidos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
-  const linhas = [['Nome', 'E-mail', 'Telefone', 'Lote', 'Código Ingresso', 'Usado', 'Data da Compra']];
+  const linhas = [['Nome', 'E-mail', 'Telefone', 'Lote', 'Assento', 'Código Ingresso', 'Usado', 'Data da Compra']];
   pedidos.forEach(p => (p.tickets || []).forEach(t => {
-    linhas.push([p.comprador?.nome || '', p.comprador?.email || '', p.comprador?.telefone || '', t.loteNome || '', t.codigo, t.usado ? 'Sim' : 'Não', new Date(p.createdAt).toLocaleString('pt-BR')]);
+    const assento = t.assento ? (t.assentoLabel || assentoParaExibicao(t.assento, ev)) : '—';
+    linhas.push([p.comprador?.nome || '', p.comprador?.email || '', p.comprador?.telefone || '', t.loteNome || '', assento, t.codigo, t.usado ? 'Sim' : 'Não', new Date(p.createdAt).toLocaleString('pt-BR')]);
   }));
   const csv = linhas.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
