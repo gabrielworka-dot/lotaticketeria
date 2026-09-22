@@ -593,11 +593,14 @@ function renderConteudoMapaParaLote(zonasDoSetor,loteId,loteNome){
     +zonasDoSetor.map(z=>{
       const ocupado=ocupados.has(z.id);
       const selecionado=!!assentosSelecionados[z.id];
-      const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
-      const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
+      // As áreas disponíveis ficam INVISÍVEIS (sem cor, sem borda) — só servem pra detectar o toque.
+      // A imagem do mapa já mostra os pontos de cada assento; só mudamos a cor de verdade quando o
+      // assento é selecionado ou já está ocupado, bem em cima do próprio ponto, sem nenhum círculo
+      // "flutuando" ao lado que possa confundir.
+      const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'transparent');
       const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
       const acao=ocupado?'':'confirmarAssentoParaLoteEscolhido(\''+z.id+'\',\''+loteId+'\',\''+esc(loteNome).replace(/'/g,"\\'")+'\',['+zonasDoSetor.map(zz=>"'"+zz.id+"'").join(',')+'])';
-      return '<div onclick="'+acao+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
+      return '<div onclick="'+acao+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
     }).join('')
     +'</div>';
   const el=document.getElementById('mapaZoomConteudo');
@@ -662,10 +665,9 @@ function abrirMapaAmpliado(tipo){
       +(EVENTO.mapaVenueZonas||[]).map(z=>{
         const ocupado=ocupados.has(z.id);
         const selecionado=!!assentosSelecionados[z.id];
-        const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
-        const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
+        const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'transparent');
         const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
-        return '<div onclick="'+(ocupado?'':'fecharMapaAmpliadoEClicar(function(){cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')})')+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
+        return '<div onclick="'+(ocupado?'':'fecharMapaAmpliadoEClicar(function(){cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')})')+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box">'+conteudoIcone+'</div>';
       }).join('')
       +'</div>';
   }
@@ -692,22 +694,7 @@ function cliqueAssento(seatCode,setorNome){
   }
   abrirEscolhaLotePraAssento(seatCode,setorNome);
 }
-function renderZonasOverlayComprador(){
-  if(!EVENTO.mapaVenueZonas||!EVENTO.mapaVenueZonas.length) return '';
-  const ocupados=new Set(EVENTO.assentosOcupados||[]);
-  return '<div style="position:absolute;inset:0">'+EVENTO.mapaVenueZonas.map(z=>{
-    const ocupado=ocupados.has(z.id);
-    const selecionado=!!assentosSelecionados[z.id];
-    // Corrigido: no celular não existe "passar o mouse" — antes, uma área disponível ficava com
-    // opacidade ZERO até passar o mouse por cima, o que no touch nunca acontece. Ou seja, no celular
-    // as áreas clicáveis eram INVISÍVEIS, e a pessoa tinha que adivinhar onde tocar. Agora toda área
-    // disponível já aparece com um contorno visível sempre, em qualquer dispositivo.
-    const corOverlay=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.16)');
-    const corBorda=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':'rgba(232,150,26,.7)');
-    const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
-    return '<div onclick="'+(ocupado?'':'cliqueZonaAssento(\''+z.id+'\',\''+esc(z.label||'').replace(/'/g,"\\'")+'\')')+'" title="'+esc(z.label||'')+(ocupado?' — ocupado':(selecionado?' — selecionado ('+esc(assentosSelecionados[z.id].nome)+')':' — clique pra escolher'))+'" style="position:absolute;left:'+z.x+'%;top:'+z.y+'%;width:'+z.w+'%;height:'+z.h+'%;cursor:'+(ocupado?'not-allowed':'pointer')+';border-radius:50%;background:'+corOverlay+';transition:background .15s;border:2px solid '+corBorda+';display:flex;align-items:center;justify-content:center;font-size:60%;font-weight:900;color:'+(ocupado?'var(--text3)':'#fff')+';box-sizing:border-box" '+(ocupado||selecionado?'':'onmouseover="this.style.background=\'var(--p)\'" onmouseout="this.style.background=\'rgba(232,150,26,.16)\'"')+'>'+conteudoIcone+'</div>';
-  }).join('')+'</div>';
-}
+
 // Clicar num assento desenhado sobre a imagem do mapa: mesmo comportamento do mapa em grade — se já
 // tinha lote escolhido, desmarca; senão abre a escolha de lote filtrada pelo nome do setor.
 function cliqueZonaAssento(seatId,setorNome){
