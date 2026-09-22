@@ -13,6 +13,7 @@ const path    = require('path');
 const { v4: uuidv4 } = require('uuid');
 const PDFDocument = require('pdfkit');
 const QRCode  = require('qrcode');
+const { Jimp } = require('jimp');
 const speakeasy = require('speakeasy');
 
 const app = express();
@@ -1091,7 +1092,129 @@ app.patch('/api/eventos/:id', auth, (req, res) => {
   res.json({ evento: ev });
 });
 
-// ── MAPA DE ASSENTOS ──
+// ── DETECÇÃO AUTOMÁTICA DE ASSENTOS NO MAPA (por cor) ──────────────────────
+// Em vez do produtor desenhar cada área manualmente (o que causava desalinhamento), o sistema
+// localiza cada bolinha colorida na própria imagem do mapa — a posição vem direto da imagem real,
+// nunca fica desalinhada. O produtor só precisa indicar QUAL COR representa cada setor.
+async function detectarBlobsPorCor(imagemBase64, coresSetor) {
+  const base64Limpo = imagemBase64.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(base64Limpo, 'base64');
+  const img = await Jimp.read(buffer);
+  const { width, height } = img.bitmap;
+  const TOLERANCIA = 22;
+  const AREA_MINIMA = 60; // em pixels — ajustado proporcionalmente pelo tamanho da imagem mais abaixo
+  const areaMinimaAjustada = Math.max(30, Math.round(AREA_MINIMA * (width * height) / (1974 * 838)));
+
+  function corProxima(r, g, b, ref) {
+    return Math.abs(r - ref[0]) <= TOLERANCIA && Math.abs(g - ref[1]) <= TOLERANCIA && Math.abs(b - ref[2]) <= TOLERANCIA;
+  }
+  function construirMascara(refCor) {
+    const mascara = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const r = img.bitmap.data[idx], g = img.bitmap.data[idx + 1], b = img.bitmap.data[idx + 2];
+        if (corProxima(r, g, b, refCor)) mascara[y * width + x] = 1;
+      }
+    }
+    return mascara;
+  }
+  function encontrarBlobs(mascara) {
+    const visitado = new Uint8Array(width * height);
+    const blobs = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        if (mascara[idx] && !visitado[idx]) {
+          const fila = [[x, y]];
+          visitado[idx] = 1;
+          let somaX = 0, somaY = 0, contagem = 0, minX = x, maxX = x, minY = y, maxY = y;
+          while (fila.length) {
+            const [cx, cy] = fila.pop();
+            somaX += cx; somaY += cy; contagem++;
+            if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+            if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+            const vizinhos = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
+            for (const [nx, ny] of vizinhos) {
+              if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+              const nidx = ny * width + nx;
+              if (mascara[nidx] && !visitado[nidx]) { visitado[nidx] = 1; fila.push([nx, ny]); }
+            }
+          }
+          if (contagem >= areaMinimaAjustada) {
+            blobs.push({ cx: somaX / contagem, cy: somaY / contagem, raio: Math.max(maxX - minX, maxY - minY) / 2 });
+          }
+        }
+      }
+    }
+    return blobs;
+  }
+
+  const resultado = {};
+  for (const setor of coresSetor) {
+    const mascara = construirMascara(setor.cor);
+    const blobs = encontrarBlobs(mascara);
+    resultado[setor.label] = blobs.map(b => ({
+      x: Math.round((b.cx / width) * 10000) / 100,
+      y: Math.round((b.cy / height) * 10000) / 100,
+      w: Math.round(((b.raio * 2) / width) * 10000) / 100,
+      h: Math.round(((b.raio * 2) / height) * 10000) / 100,
+    }));
+  }
+  return resultado;
+}
+// Recebe até 8 cores de referência (RGB), detecta e devolve a CONTAGEM por setor pra o produtor
+// revisar antes de confirmar — não salva nada ainda nessa etapa.
+app.post('/api/eventos/:id/detectar-assentos', auth, async (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  if (!ev.mapaVenuePdf || !ev.mapaVenuePdf.startsWith('data:image/')) return res.status(400).json({ error: 'Suba uma imagem do mapa primeiro.' });
+  const { setores } = req.body; // [{ label, cor:[r,g,b] }]
+  if (!Array.isArray(setores) || !setores.length) return res.status(400).json({ error: 'Informe ao menos um setor com sua cor.' });
+  const coresValidas = setores.slice(0, 8).map(s => ({
+    label: sanitize(s.label || '', 40),
+    cor: Array.isArray(s.cor) && s.cor.length === 3 ? s.cor.map(v => Math.max(0, Math.min(255, parseInt(v) || 0))) : [0, 0, 0]
+  })).filter(s => s.label);
+  try {
+    const resultado = await detectarBlobsPorCor(ev.mapaVenuePdf, coresValidas);
+    res.json({ resultado });
+  } catch (e) {
+    console.error('Erro na detecção automática de assentos:', e.message);
+    res.status(500).json({ error: 'Não foi possível processar a imagem. Tente uma imagem em melhor qualidade ou desenhe manualmente.' });
+  }
+});
+// Confirma a detecção e SALVA como zonas de verdade (mesmo formato usado pelo desenho manual) —
+// cada bolinha detectada recebe um ID único e numeração sequencial dentro do próprio setor.
+app.post('/api/eventos/:id/confirmar-assentos-detectados', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { resultado } = req.body; // { "Plateia": [{x,y,w,h}, ...], ... }
+  if (!resultado || typeof resultado !== 'object') return res.status(400).json({ error: 'Dados de detecção inválidos.' });
+  const novasZonas = [];
+  for (const [label, pontos] of Object.entries(resultado)) {
+    const labelLimpo = sanitize(label || '', 40);
+    if (!labelLimpo || !Array.isArray(pontos)) continue;
+    pontos.forEach((p, i) => {
+      novasZonas.push({
+        id: uuidv4(),
+        x: Math.max(0, Math.min(100, parseFloat(p.x) || 0)),
+        y: Math.max(0, Math.min(100, parseFloat(p.y) || 0)),
+        w: Math.max(0.3, Math.min(100, parseFloat(p.w) || 1)),
+        h: Math.max(0.3, Math.min(100, parseFloat(p.h) || 1)),
+        label: labelLimpo, numero: i + 1
+      });
+    });
+  }
+  if (!novasZonas.length) return res.status(400).json({ error: 'Nenhum assento pra salvar.' });
+  // Substitui as zonas antigas por essas — feito com cautela: só chega até aqui depois do produtor
+  // já ter revisado a contagem detectada e confirmado explicitamente na tela.
+  ev.mapaVenueZonas = novasZonas;
+  persistEventos();
+  registrarAuditoria(req.user, 'detectou_assentos_automaticamente', { eventoId: ev.id, totalAssentos: novasZonas.length });
+  res.json({ ok: true, totalAssentos: novasZonas.length });
+});
+
+
 app.patch('/api/eventos/:id/mapa-assentos', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
