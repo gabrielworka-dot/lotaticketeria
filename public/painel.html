@@ -1005,14 +1005,51 @@ async function rodarDeteccaoAutomatica(){
   try{
     const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/detectar-assentos',{setores:SETORES_DETECCAO_TEMP});
     window._resultadoDeteccaoAtual=d.resultado;
-    const total=Object.values(d.resultado).reduce((s,arr)=>s+arr.length,0);
-    el.innerHTML='<div style="background:var(--bg3);border-radius:10px;padding:14px;margin-bottom:14px">'
-      +'<div style="font-weight:700;margin-bottom:8px">Total encontrado: '+total+' assento(s)</div>'
-      +Object.entries(d.resultado).map(([label,pontos])=>'<div style="font-size:13px;padding:4px 0">'+esc(label)+': <strong>'+pontos.length+'</strong></div>').join('')
-      +'</div>'
-      +'<p style="font-size:11px;color:var(--text3);margin-bottom:12px">⚠️ Confere se os números fazem sentido — se algum setor tiver 1 ou 2 de mais/menos, pode ter pego a bolinha da legenda por engano (nesse caso, edita manualmente depois na aba "Desenhar área clicável").</p>'
-      +'<button class="btn bp" onclick="confirmarDeteccaoAutomatica()">✅ Confirmar e salvar esses assentos</button>';
+    renderPreviewDeteccao();
   }catch(e){ el.innerHTML='<p style="font-size:13px;color:var(--red)">'+esc(e.message)+'</p>'; }
+}
+const CORES_PREVIEW_DETECCAO=['#E8961A','#3B9EFF','#4ADE80','#F87171','#A855F7','#F472B6','#FBBF24','#22D3EE'];
+let SETOR_ATIVO_CORRECAO=null;
+function renderPreviewDeteccao(){
+  const el=document.getElementById('resultadoDeteccaoEl');
+  const resultado=window._resultadoDeteccaoAtual;
+  const total=Object.values(resultado).reduce((s,arr)=>s+arr.length,0);
+  const labels=Object.keys(resultado);
+  el.innerHTML='<div style="font-weight:700;margin-bottom:8px">Total: '+total+' assento(s) — confere abaixo e corrige se precisar</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+labels.map((label,i)=>'<button type="button" onclick="SETOR_ATIVO_CORRECAO=(SETOR_ATIVO_CORRECAO===\''+esc(label)+'\'?null:\''+esc(label)+'\');renderPreviewDeteccao()" style="background:'+(SETOR_ATIVO_CORRECAO===label?CORES_PREVIEW_DETECCAO[i%8]:'var(--bg3)')+';color:'+(SETOR_ATIVO_CORRECAO===label?'#18160F':'var(--text)')+';border:1.5px solid '+CORES_PREVIEW_DETECCAO[i%8]+';border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">'+esc(label)+' ('+resultado[label].length+')</button>').join('')+'</div>'
+    +'<p style="font-size:11px;color:var(--text3);margin-bottom:10px">👆 Clica no NOME do setor acima pra "ativar" a correção dele — depois disso, clica num pontinho ERRADO na imagem pra removê-lo, ou clica num lugar VAZIO (onde faltou detectar) pra adicionar um assento ali.</p>'
+    +'<div id="previewDeteccaoWrap" style="position:relative;margin-bottom:14px"></div>'
+    +'<button class="btn bp" onclick="confirmarDeteccaoAutomatica()">✅ Confirmar e salvar esses assentos</button>';
+  renderPontosPreview();
+}
+function renderPontosPreview(){
+  const wrap=document.getElementById('previewDeteccaoWrap');
+  const imgOriginal=document.getElementById('deteccaoImg');
+  const resultado=window._resultadoDeteccaoAtual;
+  const labels=Object.keys(resultado);
+  let html='<img src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="width:100%;display:block;border-radius:8px">';
+  labels.forEach((label,li)=>{
+    const cor=CORES_PREVIEW_DETECCAO[li%8];
+    resultado[label].forEach((p,pi)=>{
+      const clique=SETOR_ATIVO_CORRECAO===label?'onclick="_resultadoDeteccaoAtual[\''+esc(label).replace(/'/g,"\\'")+'\'].splice('+pi+',1);renderPreviewDeteccao()"':'';
+      html+='<div '+clique+' title="'+esc(label)+' #'+(pi+1)+(SETOR_ATIVO_CORRECAO===label?' — clique pra remover':'')+'" style="position:absolute;left:'+p.x+'%;top:'+p.y+'%;width:'+Math.max(p.w,1.2)+'%;height:'+Math.max(p.h,1.2)+'%;border-radius:50%;border:2px solid '+cor+';background:'+cor+'55;cursor:'+(SETOR_ATIVO_CORRECAO===label?'pointer':'default')+';box-sizing:border-box"></div>';
+    });
+  });
+  wrap.innerHTML=html;
+  // Pra ADICIONAR um assento que faltou: clica em qualquer ponto vazio da imagem, com o setor ativo.
+  const imgClicavel=wrap.querySelector('img');
+  imgClicavel.style.cursor=SETOR_ATIVO_CORRECAO?'crosshair':'default';
+  imgClicavel.onclick=(e)=>{
+    if(!SETOR_ATIVO_CORRECAO) return;
+    const rect=imgClicavel.getBoundingClientRect();
+    const xPct=((e.clientX-rect.left)/rect.width)*100;
+    const yPct=((e.clientY-rect.top)/rect.height)*100;
+    const pontosDoSetor=window._resultadoDeteccaoAtual[SETOR_ATIVO_CORRECAO];
+    const wMedio=pontosDoSetor.length?pontosDoSetor.reduce((s,p)=>s+p.w,0)/pontosDoSetor.length:1.5;
+    const hMedio=pontosDoSetor.length?pontosDoSetor.reduce((s,p)=>s+p.h,0)/pontosDoSetor.length:1.5;
+    pontosDoSetor.push({x:Math.round(xPct*100)/100,y:Math.round(yPct*100)/100,w:wMedio,h:hMedio});
+    renderPreviewDeteccao();
+  };
 }
 async function confirmarDeteccaoAutomatica(){
   if(!window._resultadoDeteccaoAtual) return;
