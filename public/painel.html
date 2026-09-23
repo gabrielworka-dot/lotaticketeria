@@ -854,6 +854,7 @@ function renderTabAssentos(){
   const temMapaPdf=!!EV_ATUAL.mapaVenuePdf;
   const ehImagem=temMapaPdf&&EV_ATUAL.mapaVenuePdf.startsWith('data:image');
   _zonasTemp=JSON.parse(JSON.stringify(EV_ATUAL.mapaVenueZonas||[]));
+  _secoesTemp=JSON.parse(JSON.stringify(EV_ATUAL.mapaSecoes?.secoes||[]));
   el.innerHTML=`
     <div class="card">
       <div class="ct">Mapa do Local (PDF ou imagem)</div>
@@ -888,9 +889,44 @@ function renderTabAssentos(){
     <div class="card" id="previewMapaCard" style="display:none">
       <div class="ct">Pré-visualização</div>
       <div id="previewMapa" style="overflow-x:auto"></div>
-    </div>`;
+    </div>
+    <div class="card" style="border:1.5px solid var(--p2)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="ct" style="margin-bottom:0">🆕 Mapa de Assentos v2 — Seções Retas e Curvas</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2)"><input type="checkbox" id="secoesAtivo" ${(EV_ATUAL.mapaSecoes?.ativo)?'checked':''} ${ro?'disabled':''}> Ativar esse sistema</label>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Desenha o mapa com fileiras de verdade (retas ou em curva/leque) — sem depender de nenhuma imagem pra funcionar. Se você subiu uma foto do local acima, ela aparece como referência visual por baixo, só pra te ajudar a posicionar.</p>
+      <div class="fg"><label>Nome do palco/frente</label><input class="fi" id="secoesPalco" value="${esc(EV_ATUAL.mapaSecoes?.palco||'PALCO')}" style="max-width:240px" ${ro?'disabled':''}></div>
+      <div id="secoesListEl" style="margin-bottom:14px"></div>
+      ${ro?'':'<div class="br"><button class="btn bo btn-sm" onclick="addSecaoTemp(\'reta\')">+ Seção Reta</button><button class="btn bo btn-sm" onclick="addSecaoTemp(\'curva\')">+ Seção Curva</button><button class="btn bp" onclick="salvarMapaSecoes()">💾 Salvar Seções</button></div>'}
+      <div style="margin-top:18px;background:var(--bg3);border-radius:12px;padding:10px;position:relative;aspect-ratio:16/10;overflow:hidden">
+        ${ehImagem?'<img src="'+esc(EV_ATUAL.mapaVenuePdf)+'" style="position:absolute;inset:10px;width:calc(100% - 20px);height:calc(100% - 20px);object-fit:contain;opacity:.35">':''}
+        <div id="previewSecoesEl" style="position:absolute;inset:0"></div>
+      </div>
+    </div>
+    ${ehImagem?`
+    <div class="card" style="border:1.5px solid var(--p2)">
+      <div class="ct">🎨 Fundo em Preto e Branco + Regiões Coloridas</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Usa a foto real do local (sem as cores confusas dela) como fundo, e você pinta cada setor com a cor que quiser — o formato exato do teatro fica preservado, só que mais fácil de entender.</p>
+      ${EV_ATUAL.mapaVenuePb?'':'<button class="btn bo btn-sm" onclick="converterMapaPB()" id="btnConverterPB">⚫⚪ Converter foto pra P&B</button>'}
+      ${EV_ATUAL.mapaVenuePb?`
+      <div id="regiaoCanvasWrap" style="position:relative;width:100%;aspect-ratio:16/10;background:var(--bg3);border-radius:10px;overflow:hidden;margin-top:10px;cursor:crosshair">
+        <img src="${esc(EV_ATUAL.mapaVenuePb)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain">
+        <svg id="regiaoSvgOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"></svg>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn bp btn-sm" onclick="iniciarDesenhoRegiao()" id="btnIniciarRegiao">✏️ Desenhar nova região</button>
+        <button class="btn bo btn-sm" onclick="fecharRegiaoAtual()" id="btnFecharRegiao" style="display:none">✅ Fechar região (mín. 3 pontos)</button>
+        <button class="btn bdng btn-sm" onclick="cancelarDesenhoRegiao()" id="btnCancelarRegiao" style="display:none">✕ Cancelar</button>
+      </div>
+      <div id="listaRegioesEl" style="margin-top:14px"></div>
+      <button class="btn bp" style="margin-top:10px" onclick="salvarMapaRegioes()">💾 Salvar Regiões</button>
+      `:''}
+    </div>`:''}`;
   renderSetoresLista();
   if(ehImagem){ renderZonasOverlay(); renderListaZonas(); }
+  renderListaSecoes();
+  if(EV_ATUAL.mapaVenuePb) iniciarRegioesTemp();
 }
 let _zonasTemp=[], MODO_DESENHO_ZONA=false, ZONA_DESENHANDO=null;
 function toggleModoDesenhoZona(){
@@ -942,6 +978,214 @@ function renderListaZonas(){
   if(!el) return;
   if(!_zonasTemp.length){ el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nenhuma área clicável desenhada ainda.</p>'; return; }
   el.innerHTML='<div style="font-size:12px;font-weight:700;margin-bottom:6px">Áreas desenhadas:</div>'+_zonasTemp.map((z,i)=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+esc(z.label)+'</span><button class="btn bdng btn-sm" onclick="_zonasTemp.splice('+i+',1);renderZonasOverlay();renderListaZonas()">✕</button></div>').join('');
+}
+let _secoesTemp=[];
+// Mesma matemática usada na tela de compra — testada e comprovada: garante que o que o produtor
+// desenha aqui é EXATAMENTE o que o comprador vai ver e clicar, sem nenhuma tradução no meio.
+function calcularPosicoesSecao(secao){
+  const posicoes=[];
+  const {linhas,assentosPorLinha}=secao;
+  if(secao.tipo==='curva'){
+    const {centroX,centroY,raioInicial,espacamentoFileiras,anguloInicio,anguloTotal}=secao;
+    for(let r=0;r<linhas;r++){
+      const raio=raioInicial+r*espacamentoFileiras;
+      for(let s=0;s<assentosPorLinha;s++){
+        const t=assentosPorLinha>1?s/(assentosPorLinha-1):0.5;
+        const anguloGraus=anguloInicio-anguloTotal/2+t*anguloTotal;
+        const anguloRad=anguloGraus*Math.PI/180;
+        posicoes.push({linha:r,assento:s,x:centroX+raio*Math.sin(anguloRad),y:centroY-raio*Math.cos(anguloRad)});
+      }
+    }
+  }else{
+    const {x,y,largura,altura,rotacao=0}=secao;
+    const rotRad=rotacao*Math.PI/180;
+    for(let r=0;r<linhas;r++){
+      for(let s=0;s<assentosPorLinha;s++){
+        const tx=assentosPorLinha>1?(s/(assentosPorLinha-1)-0.5)*largura:0;
+        const ty=linhas>1?(r/(linhas-1)-0.5)*altura:0;
+        const rx=tx*Math.cos(rotRad)-ty*Math.sin(rotRad);
+        const ry=tx*Math.sin(rotRad)+ty*Math.cos(rotRad);
+        posicoes.push({linha:r,assento:s,x:x+rx,y:y+ry});
+      }
+    }
+  }
+  return posicoes;
+}
+function addSecaoTemp(tipo){
+  const base={id:'',nome:'Setor '+(_secoesTemp.length+1),loteId:'',cor:'#C47B14',tipo,linhas:5,assentosPorLinha:10};
+  if(tipo==='curva') _secoesTemp.push({...base,centroX:50,centroY:100,raioInicial:15,espacamentoFileiras:6,anguloInicio:0,anguloTotal:90});
+  else _secoesTemp.push({...base,x:50,y:50,largura:30,altura:15,rotacao:0});
+  renderListaSecoes();
+}
+function renderListaSecoes(){
+  const el=document.getElementById('secoesListEl');
+  if(!el) return;
+  el.innerHTML=_secoesTemp.length?_secoesTemp.map((s,i)=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:10px"><span style="width:14px;height:14px;border-radius:50%;background:'+s.cor+';flex-shrink:0"></span><div><strong>'+esc(s.nome)+'</strong> <span style="font-size:11px;color:var(--text3)">('+(s.tipo==='curva'?'curva':'reta')+' — '+s.linhas+'x'+s.assentosPorLinha+' = '+(s.linhas*s.assentosPorLinha)+' assentos)</span></div></div><div style="display:flex;gap:6px"><button class="btn bo btn-sm" onclick="abrirEdicaoSecao('+i+')">Editar</button><button class="btn bdng btn-sm" onclick="_secoesTemp.splice('+i+',1);renderListaSecoes();renderPreviewSecoes()">✕</button></div></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Nenhuma seção criada ainda.</p>';
+  renderPreviewSecoes();
+}
+function renderPreviewSecoes(){
+  const el=document.getElementById('previewSecoesEl');
+  if(!el) return;
+  let html='';
+  _secoesTemp.forEach(s=>{
+    const pontos=calcularPosicoesSecao(s);
+    pontos.forEach(p=>{
+      html+='<div style="position:absolute;left:'+p.x+'%;top:'+p.y+'%;width:1.6%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:'+s.cor+';border:1px solid rgba(0,0,0,.3)"></div>';
+    });
+  });
+  const palcoTxt=document.getElementById('secoesPalco')?.value||'PALCO';
+  html+='<div style="position:absolute;bottom:2%;left:50%;transform:translateX(-50%);background:#18160F;color:#fff;font-size:11px;font-weight:800;padding:4px 16px;border-radius:6px;letter-spacing:2px">'+esc(palcoTxt)+'</div>';
+  el.innerHTML=html;
+}
+function abrirEdicaoSecao(index){
+  const s=_secoesTemp[index];
+  const lotesDisponiveis=EV_ATUAL.lotes||[];
+  let modal=document.getElementById('modalEdicaoSecao');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalEdicaoSecao';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  const camposComuns='<div class="fg"><label>Nome</label><input class="fi" id="secEditNome" value="'+esc(s.nome)+'"></div>'
+    +'<div class="fg2"><div class="fg"><label>Cor</label><input class="fi" type="color" id="secEditCor" value="'+s.cor+'" style="height:42px;padding:4px"></div><div class="fg"><label>Lote vinculado</label><select class="fs" id="secEditLote"><option value="">— nenhum —</option>'+lotesDisponiveis.map(l=>'<option value="'+l.id+'" '+(l.id===s.loteId?'selected':'')+'>'+esc(l.nome)+'</option>').join('')+'</select></div></div>'
+    +'<div class="fg2"><div class="fg"><label>Fileiras</label><input class="fi" type="number" id="secEditLinhas" value="'+s.linhas+'" min="1" max="30" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Assentos/fileira</label><input class="fi" type="number" id="secEditAssentos" value="'+s.assentosPorLinha+'" min="1" max="50" oninput="atualizarPreviewEdicao()"></div></div>';
+  const camposEspecificos=s.tipo==='curva'
+    ?'<div class="fg2"><div class="fg"><label>Centro X (%)</label><input class="fi" type="number" id="secEditCentroX" value="'+s.centroX+'" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Centro Y (%)</label><input class="fi" type="number" id="secEditCentroY" value="'+s.centroY+'" oninput="atualizarPreviewEdicao()"></div></div>'
+      +'<div class="fg2"><div class="fg"><label>Raio inicial</label><input class="fi" type="number" id="secEditRaioInicial" value="'+s.raioInicial+'" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Espaço entre fileiras</label><input class="fi" type="number" id="secEditEspacamento" value="'+s.espacamentoFileiras+'" oninput="atualizarPreviewEdicao()"></div></div>'
+      +'<div class="fg2"><div class="fg"><label>Ângulo inicial (rotação)</label><input class="fi" type="number" id="secEditAnguloInicio" value="'+s.anguloInicio+'" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Abertura da curva (°)</label><input class="fi" type="number" id="secEditAnguloTotal" value="'+s.anguloTotal+'" min="1" max="359" oninput="atualizarPreviewEdicao()"></div></div>'
+    :'<div class="fg2"><div class="fg"><label>Posição X (%)</label><input class="fi" type="number" id="secEditX" value="'+s.x+'" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Posição Y (%)</label><input class="fi" type="number" id="secEditY" value="'+s.y+'" oninput="atualizarPreviewEdicao()"></div></div>'
+      +'<div class="fg2"><div class="fg"><label>Largura total (%)</label><input class="fi" type="number" id="secEditLargura" value="'+s.largura+'" oninput="atualizarPreviewEdicao()"></div><div class="fg"><label>Altura total (%)</label><input class="fi" type="number" id="secEditAltura" value="'+s.altura+'" oninput="atualizarPreviewEdicao()"></div></div>'
+      +'<div class="fg"><label>Rotação (°)</label><input class="fi" type="number" id="secEditRotacao" value="'+s.rotacao+'" oninput="atualizarPreviewEdicao()"></div>';
+  modal.innerHTML='<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><h3 style="font-size:17px;font-weight:800">Editar Seção ('+(s.tipo==='curva'?'Curva':'Reta')+')</h3><button onclick="document.getElementById(\'modalEdicaoSecao\').style.display=\'none\'" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1">✕</button></div>'
+    +camposComuns+camposEspecificos
+    +'<div id="previewEdicaoWrap" style="margin-top:14px;background:var(--bg3);border-radius:10px;position:relative;aspect-ratio:16/10;overflow:hidden"><div id="previewEdicaoEl" style="position:absolute;inset:0"></div></div>'
+    +'<button class="btn bp" style="margin-top:16px" onclick="salvarEdicaoSecao('+index+')">💾 Aplicar</button>'
+    +'</div>';
+  window._secaoEditandoIndex=index;
+  atualizarPreviewEdicao();
+}
+function atualizarPreviewEdicao(){
+  const i=window._secaoEditandoIndex;
+  const s=_secoesTemp[i];
+  const dadosAtualizados={...s,
+    linhas:parseInt(document.getElementById('secEditLinhas').value)||1,
+    assentosPorLinha:parseInt(document.getElementById('secEditAssentos').value)||1,
+  };
+  if(s.tipo==='curva'){
+    dadosAtualizados.centroX=parseFloat(document.getElementById('secEditCentroX').value)||0;
+    dadosAtualizados.centroY=parseFloat(document.getElementById('secEditCentroY').value)||0;
+    dadosAtualizados.raioInicial=parseFloat(document.getElementById('secEditRaioInicial').value)||1;
+    dadosAtualizados.espacamentoFileiras=parseFloat(document.getElementById('secEditEspacamento').value)||1;
+    dadosAtualizados.anguloInicio=parseFloat(document.getElementById('secEditAnguloInicio').value)||0;
+    dadosAtualizados.anguloTotal=parseFloat(document.getElementById('secEditAnguloTotal').value)||1;
+  }else{
+    dadosAtualizados.x=parseFloat(document.getElementById('secEditX').value)||0;
+    dadosAtualizados.y=parseFloat(document.getElementById('secEditY').value)||0;
+    dadosAtualizados.largura=parseFloat(document.getElementById('secEditLargura').value)||1;
+    dadosAtualizados.altura=parseFloat(document.getElementById('secEditAltura').value)||1;
+    dadosAtualizados.rotacao=parseFloat(document.getElementById('secEditRotacao').value)||0;
+  }
+  window._previewEdicaoDados=dadosAtualizados;
+  const pontos=calcularPosicoesSecao(dadosAtualizados);
+  const el=document.getElementById('previewEdicaoEl');
+  el.innerHTML=pontos.map(p=>'<div style="position:absolute;left:'+p.x+'%;top:'+p.y+'%;width:2.2%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:'+(document.getElementById('secEditCor')?.value||s.cor)+';border:1px solid rgba(0,0,0,.3)"></div>').join('');
+}
+function salvarEdicaoSecao(index){
+  const s=_secoesTemp[index];
+  const atualizado={...window._previewEdicaoDados,
+    nome:document.getElementById('secEditNome').value.trim()||s.nome,
+    cor:document.getElementById('secEditCor').value,
+    loteId:document.getElementById('secEditLote').value,
+  };
+  _secoesTemp[index]=atualizado;
+  document.getElementById('modalEdicaoSecao').style.display='none';
+  renderListaSecoes();
+}
+async function converterMapaPB(){
+  const btn=document.getElementById('btnConverterPB');
+  btn.disabled=true; btn.textContent='Convertendo...';
+  try{
+    await api('POST','/api/eventos/'+EV_ATUAL.id+'/converter-mapa-pb',{});
+    toast('Convertido!','ok');
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id);
+    EV_ATUAL=d.evento;
+    renderTabAssentos();
+  }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='⚫⚪ Converter foto pra P&B'; }
+}
+let _regioesTemp=[], REGIAO_DESENHANDO=null;
+function iniciarRegioesTemp(){ _regioesTemp=JSON.parse(JSON.stringify(EV_ATUAL.mapaRegioes||[])); renderListaRegioes(); }
+function iniciarDesenhoRegiao(){
+  REGIAO_DESENHANDO={pontos:[]};
+  document.getElementById('btnIniciarRegiao').style.display='none';
+  document.getElementById('btnFecharRegiao').style.display='inline-block';
+  document.getElementById('btnCancelarRegiao').style.display='inline-block';
+  const wrap=document.getElementById('regiaoCanvasWrap');
+  wrap.onclick=(e)=>{
+    if(!REGIAO_DESENHANDO) return;
+    const rect=wrap.getBoundingClientRect();
+    const x=((e.clientX-rect.left)/rect.width)*100;
+    const y=((e.clientY-rect.top)/rect.height)*100;
+    REGIAO_DESENHANDO.pontos.push({x:Math.round(x*100)/100,y:Math.round(y*100)/100});
+    renderSvgDesenhoAtual();
+  };
+}
+function renderSvgDesenhoAtual(){
+  const svg=document.getElementById('regiaoSvgOverlay');
+  if(!svg||!REGIAO_DESENHANDO) return;
+  const pontosStr=REGIAO_DESENHANDO.pontos.map(p=>p.x+','+p.y).join(' ');
+  const bolinhas=REGIAO_DESENHANDO.pontos.map(p=>'<circle cx="'+p.x+'" cy="'+p.y+'" r="1" fill="#fff" stroke="#000" stroke-width="0.3"></circle>').join('');
+  svg.innerHTML=renderSvgRegioesSalvas()+'<polyline points="'+pontosStr+'" fill="rgba(232,150,26,.25)" stroke="#E8961A" stroke-width="0.5"></polyline>'+bolinhas;
+}
+function renderSvgRegioesSalvas(){
+  return _regioesTemp.map(r=>{
+    const pontosStr=r.pontos.map(p=>p.x+','+p.y).join(' ');
+    return '<polygon points="'+pontosStr+'" fill="'+r.cor+'55" stroke="'+r.cor+'" stroke-width="0.4"></polygon>';
+  }).join('');
+}
+function fecharRegiaoAtual(){
+  if(!REGIAO_DESENHANDO||REGIAO_DESENHANDO.pontos.length<3){ toast('Marca pelo menos 3 pontos pra fechar a região.','err'); return; }
+  const nome=prompt('Nome desse setor:','');
+  if(!nome||!nome.trim()){ toast('Precisa dar um nome.','err'); return; }
+  const cor=prompt('Cor em hexadecimal (ex: #4ADE80):','#4ADE80')||'#4ADE80';
+  _regioesTemp.push({id:'',nome:nome.trim(),cor,pontos:REGIAO_DESENHANDO.pontos});
+  cancelarDesenhoRegiao();
+  renderListaRegioes();
+}
+function cancelarDesenhoRegiao(){
+  REGIAO_DESENHANDO=null;
+  document.getElementById('btnIniciarRegiao').style.display='inline-block';
+  document.getElementById('btnFecharRegiao').style.display='none';
+  document.getElementById('btnCancelarRegiao').style.display='none';
+  const svg=document.getElementById('regiaoSvgOverlay');
+  if(svg) svg.innerHTML=renderSvgRegioesSalvas();
+}
+function renderListaRegioes(){
+  const el=document.getElementById('listaRegioesEl');
+  if(!el) return;
+  el.innerHTML=_regioesTemp.length?_regioesTemp.map((r,i)=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border-radius:4px;background:'+r.cor+'"></span>'+esc(r.nome)+' <span style="font-size:11px;color:var(--text3)">('+r.pontos.length+' pontos)</span></div><button class="btn bdng btn-sm" onclick="_regioesTemp.splice('+i+',1);renderListaRegioes()">✕</button></div>').join(''):'<p style="font-size:12px;color:var(--text3)">Nenhuma região desenhada ainda.</p>';
+  const svg=document.getElementById('regiaoSvgOverlay');
+  if(svg) svg.innerHTML=renderSvgRegioesSalvas();
+}
+async function salvarMapaRegioes(){
+  try{
+    await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/mapa-regioes',{regioes:_regioesTemp});
+    toast('Regiões salvas!','ok');
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id);
+    EV_ATUAL=d.evento;
+  }catch(e){ toast(e.message,'err'); }
+}
+async function salvarMapaSecoes(){
+  const ativo=document.getElementById('secoesAtivo').checked;
+  const palco=document.getElementById('secoesPalco').value;
+  try{
+    await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/mapa-secoes',{ativo,palco,secoes:_secoesTemp});
+    toast('Mapa de seções salvo!','ok');
+    const d=await api('GET','/api/eventos/'+EV_ATUAL.id);
+    EV_ATUAL=d.evento;
+  }catch(e){ toast(e.message,'err'); }
 }
 async function salvarZonasClicaveis(){
   try{
