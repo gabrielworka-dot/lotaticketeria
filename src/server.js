@@ -3403,6 +3403,25 @@ app.get('/api/public/pedido/:pedidoId/pdf', async (req, res) => {
 });
 
 // ── TRANSFERIR INGRESSO ──
+// Editar só o NOME de quem vai usar aquele ingresso específico — diferente de "transferir", isso
+// não manda e-mail pra ninguém nem move o ingresso pra outra conta. É só pra quem comprou várias
+// unidades poder indicar "esse aqui é da Maria, esse é do João", sem precisar do e-mail de cada um.
+app.patch('/api/public/pedido/:pedidoId/ticket/:codigo/titular', rateLimit(60000, 20), (req, res) => {
+  const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
+  if (pedido.status !== 'pago') return res.status(400).json({ error: 'Este pedido ainda não foi confirmado.' });
+  const ticket = (pedido.tickets || []).find(t => t.codigo === req.params.codigo);
+  if (!ticket) return res.status(404).json({ error: 'Ingresso não encontrado.' });
+  if (ticket.cancelado) return res.status(400).json({ error: 'Este ingresso foi cancelado.' });
+  if (ticket.usado) return res.status(400).json({ error: 'Este ingresso já foi utilizado na entrada e não pode mais ser editado.' });
+  const { nome } = req.body;
+  const nomeLimpo = sanitize(nome || '', 100);
+  if (!nomeLimpo) return res.status(400).json({ error: 'Digite o nome de quem vai usar esse ingresso.' });
+  ticket.titularNome = nomeLimpo;
+  persistPedidos();
+  res.json({ ok: true, ticket: { codigo: ticket.codigo, titularNome: ticket.titularNome } });
+});
+
 app.post('/api/public/pedido/:pedidoId/ticket/:codigo/transferir', rateLimit(60000, 10), async (req, res) => {
   try {
     const pedido = PEDIDOS.find(p => p.id === req.params.pedidoId);
