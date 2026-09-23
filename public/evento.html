@@ -518,8 +518,10 @@ function removerAssentoSelecionado(codigo){
 }
 function renderMapaAssentosHtml(){
   const ma=EVENTO.mapaAssentos;
+  const temFotoReferencia=!!(EVENTO.mapaVenuePdf && EVENTO.mapaVenuePdf.startsWith('data:image'));
   let html='<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">Escolha seu assento<button onclick="abrirMapaAmpliado(\'grade\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:6px 12px;font-size:12px;font-family:inherit;cursor:pointer">🔍 Ampliar</button></div>'
     +'<p style="font-size:12px;color:var(--text2);margin-bottom:14px">Escolhe o assento primeiro — depois você escolhe qual tipo de ingresso (inteira, meia, etc) quer usar pra ele.</p>'
+    +(temFotoReferencia?'<button type="button" id="btnToggleFotoReferencia" onclick="const w=document.getElementById(\'fotoReferenciaWrap\');const aberto=w.style.display!==\'none\';w.style.display=aberto?\'none\':\'block\';document.getElementById(\'btnToggleFotoReferencia\').textContent=aberto?\'🗺️ Ver foto real do local (referência) ▾\':\'🗺️ Ocultar foto real do local ▴\'" style="width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-family:inherit;font-size:12px;font-weight:700;color:var(--text2);cursor:pointer;margin-bottom:14px">🗺️ Ver foto real do local (referência) ▾</button><div id="fotoReferenciaWrap" style="display:none;margin-bottom:14px"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="width:100%;border-radius:10px;display:block"><p style="font-size:11px;color:var(--text3);margin-top:6px">Essa foto é só pra você se orientar de onde fica cada setor — a escolha do assento é feita no mapa abaixo.</p></div>':'')
     +renderConteudoMapaGrade(false)
     +'</div>';
   return html;
@@ -530,33 +532,30 @@ function renderMapaAssentosHtml(){
 function renderConteudoMapaGrade(ampliado){
   const ma=EVENTO.mapaAssentos;
   const ocupados=new Set(EVENTO.assentosOcupados||[]);
-  const tam=ampliado?42:34;
-  let html='<div style="text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:16px;font-size:11px;letter-spacing:3px;color:var(--text3);font-weight:700">'+esc(ma.palco||'PALCO')+'</div>';
+  const tam=ampliado?40:32;
+  let html='<div style="text-align:center;background:linear-gradient(180deg,var(--bg),transparent);border:1px solid var(--border);border-radius:30px;padding:12px;margin-bottom:22px;font-size:11px;letter-spacing:4px;color:var(--text3);font-weight:800">'+esc(ma.palco||'PALCO')+'</div>';
   ma.setores.forEach(s=>{
-    html+='<div style="margin-bottom:18px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border-radius:3px;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+'</div>';
-    html+='<div style="overflow-x:auto"><div style="display:inline-block">';
+    html+='<div style="margin-bottom:22px"><div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border-radius:50%;background:'+(s.cor||'var(--p)')+'"></span>'+esc(s.nome)+'</div>';
+    html+='<div style="overflow-x:auto;padding-bottom:4px"><div style="display:inline-flex;flex-direction:column;align-items:center;gap:7px">';
     for(let r=0;r<s.linhas;r++){
       const letra=String.fromCharCode(65+r);
-      html+='<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">';
-      html+='<span style="font-size:11px;color:var(--text3);width:18px;text-align:center;font-weight:700">'+letra+'</span>';
+      html+='<div style="display:flex;gap:5px;align-items:center">';
+      html+='<span style="font-size:10px;color:var(--text3);width:16px;text-align:center;font-weight:800;flex-shrink:0">'+letra+'</span>';
       for(let c=1;c<=s.assentosPorLinha;c++){
         const seatCode=s.id+'-'+letra+c;
         const ocupado=ocupados.has(seatCode);
         const selecionado=!!assentosSelecionados[seatCode];
-        const cor=ocupado?'var(--gray-occ)':(selecionado?(s.cor||'var(--p)'):'var(--bg3)');
+        const cor=ocupado?'var(--gray-occ)':(selecionado?(s.cor||'var(--p)'):'var(--card)');
         const acaoClique=ocupado?'':(ampliado?'fecharMapaAmpliadoEClicar(function(){cliqueAssento(\''+seatCode+'\',\''+esc(s.nome).replace(/'/g,"\\'")+'\')})':'cliqueAssento(\''+seatCode+'\',\''+esc(s.nome).replace(/'/g,"\\'")+'\')');
-        // Além da cor, mostra um ✓ (selecionado) ou ✕ (ocupado) dentro do quadradinho — não depende
-        // só de perceber diferença de cor, o que é bem mais difícil em telas pequenas ou pra quem
-        // tem dificuldade de visão.
-        const conteudoIcone=ocupado?'✕':(selecionado?'✓':'');
-        const corIcone=ocupado?'var(--text3)':'#fff';
-        html+='<div onclick="'+acaoClique+'" title="'+seatCode+(selecionado?' — '+esc(assentosSelecionados[seatCode].nome):'')+'" style="width:'+tam+'px;height:'+tam+'px;border-radius:6px;background:'+cor+';border:2px solid '+(selecionado?(s.cor||'var(--p)'):(ocupado?'var(--gray-occ)':'var(--border)'))+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:'+(ampliado?'18px':'15px')+';font-weight:900;color:'+corIcone+'">'+conteudoIcone+'</div>';
+        const conteudoIcone=ocupado?'✕':c;
+        const corTexto=ocupado?'var(--text3)':(selecionado?'#18160F':'var(--text2)');
+        html+='<div onclick="'+acaoClique+'" title="'+seatCode+(selecionado?' — '+esc(assentosSelecionados[seatCode].nome):'')+'" style="width:'+tam+'px;height:'+tam+'px;border-radius:50%;background:'+cor+';border:1.5px solid '+(selecionado?(s.cor||'var(--p)'):(ocupado?'var(--gray-occ)':'var(--border)'))+';cursor:'+(ocupado?'not-allowed':'pointer')+';flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:'+(ampliado?'13px':'11px')+';font-weight:800;color:'+corTexto+';box-shadow:'+(selecionado?'0 2px 8px rgba(0,0,0,.25)':'none')+'">'+conteudoIcone+'</div>';
       }
       html+='</div>';
     }
     html+='</div></div></div>';
   });
-  html+='<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-top:8px;flex-wrap:wrap"><span><span style="display:inline-block;width:12px;height:12px;background:var(--bg3);border:1.5px solid var(--border);border-radius:3px;margin-right:5px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--p);border-radius:3px;margin-right:5px;vertical-align:middle;color:#fff;font-size:9px;font-weight:900">✓</span>Selecionado</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--gray-occ);border-radius:3px;margin-right:5px;vertical-align:middle;color:var(--text3);font-size:9px;font-weight:900">✕</span>Ocupado</span></div>';
+  html+='<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-top:8px;flex-wrap:wrap;justify-content:center"><span><span style="display:inline-block;width:12px;height:12px;background:var(--card);border:1.5px solid var(--border);border-radius:50%;margin-right:5px;vertical-align:middle"></span>Disponível</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--p);border-radius:50%;margin-right:5px;vertical-align:middle"></span>Selecionado</span><span><span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;background:var(--gray-occ);border-radius:50%;margin-right:5px;vertical-align:middle;color:var(--text3);font-size:9px;font-weight:900">✕</span>Ocupado</span></div>';
   return html;
 }
 // Clicar num assento: se já tiver um lote escolhido pra ele, desmarca direto (clique de novo pra
