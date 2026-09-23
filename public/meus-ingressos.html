@@ -146,7 +146,7 @@ async function init(){
         ${p.tickets.map((t,i)=>`
           <div class="ticket">
             <div class="ticket-qr" id="qr-${p.pedidoId}-${i}"></div>
-            <div style="flex:1"><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}${t.titularNome?' · '+esc(t.titularNome):''}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':(t.cancelado?'<div style="font-size:11px;color:#F87171;margin-top:2px">Reembolsado</div>':'<button onclick="abrirTransferencia(\''+p.pedidoId+'\',\''+t.codigo+'\')" style="margin-top:6px;background:none;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">🔄 Transferir</button>')}
+            <div style="flex:1"><div class="ticket-code">${t.codigo}</div><div class="ticket-lote">${esc(t.loteNome)}${t.titularNome?' · '+esc(t.titularNome):''}</div>${t.usado?'<div class="ticket-usado">✓ Já utilizado</div>':(t.cancelado?'<div style="font-size:11px;color:#F87171;margin-top:2px">Reembolsado</div>':'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><button onclick="abrirEdicaoNome(\''+p.pedidoId+'\',\''+t.codigo+'\',\''+esc(t.titularNome||'').replace(/'/g,"\\'")+'\')" style="background:none;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">✏️ Editar nome</button><button onclick="abrirTransferencia(\''+p.pedidoId+'\',\''+t.codigo+'\')" style="margin-top:6px;background:none;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">🔄 Transferir</button></div>')}
               ${t.barAtivo?`<div style="margin-top:8px;background:var(--bg3,#161410);border-radius:7px;padding:8px 10px">
                 <div style="font-size:11px;color:var(--text3,#8A8378)">Saldo do bar</div>
                 <div style="font-size:14px;font-weight:700;color:#4ADE80">R$ ${t.saldoCashless.toFixed(2)}</div>
@@ -218,6 +218,16 @@ function toast(msg){
   t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#4ADE80;color:#18160F;padding:10px 20px;border-radius:8px;font-weight:700;font-size:13px;z-index:999';
   document.body.appendChild(t);
   setTimeout(()=>t.remove(),2500);
+}
+async function abrirEdicaoNome(pedidoId,codigo,nomeAtual){
+  const novoNome=prompt('Nome de quem vai usar esse ingresso:',nomeAtual||'');
+  if(novoNome===null) return; // cancelou
+  const nomeLimpo=novoNome.trim();
+  if(!nomeLimpo){ alert('Digite um nome.'); return; }
+  try{
+    await api('PATCH','/api/public/pedido/'+pedidoId+'/ticket/'+codigo+'/titular',{nome:nomeLimpo});
+    init();
+  }catch(e){ alert(e.message); }
 }
 function abrirTransferencia(pedidoId,codigo){
   TRANSFER_PEDIDO_ID=pedidoId; TRANSFER_CODIGO=codigo;
