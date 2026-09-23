@@ -255,7 +255,12 @@ async function init(){
 function renderEvento(){
   const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'var(--p)';
   const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
-  const loteIdsComAssento=temMapaAssentos?new Set(EVENTO.mapaAssentos.setores.map(s=>s.loteId)):new Set();
+  // Corrigido: antes, só o lote EXATAMENTE vinculado ao setor (loteId) ficava de fora da lista geral
+  // — mas a escolha de assento já mostra QUALQUER lote cujo nome bata com o setor (ex: "Plateia
+  // Meia", "Plateia Solidário"), não só o vinculado. Isso fazia esses outros ficarem "soltos" na
+  // lista geral TAMBÉM, duplicando a opção. Agora a exclusão usa a mesma lógica de nome do modal.
+  const nomesSetoresGrade=temMapaAssentos?EVENTO.mapaAssentos.setores.map(s=>(s.nome||'').toLowerCase().trim()).filter(Boolean):[];
+  const loteIdsComAssento=temMapaAssentos?new Set((PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes).filter(l=>nomesSetoresGrade.some(nomeSetor=>l.nome.toLowerCase().includes(nomeSetor))).map(l=>l.id)):new Set();
   const lotesFonte=PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
   // Zonas desenhadas sobre a imagem do mapa: cada lote ligado a um setor (pelo nome) agora aparece
   // NORMALMENTE na lista de ingressos — só que em vez de +/- de quantidade, mostra um botão "Escolher
