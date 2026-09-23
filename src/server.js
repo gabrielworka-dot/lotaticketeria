@@ -1235,6 +1235,166 @@ app.patch('/api/eventos/:id/mapa-assentos', auth, (req, res) => {
   res.json({ evento: ev });
 });
 
+// ── MAPA DE ASSENTOS v2 — SEÇÕES RETAS E CURVAS ──────────────────────────
+// Reconstrução completa do mapa de assentos: em vez de tentar detectar pontos numa imagem (frágil,
+// desalinha fácil) ou de uma grade única e reta, o produtor desenha SEÇÕES — cada uma reta ou em
+// curva/leque — que juntas formam o layout completo do local. A foto original (se houver) fica só
+// como referência visual por baixo, nunca é usada pra calcular posição de assento.
+app.patch('/api/eventos/:id/mapa-secoes', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { ativo, palco, secoes } = req.body;
+  if (!ev.mapaSecoes) ev.mapaSecoes = { ativo: false, palco: 'PALCO', secoes: [] };
+  if (ativo !== undefined) ev.mapaSecoes.ativo = !!ativo;
+  if (palco !== undefined) ev.mapaSecoes.palco = sanitize(palco, 40);
+  if (Array.isArray(secoes)) {
+    ev.mapaSecoes.secoes = secoes.slice(0, 30).map(s => {
+      const base = {
+        id: (s.id && /^[a-zA-Z0-9_-]{1,60}$/.test(s.id) && !['undefined', 'null', 'nan'].includes(String(s.id).toLowerCase())) ? s.id : uuidv4(),
+        nome: sanitize(s.nome || 'Setor', 40),
+        loteId: sanitize(s.loteId || '', 60),
+        cor: /^#[0-9A-Fa-f]{6}$/.test(s.cor || '') ? s.cor : '#C47B14',
+        tipo: s.tipo === 'curva' ? 'curva' : 'reta',
+        linhas: Math.max(1, Math.min(30, parseInt(s.linhas) || 1)),
+        assentosPorLinha: Math.max(1, Math.min(50, parseInt(s.assentosPorLinha) || 1)),
+      };
+      if (base.tipo === 'curva') {
+        return {
+          ...base,
+          centroX: Math.max(-50, Math.min(150, parseFloat(s.centroX) || 50)),
+          centroY: Math.max(-50, Math.min(150, parseFloat(s.centroY) || 50)),
+          raioInicial: Math.max(1, Math.min(200, parseFloat(s.raioInicial) || 15)),
+          espacamentoFileiras: Math.max(1, Math.min(50, parseFloat(s.espacamentoFileiras) || 6)),
+          anguloInicio: ((parseFloat(s.anguloInicio) || 0) % 360),
+          anguloTotal: Math.max(1, Math.min(359, parseFloat(s.anguloTotal) || 90)),
+        };
+      }
+      return {
+        ...base,
+        x: Math.max(-50, Math.min(150, parseFloat(s.x) || 50)),
+        y: Math.max(-50, Math.min(150, parseFloat(s.y) || 50)),
+        largura: Math.max(1, Math.min(200, parseFloat(s.largura) || 20)),
+        altura: Math.max(1, Math.min(200, parseFloat(s.altura) || 10)),
+        rotacao: ((parseFloat(s.rotacao) || 0) % 360),
+      };
+    });
+  }
+  ev.updatedAt = new Date().toISOString();
+  persistEventos();
+  res.json({ evento: ev });
+});
+
+// ── CONVERSÃO PRETO E BRANCO + REGIÕES COLORIDAS POR SETOR ───────────────────────
+// Pega a foto real do local e remove as cores originais (que causavam confusão — cada casa de show
+// usa uma paleta diferente) — o produtor então desenha uma REGIÃO (polígono) por setor em cima
+// dessa versão em P&B, escolhendo a cor que quiser. Os assentos individuais clicáveis continuam
+// vindo do sistema de seções (matemática), essa região é só o fundo visual pra bater com a foto real.
+app.post('/api/eventos/:id/converter-mapa-pb', auth, async (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  if (!ev.mapaVenuePdf || !ev.mapaVenuePdf.startsWith('data:image/')) return res.status(400).json({ error: 'Suba uma imagem do mapa primeiro.' });
+  try {
+    const base64Limpo = ev.mapaVenuePdf.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Limpo, 'base64');
+    const img = await Jimp.read(buffer);
+    img.greyscale();
+    const saida = await img.getBase64('image/png');
+    ev.mapaVenuePb = saida;
+    persistEventos();
+    res.json({ ok: true, mapaVenuePb: saida });
+  } catch (e) {
+    console.error('Erro ao converter mapa pra P&B:', e.message);
+    res.status(500).json({ error: 'Não foi possível processar essa imagem.' });
+  }
+});
+app.patch('/api/eventos/:id/mapa-regioes', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { regioes } = req.body;
+  if (Array.isArray(regioes)) {
+    ev.mapaRegioes = regioes.slice(0, 20).map(r => ({
+      id: (r.id && /^[a-zA-Z0-9_-]{1,60}$/.test(r.id) && !['undefined', 'null'].includes(String(r.id).toLowerCase())) ? r.id : uuidv4(),
+      nome: sanitize(r.nome || 'Setor', 40),
+      cor: /^#[0-9A-Fa-f]{6}$/.test(r.cor || '') ? r.cor : '#C47B14',
+      pontos: Array.isArray(r.pontos) ? r.pontos.slice(0, 30).map(p => ({
+        x: Math.max(0, Math.min(100, parseFloat(p.x) || 0)),
+        y: Math.max(0, Math.min(100, parseFloat(p.y) || 0)),
+      })) : []
+    })).filter(r => r.pontos.length >= 3);
+  }
+  ev.updatedAt = new Date().toISOString();
+  persistEventos();
+  res.json({ evento: ev });
+});
+
+// ── IMPORTAÇÃO DE ASSENTOS POR TEXTO ─────────────────────────────────────
+// Jeito mais direto de definir o mapa: em vez de desenhar ou configurar curva, o produtor escreve
+// uma lista (Setor / Fileira / Mesa + números dos assentos) e o sistema calcula a posição de cada
+// um automaticamente. Fileiras ficam em linha reta; mesas ficam num círculo (como gente sentada
+// em volta de uma mesa de verdade). Sem desenho manual, sem coordenar nada na mão.
+function parseTextoAssentos(texto) {
+  const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
+  const setores = [];
+  let setorAtual = null;
+  for (const linha of linhas) {
+    const matchSetor = linha.match(/^setor\s*:\s*(.+)$/i);
+    if (matchSetor) { setorAtual = { nome: matchSetor[1].trim(), grupos: [] }; setores.push(setorAtual); continue; }
+    const matchGrupo = linha.match(/^(fileira|mesa)\s+([^:]+)\s*:\s*(.+)$/i);
+    if (matchGrupo && setorAtual) {
+      const numeros = matchGrupo[3].split(',').map(n => n.trim()).filter(Boolean);
+      setorAtual.grupos.push({ tipo: matchGrupo[1].toLowerCase(), label: matchGrupo[2].trim(), numeros });
+    }
+  }
+  return setores;
+}
+function calcularLayoutTexto(setores) {
+  const assentos = [];
+  const alturaSetorPct = 100 / Math.max(setores.length, 1);
+  setores.forEach((setor, si) => {
+    const topoSetor = si * alturaSetorPct;
+    const alturaGrupoPct = alturaSetorPct / Math.max(setor.grupos.length, 1);
+    setor.grupos.forEach((grupo, gi) => {
+      const centroYGrupo = topoSetor + gi * alturaGrupoPct + alturaGrupoPct / 2;
+      const n = grupo.numeros.length;
+      if (grupo.tipo === 'fileira') {
+        grupo.numeros.forEach((numero, i) => {
+          const x = n > 1 ? 10 + (i / (n - 1)) * 80 : 50;
+          assentos.push({ setorNome: setor.nome, grupoLabel: grupo.label, numeroOriginal: numero, x, y: centroYGrupo });
+        });
+      } else if (grupo.tipo === 'mesa') {
+        const raioMesa = Math.min(3.5, alturaGrupoPct * 0.35);
+        grupo.numeros.forEach((numero, i) => {
+          const anguloRad = (i / n) * 360 * Math.PI / 180;
+          const x = 50 + raioMesa * 3 * Math.sin(anguloRad);
+          const y = centroYGrupo + raioMesa * Math.cos(anguloRad);
+          assentos.push({ setorNome: setor.nome, grupoLabel: grupo.label, numeroOriginal: numero, x, y });
+        });
+      }
+    });
+  });
+  return assentos;
+}
+app.post('/api/eventos/:id/importar-assentos-texto', auth, (req, res) => {
+  const ev = eventoDoUsuario(req.params.id, req.user.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const { texto } = req.body;
+  if (!texto || !texto.trim()) return res.status(400).json({ error: 'Cole o texto com a estrutura dos assentos.' });
+  const setores = parseTextoAssentos(texto);
+  if (!setores.length) return res.status(400).json({ error: 'Não consegui encontrar nenhum "Setor:" no texto. Confere o formato.' });
+  const assentosCalculados = calcularLayoutTexto(setores);
+  if (!assentosCalculados.length) return res.status(400).json({ error: 'Nenhum assento encontrado dentro dos setores — confere se tem linhas "Fileira X: 1,2,3" ou "Mesa X: 1,2,3".' });
+  // Só devolve pra revisão — quem confirma de fato é a rota que já existia de salvar zonas.
+  const resumo = setores.map(s => ({ nome: s.nome, totalAssentos: s.grupos.reduce((sum, g) => sum + g.numeros.length, 0) }));
+  res.json({
+    resumo,
+    totalGeral: assentosCalculados.length,
+    zonas: assentosCalculados.map(a => ({
+      x: Math.round(a.x * 100) / 100, y: Math.round(a.y * 100) / 100, w: 2, h: 3,
+      label: a.setorNome, numero: a.numeroOriginal, grupo: a.grupoLabel
+    }))
+  });
+});
+
 app.patch('/api/eventos/:id/publicar', auth, async (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
@@ -2456,9 +2616,12 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
     suporteWhatsapp: SUPORTE_WHATSAPP || undefined,
     provedorPagamento: db.provedorPagamento,
     mapaAssentos: ev.mapaAssentos?.ativo ? ev.mapaAssentos : null,
+    mapaSecoes: ev.mapaSecoes?.ativo ? ev.mapaSecoes : null,
+    mapaVenuePb: ev.mapaVenuePb || null,
+    mapaRegioes: ev.mapaRegioes || [],
     mapaVenuePdf: ev.mapaVenuePdf || '',
     mapaVenueZonas: ev.mapaVenueZonas || [],
-    assentosOcupados: ev.mapaAssentos?.ativo ? (ev.assentosOcupados || []) : [],
+    assentosOcupados: (ev.mapaAssentos?.ativo || ev.mapaSecoes?.ativo) ? (ev.assentosOcupados || []) : [],
     organizador: { nome: organizador?.nomePublico || organizador?.nome, slug: organizador?.organizadorSlug, verificado: !!organizador?.verificado }
   });
 });
