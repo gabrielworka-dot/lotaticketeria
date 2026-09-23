@@ -255,11 +255,12 @@ async function init(){
 function renderEvento(){
   const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'var(--p)';
   const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
+  const temMapaSecoes=!!(EVENTO.mapaSecoes&&EVENTO.mapaSecoes.ativo&&EVENTO.mapaSecoes.secoes?.length);
   // Corrigido: antes, só o lote EXATAMENTE vinculado ao setor (loteId) ficava de fora da lista geral
   // — mas a escolha de assento já mostra QUALQUER lote cujo nome bata com o setor (ex: "Plateia
   // Meia", "Plateia Solidário"), não só o vinculado. Isso fazia esses outros ficarem "soltos" na
   // lista geral TAMBÉM, duplicando a opção. Agora a exclusão usa a mesma lógica de nome do modal.
-  const nomesSetoresGrade=temMapaAssentos?EVENTO.mapaAssentos.setores.map(s=>(s.nome||'').toLowerCase().trim()).filter(Boolean):[];
+  const nomesSetoresGrade=(temMapaAssentos?EVENTO.mapaAssentos.setores.map(s=>(s.nome||'').toLowerCase().trim()):[]).concat(temMapaSecoes?EVENTO.mapaSecoes.secoes.map(s=>(s.nome||'').toLowerCase().trim()):[]).filter(Boolean);
   const loteIdsComAssento=temMapaAssentos?new Set((PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes).filter(l=>nomesSetoresGrade.some(nomeSetor=>l.nome.toLowerCase().includes(nomeSetor))).map(l=>l.id)):new Set();
   const lotesFonte=PROMOTER_INFO?PROMOTER_INFO.lotes:EVENTO.lotes;
   // Zonas desenhadas sobre a imagem do mapa: cada lote ligado a um setor (pelo nome) agora aparece
@@ -313,6 +314,7 @@ function renderEvento(){
       </div>
     </div>
     ${temMapaAssentos?renderMapaAssentosHtml():''}
+    ${temMapaSecoes?renderMapaSecoesHtml():''}
     <!-- Lista clara dos assentos escolhidos, separada do mapa — pra não depender só de olhar a cor
          no mapa (mais difícil em telas pequenas ou pra quem tem dificuldade de visão). Cada linha
          tem um botão grande de remover, do mesmo jeito que a Sympla faz. -->
@@ -520,6 +522,95 @@ function removerAssentoSelecionado(codigo){
   delete assentosSelecionados[codigo];
   renderEvento();
   atualizarTotal();
+}
+// ── MAPA DE ASSENTOS v2 — SEÇÕES RETAS E CURVAS ──────────────────────────
+// Mesma matemática usada no editor do painel — garante que a posição de cada assento aqui é
+// EXATAMENTE a mesma que o produtor viu ao desenhar, sem nenhuma tradução/aproximação no meio.
+function calcularPosicoesSecao(secao){
+  const posicoes=[];
+  const {linhas,assentosPorLinha}=secao;
+  if(secao.tipo==='curva'){
+    const {centroX,centroY,raioInicial,espacamentoFileiras,anguloInicio,anguloTotal}=secao;
+    for(let r=0;r<linhas;r++){
+      const raio=raioInicial+r*espacamentoFileiras;
+      for(let s=0;s<assentosPorLinha;s++){
+        const t=assentosPorLinha>1?s/(assentosPorLinha-1):0.5;
+        const anguloGraus=anguloInicio-anguloTotal/2+t*anguloTotal;
+        const anguloRad=anguloGraus*Math.PI/180;
+        posicoes.push({linha:r,assento:s,x:centroX+raio*Math.sin(anguloRad),y:centroY-raio*Math.cos(anguloRad)});
+      }
+    }
+  }else{
+    const {x,y,largura,altura,rotacao=0}=secao;
+    const rotRad=rotacao*Math.PI/180;
+    for(let r=0;r<linhas;r++){
+      for(let s=0;s<assentosPorLinha;s++){
+        const tx=assentosPorLinha>1?(s/(assentosPorLinha-1)-0.5)*largura:0;
+        const ty=linhas>1?(r/(linhas-1)-0.5)*altura:0;
+        const rx=tx*Math.cos(rotRad)-ty*Math.sin(rotRad);
+        const ry=tx*Math.sin(rotRad)+ty*Math.cos(rotRad);
+        posicoes.push({linha:r,assento:s,x:x+rx,y:y+ry});
+      }
+    }
+  }
+  return posicoes;
+}
+function renderMapaSecoesHtml(){
+  const ms=EVENTO.mapaSecoes;
+  const temFotoReferencia=!!(EVENTO.mapaVenuePdf && EVENTO.mapaVenuePdf.startsWith('data:image'));
+  let html='<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">Escolha seu assento<button onclick="abrirMapaSecoesAmpliado()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:8px;padding:6px 12px;font-size:12px;font-family:inherit;cursor:pointer">🔍 Ampliar</button></div>'
+    +(temFotoReferencia?'<button type="button" id="btnToggleFotoReferenciaSec" onclick="const w=document.getElementById(\'fotoReferenciaWrapSec\');const aberto=w.style.display!==\'none\';w.style.display=aberto?\'none\':\'block\';document.getElementById(\'btnToggleFotoReferenciaSec\').textContent=aberto?\'🗺️ Ver foto real do local (referência) ▾\':\'🗺️ Ocultar foto real do local ▴\'" style="width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-family:inherit;font-size:12px;font-weight:700;color:var(--text2);cursor:pointer;margin-bottom:14px">🗺️ Ver foto real do local (referência) ▾</button><div id="fotoReferenciaWrapSec" style="display:none;margin-bottom:14px"><img src="'+esc(EVENTO.mapaVenuePdf)+'" style="width:100%;border-radius:10px;display:block"></div>':'')
+    +renderConteudoMapaSecoes(false)
+    +'</div>';
+  return html;
+}
+function renderConteudoMapaSecoes(ampliado){
+  const ms=EVENTO.mapaSecoes;
+  const ocupados=new Set(EVENTO.assentosOcupados||[]);
+  const raio=ampliado?1.6:1.3;
+  const temFundoPB=!!EVENTO.mapaVenuePb;
+  const temRegioes=!!(EVENTO.mapaRegioes&&EVENTO.mapaRegioes.length);
+  let html='<div style="position:relative;width:100%;aspect-ratio:16/10;background:var(--bg3);border-radius:10px;border:1px solid var(--border);overflow:hidden">';
+  if(temFundoPB) html+='<img src="'+esc(EVENTO.mapaVenuePb)+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.55">';
+  if(temRegioes) html+='<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">'+EVENTO.mapaRegioes.map(r=>'<polygon points="'+r.pontos.map(p=>p.x+','+p.y).join(' ')+'" fill="'+r.cor+'40" stroke="'+r.cor+'" stroke-width="0.4"></polygon>').join('')+'</svg>';
+  ms.secoes.forEach(sec=>{
+    const pontos=calcularPosicoesSecao(sec);
+    pontos.forEach(p=>{
+      const seatCode=sec.id+'-L'+p.linha+'-A'+p.assento;
+      const ocupado=ocupados.has(seatCode);
+      const selecionado=!!assentosSelecionados[seatCode];
+      const cor=ocupado?'var(--gray-occ)':(selecionado?'var(--p)':sec.cor);
+      const acaoClique=ocupado?'':(ampliado?'fecharMapaAmpliadoEClicar(function(){cliqueAssento(\''+seatCode+'\',\''+esc(sec.nome).replace(/'/g,"\\'")+'\')})':'cliqueAssento(\''+seatCode+'\',\''+esc(sec.nome).replace(/'/g,"\\'")+'\')');
+      const conteudoIcone=ocupado?'✕':(p.assento+1);
+      html+='<div onclick="'+acaoClique+'" title="'+esc(sec.nome)+' — Fileira '+(p.linha+1)+', Assento '+(p.assento+1)+'" style="position:absolute;left:'+p.x+'%;top:'+p.y+'%;width:'+raio+'%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:'+cor+';border:1.5px solid rgba(0,0,0,.3);cursor:'+(ocupado?'not-allowed':'pointer')+';display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:'+(ocupado?'var(--text3)':'#18160F')+';box-sizing:border-box">'+conteudoIcone+'</div>';
+    });
+  });
+  html+='<div style="position:absolute;bottom:2%;left:50%;transform:translateX(-50%);background:#18160F;color:#fff;font-size:11px;font-weight:800;padding:5px 18px;border-radius:6px;letter-spacing:2px">'+esc(ms.palco||'PALCO')+'</div>';
+  html+='</div>';
+  // Tabela de legenda — explica claramente qual cor é qual setor, separada do mapa (mais fácil de
+  // ler que só a legenda pequena embaixo do mapa, principalmente com muitos setores).
+  if(ms.secoes.length>1){
+    html+='<div style="margin-top:12px;border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +ms.secoes.map((sec,i)=>{
+        const preco=(getLotesFonte().find(l=>l.nome.toLowerCase().includes(sec.nome.toLowerCase()))||{}).preco;
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;'+(i<ms.secoes.length-1?'border-bottom:1px solid var(--border);':'')+'background:'+(i%2===0?'var(--card)':'var(--bg3)')+'"><span style="width:16px;height:16px;border-radius:50%;background:'+sec.cor+';flex-shrink:0"></span><span style="font-size:13px;font-weight:700;flex:1">'+esc(sec.nome)+'</span>'+(preco!==undefined?'<span style="font-size:12px;color:var(--text2)">R$ '+preco.toFixed(2).replace('.',',')+'</span>':'')+'</div>';
+      }).join('')
+      +'</div>';
+  }
+  html+='<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-top:10px;justify-content:center"><span><span style="display:inline-block;width:11px;height:11px;background:var(--gray-occ);border-radius:50%;margin-right:5px;vertical-align:middle"></span>Ocupado</span></div>';
+  return html;
+}
+function abrirMapaSecoesAmpliado(){
+  let modal=document.getElementById('modalMapaAmpliado');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='modalMapaAmpliado';
+    modal.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:400;flex-direction:column';
+    document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  modal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;flex-shrink:0"><span style="color:#fff;font-size:13px;font-weight:700">Toque num assento livre</span><button onclick="document.getElementById(\'modalMapaAmpliado\').style.display=\'none\'" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer">✕</button></div>'
+    +'<div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px">'+renderConteudoMapaSecoes(true)+'</div>';
 }
 function renderMapaAssentosHtml(){
   const ma=EVENTO.mapaAssentos;
