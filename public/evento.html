@@ -160,11 +160,19 @@ function aplicarTema(tema){
   const btn=document.getElementById('themeToggle');
   if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
 }
-(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+// Alguns navegadores restritos (o navegador interno do Instagram/Facebook, principalmente no
+// iPhone, é o caso mais comum) BLOQUEIAM acesso ao localStorage e o acesso direto LANÇA UM ERRO em
+// vez de simplesmente retornar vazio. Sem essa proteção, a página inteira travava e nada carregava
+// pra quem clicava no anúncio e abria o link dentro do próprio app — exatamente o público que mais
+// importa numa campanha de tráfego. Essas funções nunca lançam erro, só retornam vazio se falhar.
+function storageGet(chave){ try{ return localStorage.getItem(chave); }catch(e){ return null; } }
+function storageSet(chave,valor){ try{ localStorage.setItem(chave,valor); }catch(e){} }
+function storageRemove(chave){ try{ localStorage.removeItem(chave); }catch(e){} }
+(function(){ aplicarTema(storageGet('lota_tema') || 'dark'); })();
 function alternarTema(){
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   const novo = atual === 'light' ? 'dark' : 'light';
-  localStorage.setItem('lota_tema', novo);
+  storageSet('lota_tema', novo);
   aplicarTema(novo);
 }
 
@@ -177,7 +185,7 @@ const slug=location.pathname.split('/').filter(Boolean).pop();
 let EVENTO=null, PROMOTER_INFO=null;
 let selecoes={};
 let cupomAplicado=null;
-let AT_COMPRADOR=localStorage.getItem('role_token')||null;
+let AT_COMPRADOR=storageGet('role_token')||null;
 let EMAIL_PENDENTE_CONFIRMACAO=false;
 let CU_EMAIL_PENDENTE=null;
 
@@ -225,12 +233,12 @@ function dispararConversao(pixels,valor,pedidoId){
   // Proteção contra disparo duplicado: se a pessoa atualizar ou revisitar a página de
   // confirmação, o evento de Purchase não deve ser contado de novo.
   const chaveDedup='pixel_purchase_'+pedidoId;
-  if(pedidoId && localStorage.getItem(chaveDedup)) return;
+  if(pedidoId && storageGet(chaveDedup)) return;
   if(pixels.metaPixelId && window.fbq) fbq('track','Purchase',{value:valor,currency:'BRL'});
   if(pixels.gaMeasurementId && window.gtag) gtag('event','purchase',{value:valor,currency:'BRL'});
   if(pixels.tiktokPixelId && window.ttq) ttq.track('CompletePayment',{value:valor,currency:'BRL'});
   if(pixels.googleAdsConversionId && window.gtag) gtag('event','conversion',{send_to:pixels.googleAdsConversionId+'/'+(pixels.googleAdsConversionLabel||''),value:valor,currency:'BRL'});
-  if(pedidoId) localStorage.setItem(chaveDedup,'1');
+  if(pedidoId) storageSet(chaveDedup,'1');
 }
 
 async function init(){
@@ -239,7 +247,7 @@ async function init(){
   // foi confirmado — cobre o caso de contas antigas, criadas antes desse recurso existir.
   if(AT_COMPRADOR){
     try{ const d=await api('GET','/api/auth/me'); if(!d.user.emailVerificado){ EMAIL_PENDENTE_CONFIRMACAO=true; CU_EMAIL_PENDENTE=d.user.email; } }
-    catch(e){ AT_COMPRADOR=null; localStorage.removeItem('role_token'); }
+    catch(e){ AT_COMPRADOR=null; storageRemove('role_token'); }
   }
   try{
     EVENTO=await api('GET','/api/public/eventos/'+slug);
@@ -1025,7 +1033,7 @@ function selecionarAbaGate(aba){
 }
 async function autenticarEContinuar(token,usuario){
   AT_COMPRADOR=token;
-  localStorage.setItem('role_token',token);
+  storageSet('role_token',token);
   carregarBeneficioAssinatura();
   // Pré-preenche nome/e-mail com os dados da conta, pra não pedir de novo
   if(usuario){
