@@ -68,6 +68,25 @@ function decifrarCpfPedidos(pedidos) {
 }
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const ASAAS_WEBHOOK_TOKEN = process.env.ASAAS_WEBHOOK_TOKEN || '';
+const MP_WEBHOOK_SECRET = process.env.MP_WEBHOOK_SECRET || '';
+// Confirma que a notificação realmente veio do Mercado Pago — sem isso, qualquer pessoa poderia
+// mandar um POST fingindo ser um pagamento aprovado. O MP manda a assinatura no header x-signature
+// no formato "ts=...,v1=...", calculada com HMAC-SHA256 sobre um "manifesto" com id+request-id+ts.
+// Documentação: https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/optional-notifications
+function verificarAssinaturaMp(req, dataId) {
+  if (!MP_WEBHOOK_SECRET) return true; // sem o secret configurado, segue sem verificar (como já era)
+  const xSignature = req.headers['x-signature'];
+  const xRequestId = req.headers['x-request-id'];
+  if (!xSignature || !dataId) return false;
+  const partes = {};
+  xSignature.split(',').forEach(p => { const [k, v] = p.split('='); if (k && v) partes[k.trim()] = v.trim(); });
+  const { ts, v1 } = partes;
+  if (!ts || !v1) return false;
+  const manifesto = `id:${dataId};request-id:${xRequestId || ''};ts:${ts};`;
+  const hashCalculado = crypto.createHmac('sha256', MP_WEBHOOK_SECRET).update(manifesto).digest('hex');
+  // Comparação em tempo constante — evita vazar informação sobre o hash através do tempo de resposta.
+  return hashCalculado.length === v1.length && crypto.timingSafeEqual(Buffer.from(hashCalculado), Buffer.from(v1));
+}
 
 // ── Security headers ──────────────────────────────────────
 app.use((req, res, next) => {
@@ -3322,6 +3341,13 @@ app.post('/api/mp/webhook', async (req, res) => {
     const paymentId = req.body?.data?.id || req.query['data.id'] || (req.query.topic === 'payment' ? req.query.id : null);
     const isPaymentNotif = req.body?.type === 'payment' || req.query.type === 'payment' || req.query.topic === 'payment';
     if (!isPaymentNotif || !paymentId) return res.sendStatus(200);
+    // Confirma que essa notificação realmente veio do Mercado Pago antes de ir buscar/confirmar
+    // qualquer pagamento — sem isso, um POST forjado poderia tentar disparar a confirmação de um
+    // pedido qualquer (mesmo que a confirmação real dependa de reconsultar a API, é uma camada extra).
+    if (!verificarAssinaturaMp(req, paymentId)) {
+      console.error('[Webhook MP] Assinatura inválida — notificação ignorada.');
+      return res.sendStatus(200); // 200 pra não gerar retentativa infinita do MP, só ignora e loga
+    }
     const { ped: pedidoId, recarga: recargaId } = req.query;
     if (!MP_PLATFORM_TOKEN) return res.sendStatus(200);
 
