@@ -3302,6 +3302,12 @@ app.post('/api/mp/webhook', async (req, res) => {
     const tipoNotif = req.body?.type || req.query.type;
     if (tipoNotif === 'subscription_preapproval') {
       const idAssinaturaMp = req.body?.data?.id || req.query['data.id'];
+      // Mesma verificação de assinatura usada pros pagamentos normais — sem isso, alguém poderia
+      // forjar um POST fingindo que uma assinatura foi autorizada, sem nunca ter pago nada.
+      if (!verificarAssinaturaMp(req, idAssinaturaMp)) {
+        console.error('[Webhook MP] Assinatura inválida (notificação de assinatura) — ignorada.');
+        return res.sendStatus(200);
+      }
       const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === idAssinaturaMp);
       if (assinatura && MP_PLATFORM_TOKEN) {
         const consulta = await fetch(`${MP_API}/preapproval/${idAssinaturaMp}`, { headers: { 'Authorization': `Bearer ${MP_PLATFORM_TOKEN}` } });
@@ -3322,6 +3328,14 @@ app.post('/api/mp/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
     if (tipoNotif === 'subscription_authorized_payment') {
+      // A assinatura é calculada sobre o "data.id" da própria notificação (o padrão documentado
+      // pelo Mercado Pago), não sobre o preapproval_id — usamos o preapproval_id só depois, pra
+      // achar QUAL assinatura renovar.
+      const idNotificacao = req.body?.data?.id || req.query['data.id'];
+      if (!verificarAssinaturaMp(req, idNotificacao)) {
+        console.error('[Webhook MP] Assinatura inválida (renovação de assinatura) — ignorada.');
+        return res.sendStatus(200);
+      }
       // Cada cobrança mensal aprovada renova o ciclo — zera as cortesias usadas, pra contar de novo.
       const idAssinaturaMp = req.body?.data?.preapproval_id;
       const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === idAssinaturaMp);
@@ -3367,7 +3381,28 @@ app.post('/api/mp/webhook', async (req, res) => {
 
     // Se o pedidoId não veio na URL (por algum motivo), localizamos pelo external_reference do próprio pagamento
     const pedido = PEDIDOS.find(p => p.id === (pedidoId || payment.external_reference));
-    if (!pedido) { console.error(`[Webhook MP] ⚠️ Pagamento ${paymentId} (status: ${payment.status}) não corresponde a nenhum pedido conhecido (ped=${pedidoId||'ausente'}, external_reference=${payment.external_reference||'ausente'}).`); return res.sendStatus(200); }
+    if (!pedido) {
+      // Antes de desistir: esse pagamento pode ser a cobrança recorrente de uma assinatura do
+      // Clube de Assinantes — a notificação nem sempre chega marcada como "subscription_authorized_
+      // payment" (documentação do próprio MP mostra que às vezes vem só como "payment" comum), então
+      // confirmamos pelo próprio objeto do pagamento, checando os campos onde o MP costuma indicar
+      // a assinatura relacionada.
+      const idAssinaturaDoPagamento = payment.preapproval_id || payment.metadata?.preapproval_id || payment.point_of_interaction?.transaction_data?.subscription_id;
+      if (idAssinaturaDoPagamento) {
+        const assinatura = ASSINATURAS.find(a => a.idExternoAssinatura === idAssinaturaDoPagamento);
+        if (assinatura && payment.status === 'approved') {
+          assinatura.status = 'ativa';
+          assinatura.cicloAtualInicio = new Date().toISOString();
+          assinatura.cicloAtualFim = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+          assinatura.cortesiasUsadasNesteCiclo = 0;
+          persistAssinaturas();
+          console.log(`[Webhook MP] Assinatura ${assinatura.id} renovada via pagamento ${paymentId}.`);
+        }
+        return res.sendStatus(200);
+      }
+      console.error(`[Webhook MP] ⚠️ Pagamento ${paymentId} (status: ${payment.status}) não corresponde a nenhum pedido conhecido (ped=${pedidoId||'ausente'}, external_reference=${payment.external_reference||'ausente'}).`);
+      return res.sendStatus(200);
+    }
 
     if (payment.status === 'approved' && pedido.status !== 'pago') {
       const hostW = req.get('host'); const protoW = req.get('x-forwarded-proto') || 'https';
