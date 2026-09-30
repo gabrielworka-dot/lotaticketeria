@@ -58,7 +58,13 @@ html,body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans'
 </div>
 
 <script>
-let AT=localStorage.getItem('role_token_scanner')||null;
+// Alguns navegadores (o interno do Instagram/Facebook, principalmente) bloqueiam localStorage e
+// LANÇAM ERRO em vez de retornar vazio — sem essa proteção, o scanner inteiro travaria bem na
+// hora do check-in, na porta do evento. Essas funções nunca travam, mesmo se o navegador bloquear.
+function storageGet(chave){ try{ return localStorage.getItem(chave); }catch(e){ return null; } }
+function storageSet(chave,valor){ try{ localStorage.setItem(chave,valor); }catch(e){} }
+function storageRemove(chave){ try{ localStorage.removeItem(chave); }catch(e){} }
+let AT=storageGet('role_token_scanner')||null;
 let CU=null;
 let MEUS_EVENTOS_SCANNER=[];
 let EVENTO_ATUAL=null;
@@ -68,11 +74,11 @@ function aplicarTema(tema){
   const btn=document.getElementById('themeToggle');
   if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
 }
-(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+(function(){ aplicarTema(storageGet('lota_tema') || 'dark'); })();
 function alternarTema(){
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   const novo = atual === 'light' ? 'dark' : 'light';
-  localStorage.setItem('lota_tema', novo);
+  storageSet('lota_tema', novo);
   aplicarTema(novo);
 }
 
@@ -105,7 +111,7 @@ async function fazerLogin(){
   try{
     const d=await api('POST','/api/auth/login',{email,senha});
     if(d.precisa2FA){ renderLogin2FA(d.preAuthToken); return; }
-    AT=d.token; localStorage.setItem('role_token_scanner',AT);
+    AT=d.token; storageSet('role_token_scanner',AT);
     CU=d.user;
     await iniciar();
   }catch(e){ renderLogin(e.message); }
@@ -120,12 +126,12 @@ function renderLogin2FA(preAuthToken){
 async function confirmar2FA(preAuthToken){
   try{
     const d=await api('POST','/api/auth/2fa/verificar-login',{preAuthToken,codigo:gv('l2fa')});
-    AT=d.token; localStorage.setItem('role_token_scanner',AT);
+    AT=d.token; storageSet('role_token_scanner',AT);
     CU=d.user;
     await iniciar();
   }catch(e){ renderLogin(e.message); }
 }
-function sair(){ AT=null; localStorage.removeItem('role_token_scanner'); location.reload(); }
+function sair(){ AT=null; storageRemove('role_token_scanner'); location.reload(); }
 
 async function iniciar(){
   try{
@@ -241,7 +247,7 @@ async function iniciarScanner(){
 (async function(){
   if(!AT){ renderLogin(); return; }
   try{ const d=await api('GET','/api/auth/me'); CU=d.user; await iniciar(); }
-  catch(e){ AT=null; localStorage.removeItem('role_token_scanner'); renderLogin(); }
+  catch(e){ AT=null; storageRemove('role_token_scanner'); renderLogin(); }
 })();
 </script>
 </body>
