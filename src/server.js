@@ -17,6 +17,7 @@ const { Jimp } = require('jimp');
 const speakeasy = require('speakeasy');
 
 const app = express();
+app.disable('x-powered-by'); // não revela "Express" no header de resposta — reduz informação útil pra atacante
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'role_dev_secret_change_in_prod';
 const SUPORTE_WHATSAPP = process.env.SUPORTE_WHATSAPP || ''; // formato: 5511999998888 (só números, com DDI)
@@ -147,6 +148,25 @@ console.log(`[Lota] Usando DATA_DIR = ${DATA_DIR}${DATA_DIR === '/data' ? ' (Vol
 const POSSIBLE_PUBLIC = [ path.join(__dirname, '../public'), path.join(process.cwd(), 'public'), '/app/public' ];
 const PUBLIC_DIR = POSSIBLE_PUBLIC.find(p => { try { return fs.existsSync(path.join(p,'index.html')); } catch(e) { return false; }}) || path.join(__dirname,'../public');
 
+// CORS explícito e restritivo — mesmo sem isso o navegador já bloqueia requisição cross-origin por
+// padrão, mas deixamos isso DECLARADO (em vez de depender do comportamento implícito), pra nunca ser
+// afrouxado sem querer numa mudança futura. Só o próprio domínio da Lota pode fazer requisições com
+// credenciais; qualquer outro é recusado.
+const ORIGENS_PERMITIDAS = [
+  'https://www.lotaticketeria.com.br',
+  'https://lotaticketeria.com.br',
+];
+app.use((req, res, next) => {
+  const origem = req.headers.origin;
+  if (origem && ORIGENS_PERMITIDAS.includes(origem)) {
+    res.setHeader('Access-Control-Allow-Origin', origem);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 
 // Proteção contra "prototype pollution" — um tipo de ataque de injeção onde alguém manda um JSON
@@ -224,7 +244,10 @@ function gerarSlugUnico(nome, existentes) {
   return slug;
 }
 function gerarCodigoTicket() {
-  return 'RL-' + uuidv4().split('-')[0].toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  // Math.random() não é criptograficamente seguro (pode, em teoria, ser previsível) — usa
+  // crypto.randomBytes pra todo o código, não só a parte do UUID, fechando essa brecha por completo.
+  const sufixo = crypto.randomBytes(3).toString('hex').toUpperCase(); // 6 caracteres hex, aleatoriedade forte
+  return 'RL-' + uuidv4().split('-')[0].toUpperCase() + '-' + sufixo;
 }
 // Detecta quantas PESSOAS um lote admite, pelo nome (não temos campo estruturado pra isso ainda).
 // "Duplo" admite 2, "Quádruplo/Quadruplo" admite 4 — cada pessoa recebe seu próprio ingresso com
