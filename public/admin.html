@@ -361,7 +361,12 @@ a{color:inherit;}
 </div>
 
 <script>
-let AT=localStorage.getItem('role_token')||null;
+// Alguns navegadores (o interno do Instagram/Facebook é o mais comum) bloqueiam localStorage e
+// LANÇAM ERRO em vez de retornar vazio — essas funções nunca travam a página por causa disso.
+function storageGet(chave){ try{ return localStorage.getItem(chave); }catch(e){ return null; } }
+function storageSet(chave,valor){ try{ localStorage.setItem(chave,valor); }catch(e){} }
+function storageRemove(chave){ try{ localStorage.removeItem(chave); }catch(e){} }
+let AT=storageGet('role_token')||null;
 let CU=null;
 
 // ─── TEMA CLARO/ESCURO ───────────────────────────────────────
@@ -370,11 +375,11 @@ function aplicarTema(tema){
   const btn=document.getElementById('themeToggleBtn');
   if(btn) btn.textContent = tema==='light' ? '☀️ Tema Claro' : '🌙 Tema Escuro';
 }
-(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+(function(){ aplicarTema(storageGet('lota_tema') || 'dark'); })();
 function alternarTema(){
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   const novo = atual === 'light' ? 'dark' : 'light';
-  localStorage.setItem('lota_tema', novo);
+  storageSet('lota_tema', novo);
   aplicarTema(novo);
 }
 
@@ -392,7 +397,7 @@ function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=
 function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
 function toggleSb(){document.getElementById('sbNav').classList.toggle('open');document.getElementById('mobOver').classList.toggle('show');}
 function closeSb(){document.getElementById('sbNav').classList.remove('open');document.getElementById('mobOver').classList.remove('show');}
-function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
+function doLogout(){ storageRemove('role_token'); location.href='/'; }
 
 const PM={overview:'Visão Geral da Plataforma',usuarios:'Produtores',eventos:'Eventos',adiantamentos:'Adiantamentos',financeiro:'Financeiro',config:'Comissão da Plataforma',mensagens:'Mensagens de Contato',dicas:'Dicas para Produtores',seguranca:'Segurança'};
 function gp(id,el){
@@ -428,8 +433,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const d=await api('GET','/api/auth/me');
     CU=d.user;
     if(!CU.isAdmin){ location.href='/painel.html'; return; }
+    // Admin é o acesso de maior privilégio do sistema — sem 2FA ativo, mostra um aviso bem visível
+    // (não bloqueia o acesso, só avisa com destaque) toda vez que entrar.
+    if(!CU.twoFactorAtivo){
+      const aviso=document.createElement('div');
+      aviso.style.cssText='position:fixed;top:0;left:0;right:0;z-index:500;background:#EF4444;color:#fff;text-align:center;padding:10px;font-size:13px;font-weight:700';
+      aviso.innerHTML='⚠️ Sua conta de admin está SEM autenticação em duas etapas (2FA) ativada — <a href="#" onclick="gp(\'seguranca\',null);this.parentElement.remove();return false" style="color:#fff;text-decoration:underline">ativar agora</a>';
+      document.body.prepend(aviso);
+    }
     carregarOverview();
-  }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
+  }catch(e){ storageRemove('role_token'); location.href='/'; }
 })();
 
 async function carregarOverview(){
