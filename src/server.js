@@ -192,6 +192,16 @@ function sanitize(str, maxLen = 500) {
   return str.trim().slice(0, maxLen).replace(/<[^>]*>/g, '');
 }
 // Imagens podem vir como URL normal ou como data URI base64 (upload direto) — precisa de limite bem maior
+// Corta um texto respeitando o fim da última palavra completa (em vez de cortar no meio, tipo "...e
+// dizem que é imp"), pra descrições de redes sociais/anúncios não ficarem com aparência quebrada —
+// isso reduz a taxa de clique em campanhas de tráfego, já que o preview do anúncio parece malfeito.
+function truncarPalavraCompleta(str, maxLen) {
+  const limpo = sanitize(str, maxLen + 40); // margem extra pra ter de onde cortar sem perder conteúdo real
+  if (limpo.length <= maxLen) return limpo;
+  const cortado = limpo.slice(0, maxLen);
+  const ultimoEspaco = cortado.lastIndexOf(' ');
+  return (ultimoEspaco > maxLen * 0.6 ? cortado.slice(0, ultimoEspaco) : cortado).trim() + '…';
+}
 function sanitizeImagem(str) {
   if (typeof str !== 'string') return '';
   const v = str.trim();
@@ -3712,7 +3722,7 @@ app.get('/e/:slug', (req, res) => {
       const baseUrl = `${proto}://${req.get('host')}`;
       const pageUrl = `${baseUrl}/e/${ev.slug}`;
       const imageUrl = ev.imagemCapa ? `${baseUrl}/api/public/eventos/${ev.slug}/imagem` : `${baseUrl}/favicon.png`;
-      const descricaoLimpa = sanitize(ev.descricao || `Ingressos para ${ev.nome}`, 200).replace(/\n/g, ' ');
+      const descricaoLimpa = truncarPalavraCompleta(ev.descricao || `Ingressos para ${ev.nome}`, 200).replace(/\n/g, ' ');
       const dataFormatada = ev.dataEvento ? parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR') : '';
       const tituloOg = `${ev.nome}${dataFormatada ? ' — ' + dataFormatada : ''}`;
       // Dados estruturados (Schema.org Event) — ajuda o Google a entender que essa página é um
@@ -3774,7 +3784,7 @@ app.get('/o/:slug', (req, res) => {
       const baseUrl = `${proto}://${req.get('host')}`;
       const nomeExibicao = user.nomePublico || user.nome;
       const imageUrl = (user.bannerUrl || user.avatarUrl) ? `${baseUrl}/api/public/organizadores/${user.organizadorSlug}/imagem` : `${baseUrl}/favicon.png`;
-      const bioLimpa = sanitize(user.bio || `Confira os eventos de ${nomeExibicao} na Lota`, 200).replace(/\n/g, ' ');
+      const bioLimpa = truncarPalavraCompleta(user.bio || `Confira os eventos de ${nomeExibicao} na Lota`, 200).replace(/\n/g, ' ');
       const metaTags = `
     <meta property="og:type" content="profile">
     <meta property="og:title" content="${esc(nomeExibicao)}">
