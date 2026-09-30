@@ -71,7 +71,12 @@ a{color:inherit;text-decoration:none;}
 
 <script>
 const slug=location.pathname.split('/').filter(Boolean).pop();
-let AT=localStorage.getItem('role_token')||null;
+// Alguns navegadores (o interno do Instagram/Facebook é o mais comum) bloqueiam localStorage e
+// LANÇAM ERRO em vez de retornar vazio — essas funções nunca travam a página por causa disso.
+function storageGet(chave){ try{ return localStorage.getItem(chave); }catch(e){ return null; } }
+function storageSet(chave,valor){ try{ localStorage.setItem(chave,valor); }catch(e){} }
+function storageRemove(chave){ try{ localStorage.removeItem(chave); }catch(e){} }
+let AT=storageGet('role_token')||null;
 let CU=null;
 // ─── TEMA CLARO/ESCURO ───────────────────────────────────────
 function aplicarTema(tema){
@@ -79,11 +84,11 @@ function aplicarTema(tema){
   const btn=document.getElementById('themeToggle');
   if(btn) btn.textContent = tema==='light' ? '☀️' : '🌙';
 }
-(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+(function(){ aplicarTema(storageGet('lota_tema') || 'dark'); })();
 function alternarTema(){
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   const novo = atual === 'light' ? 'dark' : 'light';
-  localStorage.setItem('lota_tema', novo);
+  storageSet('lota_tema', novo);
   aplicarTema(novo);
 }
 
