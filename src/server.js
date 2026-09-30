@@ -559,7 +559,12 @@ app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
     return res.json({ precisa2FA: true, preAuthToken });
   }
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
-  res.json({ token, user: safe(user) });
+  // Admin é o acesso de maior privilégio do sistema — sem forçar a ativação (pra não arriscar
+  // travar o próprio admin fora da conta caso algo dê errado no fluxo de configuração), pelo menos
+  // avisamos com destaque e registramos no log de auditoria toda vez que isso acontece sem 2FA.
+  const avisoSeguranca2FA = !!(user.isAdmin && !user.twoFactorAtivo);
+  if (avisoSeguranca2FA) registrarAuditoria(user, 'login_admin_sem_2fa', { ip: req.ip });
+  res.json({ token, user: safe(user), avisoSeguranca2FA });
 });
 
 app.post('/api/auth/2fa/verificar-login', rateLimit(60000, 10), (req, res) => {
