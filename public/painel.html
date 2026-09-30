@@ -364,7 +364,12 @@ a{color:inherit;}
 <div class="toast" id="toast"></div>
 
 <script>
-let AT=localStorage.getItem('role_token')||null;
+// Alguns navegadores (o interno do Instagram/Facebook é o mais comum) bloqueiam localStorage e
+// LANÇAM ERRO em vez de retornar vazio — essas funções nunca travam a página por causa disso.
+function storageGet(chave){ try{ return localStorage.getItem(chave); }catch(e){ return null; } }
+function storageSet(chave,valor){ try{ localStorage.setItem(chave,valor); }catch(e){} }
+function storageRemove(chave){ try{ localStorage.removeItem(chave); }catch(e){} }
+let AT=storageGet('role_token')||null;
 let CU=null;
 let PH=[];
 
@@ -374,11 +379,11 @@ function aplicarTema(tema){
   const btn=document.getElementById('themeToggleBtn');
   if(btn) btn.textContent = tema==='light' ? '☀️ Tema Claro' : '🌙 Tema Escuro';
 }
-(function(){ aplicarTema(localStorage.getItem('lota_tema') || 'dark'); })();
+(function(){ aplicarTema(storageGet('lota_tema') || 'dark'); })();
 function alternarTema(){
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   const novo = atual === 'light' ? 'dark' : 'light';
-  localStorage.setItem('lota_tema', novo);
+  storageSet('lota_tema', novo);
   aplicarTema(novo);
 }
 
@@ -462,7 +467,7 @@ function gp(id,el){
 }
 function goBack(){ if(!PH.length) return; const p=PH.pop(); gp(p); }
 
-function doLogout(){ localStorage.removeItem('role_token'); location.href='/'; }
+function doLogout(){ storageRemove('role_token'); location.href='/'; }
 
 async function tornarOrganizador(){
   const nomePublico=document.getElementById('opNomeInput').value.trim();
@@ -531,7 +536,7 @@ let SOMENTE_LEITURA=false;
     if(CU.isAdmin){
       const s=document.getElementById('navAdminSec'); if(s) s.style.display='block';
     }
-  }catch(e){ localStorage.removeItem('role_token'); location.href='/'; }
+  }catch(e){ storageRemove('role_token'); location.href='/'; }
 })();
 
 // ─── EVENTOS ────────────────────────────────────────────────
@@ -2384,7 +2389,7 @@ async function confirmarExcluirContaProdutor(){
   try{
     await api('POST','/api/produtor/excluir-conta',{senha});
     toast('Conta excluída. Até logo!','ok');
-    setTimeout(()=>{ AT=null; localStorage.removeItem('role_token'); location.href='/'; }, 1500);
+    setTimeout(()=>{ AT=null; storageRemove('role_token'); location.href='/'; }, 1500);
   }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
 function irParaPerfil(){ gp('perfil', document.getElementById('navPerfil')); }
