@@ -934,7 +934,7 @@ function atualizarTotal(){
     gateCodigoEl.style.display='none';
   }
   const usaAsaas=EVENTO?.provedorPagamento==='asaas';
-  document.getElementById('camposEnderecoAsaas').style.display=usaAsaas?'block':'none';
+  document.getElementById('camposEnderecoAsaas').style.display=(usaAsaas&&METODO_ATUAL_ASAAS==='cartao')?'block':'none';
   document.getElementById('pagamentoCard').style.display=(temItem&&autenticado&&!usaAsaas)?'block':'none';
   document.getElementById('pagamentoCardAsaas').style.display=(temItem&&autenticado&&usaAsaas)?'block':'none';
   if(temItem&&autenticado){
@@ -1119,6 +1119,10 @@ function selecionarMetodoAsaas(metodo){
   document.getElementById('tabCartaoAsaas').classList.toggle('active', metodo==='cartao');
   document.getElementById('tabPixAsaas').classList.toggle('active', metodo==='pix');
   document.getElementById('tabBoletoAsaas').classList.toggle('active', metodo==='boleto');
+  // O CEP só é necessário pra cartão (uso antifraude) — escondemos o campo pra PIX/boleto, pra não
+  // parecer uma etapa extra obrigatória pra quem só quer pagar rápido.
+  const campoCep=document.getElementById('camposEnderecoAsaas');
+  if(campoCep) campoCep.style.display=metodo==='cartao'?'block':'none';
 }
 
 let PROCESSANDO_PAGAMENTO_ASAAS=false;
@@ -1133,7 +1137,10 @@ async function processarSubmitAsaas(){
   errEl.style.display='none';
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
   if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
-  if(!cep||cep.length!==8){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
+  // O CEP só é exigido de verdade pelo Asaas pra pagamento em CARTÃO (uso antifraude do cartão) —
+  // pra PIX e boleto, pedir isso é uma fricção sem necessidade, que pode fazer gente desistir bem
+  // na última etapa, principalmente em quem veio de anúncio e quer pagar rápido.
+  if(METODO_ATUAL_ASAAS==='cartao' && (!cep||cep.length!==8)){errEl.textContent='Digite um CEP válido (8 dígitos).';errEl.style.display='block';return;}
   const itens=Object.entries(selecoes).filter(([_,q])=>q>0).map(([loteId,qtd])=>({loteId,qtd,nomesAdicionais:nomesAdicionaisPorLote[loteId]||[]}));
   Object.entries(assentosSelecionados).forEach(([seatCode,info])=>{ itens.push({loteId:info.loteId,qtd:1,assento:seatCode}); });
   if(!itens.length){errEl.textContent='Selecione ao menos um ingresso.';errEl.style.display='block';return;}
