@@ -1,0 +1,29 @@
+# Configuração do Dependabot — verifica automaticamente se alguma biblioteca usada na Lota
+# (express, jsonwebtoken, bcryptjs, etc) tem falha de segurança conhecida, e abre um Pull Request
+# sozinho com a correção. Gratuito mesmo em repositórios privados.
+#
+# Como usar: coloca esse arquivo exatamente no caminho .github/dependabot.yml do repositório
+# (cria as pastas .github e, dentro dela, esse arquivo).
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "segurança"
+      - "dependências"
+    commit-message:
+      prefix: "deps"
+    # Agrupa atualizações menores numa única PR, pra não gerar uma avalanche de PRs pequenas —
+    # mas qualquer coisa marcada como vulnerabilidade de segurança sempre vem separada, prioritária.
+    groups:
+      atualizacoes-de-rotina:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
