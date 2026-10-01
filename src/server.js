@@ -2947,6 +2947,12 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
         if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
         pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID do checkout do Asaas nesse mesmo campo
+        // Guarda ESSE id numa segunda propriedade, que NUNCA é sobrescrita depois — diferente de
+        // mpPaymentId, que na confirmação do pagamento passa a guardar o ID do pagamento real (pro
+        // reembolso funcionar). Em cobranças parceladas, da 2ª parcela em diante o Asaas manda a
+        // notificação sem external_reference, só com "checkoutSession" — e sem esse campo intacto
+        // pra comparar, o pedido nunca era encontrado, travando a confirmação das parcelas seguintes.
+        pedidoBase.checkoutSessionAsaas = criacao.data.id;
         PEDIDOS.push(pedidoBase);
         // Gravação SÍNCRONA aqui — garante que o pedido já está de verdade em disco antes do
         // comprador ser redirecionado pro Asaas, fechando a janela de corrida que podia perder o
@@ -3575,7 +3581,11 @@ app.post('/api/asaas/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
     let pedido = payment.externalReference ? PEDIDOS.find(p => p.id === payment.externalReference) : null;
-    if (!pedido && payment.checkoutSession) pedido = PEDIDOS.find(p => p.mpPaymentId === payment.checkoutSession);
+    // Corrigido: usa o campo DEDICADO (nunca sobrescrito), não mais mpPaymentId — que depois da 1ª
+    // parcela confirmada já guarda o ID do pagamento real, não mais o do checkout, quebrando essa
+    // comparação pras parcelas seguintes. Mantemos a comparação antiga só como respaldo, pra
+    // pedidos criados antes dessa correção existir.
+    if (!pedido && payment.checkoutSession) pedido = PEDIDOS.find(p => p.checkoutSessionAsaas === payment.checkoutSession || p.mpPaymentId === payment.checkoutSession);
     if (!pedido) { console.error(`[Webhook Asaas] ⚠️ Payment "${payment.id}" (externalReference: ${payment.externalReference}, checkoutSession: ${payment.checkoutSession}, evento: ${evento}) não corresponde a nenhum pedido conhecido.`); return res.sendStatus(200); }
 
     if (['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'].includes(evento) && pedido.status !== 'pago') {
