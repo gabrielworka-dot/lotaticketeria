@@ -799,6 +799,14 @@ app.post('/api/auth/tornar-organizador', auth, (req, res) => {
 // ════════════════════════════════════════════════════════
 // EQUIPE — colaboradores com acesso somente de visualização
 // ════════════════════════════════════════════════════════
+// Procura conta pelo e-mail ignorando maiúscula/minúscula e espaços — contas criadas por caminhos
+// diferentes (cadastro normal, login do Google) nem sempre guardam o e-mail do mesmo jeito, e a busca
+// exata fazia aparecer "não existe conta com esse e-mail" pra uma conta que existia.
+function acharUsuarioPorEmail(email) {
+  const alvo = String(email || '').trim().toLowerCase();
+  if (!alvo) return undefined;
+  return db.users.find(u => String(u.email || '').trim().toLowerCase() === alvo);
+}
 app.get('/api/produtor/colaboradores', auth, organizadorOnly, (req, res) => {
   const membros = db.users.filter(u => u.colaboradorDe === req.user.id).map(u => ({ id: u.id, nome: u.nome, email: u.email }));
   res.json({ colaboradores: membros });
@@ -807,7 +815,7 @@ app.get('/api/produtor/colaboradores', auth, organizadorOnly, (req, res) => {
 app.post('/api/produtor/colaboradores', auth, organizadorOnly, (req, res) => {
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
-  const pessoa = db.users.find(u => u.email === email);
+  const pessoa = acharUsuarioPorEmail(email);
   if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
   if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
   if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
@@ -838,7 +846,7 @@ app.post('/api/eventos/:id/colaboradores', auth, (req, res) => {
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
-  const pessoa = db.users.find(u => u.email === email);
+  const pessoa = acharUsuarioPorEmail(email);
   if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
   if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
   if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
@@ -871,7 +879,7 @@ app.post('/api/eventos/:id/colaboradores-scanner', auth, (req, res) => {
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
-  const pessoa = db.users.find(u => u.email === email);
+  const pessoa = acharUsuarioPorEmail(email);
   if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. Peça para a pessoa criar uma conta primeiro.' });
   if (pessoa.id === req.user.id) return res.status(400).json({ error: 'Você não pode se adicionar como colaborador de si mesmo.' });
   if (pessoa.isOrganizador) return res.status(400).json({ error: 'Essa conta já é de um produtor e não pode ser adicionada como colaboradora.' });
@@ -1035,7 +1043,10 @@ function isTestToken(token) { return /^TEST-/i.test(token || ''); }
 app.get('/api/meus-eventos', auth, organizadorOuColaborador, (req, res) => {
   let eventos;
   if (req.user.isOrganizador) {
-    eventos = EVENTOS.filter(e => e.organizadorId === req.user.id);
+    // Produtor vê os PRÓPRIOS eventos e também os de outros produtores em cujas equipes foi
+    // adicionado. Antes só aparecia o que era dele — quem era produtor E membro de equipe nunca via
+    // o evento da equipe na lista, mesmo com o acesso concedido corretamente.
+    eventos = EVENTOS.filter(e => e.organizadorId === req.user.id || (e.colaboradoresIds || []).includes(req.user.id));
   } else {
     // Colaborador puro: vê só os eventos em que foi adicionado especificamente, mais os eventos do
     // produtor a quem ainda está vinculado pelo jeito antigo (compatibilidade com quem já usava isso).
@@ -4236,6 +4247,78 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
 
   registrarAuditoria(req.user, 'recuperou_pedido_manualmente', { pedidoId: pedido.id, eventoId: ev.id, compradorEmail: pedido.comprador?.email, valor: pedido.total });
   res.json({ ok: true, pedidoId: pedido.id, ticketsGerados: pedido.tickets.length });
+});
+
+// ── EQUIPE DO EVENTO — gestão manual pelo admin ──────────────────────────────
+// O produtor só consegue adicionar contas que NÃO são de produtor (regra das rotas dele). Aqui o admin
+// resolve os casos que travam por isso: pode adicionar QUALQUER conta (inclusive de outro produtor),
+// remover membros, e limpar referências quebradas (ids de contas que não existem mais, que ficavam
+// "invisíveis" na equipe e atrapalhavam a conferência).
+function resumoMembroEquipe(u) {
+  return { id: u.id, nome: u.nome, email: u.email, isOrganizador: !!u.isOrganizador, isAdmin: !!u.isAdmin, ativo: u.ativo !== false };
+}
+app.get('/api/admin/eventos/:id/equipe', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const dono = db.users.find(u => u.id === ev.organizadorId);
+  const separar = (ids) => {
+    const membros = [], orfaos = [];
+    [...new Set(ids || [])].forEach(id => {
+      const u = db.users.find(x => x.id === id);
+      if (u) membros.push(resumoMembroEquipe(u)); else orfaos.push(id);
+    });
+    return { membros, orfaos };
+  };
+  const leitura = separar(ev.colaboradoresIds);
+  const scanner = separar(ev.colaboradoresScannerIds);
+  // Vínculo antigo: a conta aparece como colaboradora de TODOS os eventos desse produtor, não só deste.
+  const vinculoAntigo = db.users.filter(u => u.colaboradorDe && u.colaboradorDe === ev.organizadorId).map(resumoMembroEquipe);
+  res.json({
+    dono: dono ? resumoMembroEquipe(dono) : null,
+    leitura: leitura.membros, orfaosLeitura: leitura.orfaos,
+    scanner: scanner.membros, orfaosScanner: scanner.orfaos,
+    vinculoAntigo
+  });
+});
+app.post('/api/admin/eventos/:id/equipe', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const tipo = req.body.tipo === 'scanner' ? 'scanner' : 'leitura';
+  const email = sanitize(req.body.email || '', 150);
+  if (!email) return res.status(400).json({ error: 'Informe o e-mail da pessoa.' });
+  const pessoa = acharUsuarioPorEmail(email);
+  if (!pessoa) return res.status(404).json({ error: 'Não existe conta cadastrada com esse e-mail. A pessoa precisa criar uma conta primeiro.' });
+  if (pessoa.id === ev.organizadorId) return res.status(400).json({ error: 'Essa conta já é a dona do evento — não precisa entrar na equipe.' });
+  if (pessoa.isAdmin) return res.status(400).json({ error: 'Contas de administrador já enxergam todos os eventos — não precisam entrar na equipe.' });
+  const campo = tipo === 'scanner' ? 'colaboradoresScannerIds' : 'colaboradoresIds';
+  if (!Array.isArray(ev[campo])) ev[campo] = [];
+  if (ev[campo].includes(pessoa.id)) return res.status(400).json({ error: tipo === 'scanner' ? 'Essa pessoa já tem acesso ao scanner deste evento.' : 'Essa pessoa já está na equipe deste evento.' });
+  ev[campo].push(pessoa.id);
+  persistEventos();
+  registrarAuditoria(req.user, 'admin_equipe_adicionou', { eventoId: ev.id, eventoNome: ev.nome, membroId: pessoa.id, membroEmail: pessoa.email, tipo });
+  res.status(201).json({ ok: true, membro: resumoMembroEquipe(pessoa) });
+});
+// tipo = leitura | scanner | vinculo. Para "leitura" e "scanner", o :userId pode ser um id de conta
+// que não existe mais (referência quebrada) — é assim que se limpa esse tipo de sujeira.
+app.delete('/api/admin/eventos/:id/equipe/:userId', auth, adminOnly, (req, res) => {
+  const ev = EVENTOS.find(e => e.id === req.params.id);
+  if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
+  const tipo = ['leitura', 'scanner', 'vinculo'].includes(req.query.tipo) ? req.query.tipo : null;
+  if (!tipo) return res.status(400).json({ error: 'Informe o tipo de acesso a remover (leitura, scanner ou vinculo).' });
+  const userId = req.params.userId;
+  const pessoa = db.users.find(u => u.id === userId);
+  if (tipo === 'vinculo') {
+    if (!pessoa || pessoa.colaboradorDe !== ev.organizadorId) return res.status(404).json({ error: 'Vínculo não encontrado.' });
+    pessoa.colaboradorDe = null;
+    saveDB(db);
+  } else {
+    const campo = tipo === 'scanner' ? 'colaboradoresScannerIds' : 'colaboradoresIds';
+    if (!Array.isArray(ev[campo]) || !ev[campo].includes(userId)) return res.status(404).json({ error: 'Essa pessoa não está na equipe deste evento.' });
+    ev[campo] = ev[campo].filter(id => id !== userId);
+    persistEventos();
+  }
+  registrarAuditoria(req.user, 'admin_equipe_removeu', { eventoId: ev.id, eventoNome: ev.nome, membroId: userId, membroEmail: pessoa?.email || '(conta inexistente)', tipo });
+  res.json({ ok: true });
 });
 
 // ── BORDERÔ — documento de fechamento financeiro do evento (acesso e edição só pelo admin) ──
