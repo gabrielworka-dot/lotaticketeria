@@ -428,7 +428,7 @@ function handleImageUpload(fileInput, targetInputId, previewId, maxW, qualidade)
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 function toast(msg,type){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(type||'ok');setTimeout(()=>e.className='toast',3000);}
-function bloqueiaSomenteLeitura(){ if(SOMENTE_LEITURA){ toast('Sua conta tem acesso somente de visualização.','err'); return true; } return false; }
+function bloqueiaSomenteLeitura(){ if(SOMENTE_LEITURA){ toast(SOMENTE_LEITURA_BASE?'Sua conta tem acesso somente de visualização.':'Você faz parte da equipe deste evento com acesso somente de visualização.','err'); return true; } return false; }
 
 function cm(id){document.getElementById(id).classList.remove('show');}
 function gv(id){return document.getElementById(id)?.value?.trim()||'';}
@@ -438,6 +438,7 @@ function closeSb(){document.getElementById('sbNav').classList.remove('open');doc
 const PM={eventos:{t:'Meus Eventos',bk:false},novo:{t:'Criar Evento',bk:false},'evento-detalhe':{t:'Evento',bk:true},saldo:{t:'Saldo e Adiantamento',bk:false},financeiro:{t:'Financeiro',bk:false},planos:{t:'Clube de Assinantes',bk:false},dicas:{t:'Dicas',bk:false},perfil:{t:'Meu Perfil',bk:false},seguranca:{t:'Segurança',bk:false}};
 
 function gp(id,el){
+  if(id!=='evento-detalhe'){ SOMENTE_LEITURA=SOMENTE_LEITURA_BASE; document.body.classList.toggle('modo-leitura',SOMENTE_LEITURA); }
   const prev=document.querySelector('.page.active');
   if(prev && prev.id!=='page-'+id) PH.push(prev.id.replace('page-',''));
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -490,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-let SOMENTE_LEITURA=false;
+let SOMENTE_LEITURA=false, SOMENTE_LEITURA_BASE=false; // BASE = vale pra conta toda; SOMENTE_LEITURA = vale pro que está aberto agora
 (async function(){
   if(!AT){ location.href='/'; return; }
   try{
@@ -528,6 +529,7 @@ let SOMENTE_LEITURA=false;
       return;
     }
     SOMENTE_LEITURA=!CU.isOrganizador;
+    SOMENTE_LEITURA_BASE=SOMENTE_LEITURA;
     if(SOMENTE_LEITURA){
       document.body.classList.add('modo-leitura');
       ['navNovo','navSaldo','navFinanceiro','navPlanos'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
@@ -568,9 +570,12 @@ function renderListaEventosFiltrada(){
   const statusLabel={publicado:'✅ Publicado',rascunho:'📝 Rascunho',finalizado:'⏹️ Finalizado',cancelado:'🚫 Cancelado'};
   el.innerHTML=filtrados.map(ev=>{
     const rotulo=ev.statusExibicao==='finalizado'?statusLabel.finalizado:(ev.statusExibicao==='cancelado'?statusLabel.cancelado:statusLabel[ev.status]);
-    const podeCancel=!SOMENTE_LEITURA && ev.statusExibicao!=='cancelado' && ev.statusExibicao!=='finalizado';
+    const ehDono=!SOMENTE_LEITURA_BASE && CU && ev.organizadorId===CU.id;
+    const podeCancel=ehDono && ev.statusExibicao!=='cancelado' && ev.statusExibicao!=='finalizado';
+    const seloEquipe=(!SOMENTE_LEITURA_BASE && !ehDono)?'<span style="display:inline-block;margin-top:8px;font-size:11px;font-weight:700;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 8px">👥 Você é da equipe deste evento</span>':'';
     return '<div class="ev-card" style="position:relative" onclick="abrirEvento(\''+ev.id+'\')"><span class="ev-status '+ev.statusExibicao+'">'+rotulo+'</span><div class="ev-nome">'+esc(ev.nome)+'</div><div class="ev-meta">'+parseDataLocal(ev.dataEvento).toLocaleDateString('pt-BR')+' · '+esc(ev.cidade||'')+'</div>'
-      +(SOMENTE_LEITURA?'':'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn bo btn-sm" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>'+(podeCancel?'<button class="btn bdng btn-sm" onclick="event.stopPropagation();cancelarEvento(\''+ev.id+'\')">🚫 Cancelar</button>':'')+'</div>')
+      +seloEquipe
+      +(!ehDono?'':'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn bo btn-sm" onclick="event.stopPropagation();duplicarEvento(\''+ev.id+'\')">📋 Duplicar</button>'+(podeCancel?'<button class="btn bdng btn-sm" onclick="event.stopPropagation();cancelarEvento(\''+ev.id+'\')">🚫 Cancelar</button>':'')+'</div>')
       +'</div>';
   }).join('');
 }
@@ -610,6 +615,10 @@ async function abrirEvento(id){
   try{
     const d=await api('GET','/api/eventos/'+id);
     EV_ATUAL=d.evento;
+    // Produtor que faz parte da equipe de OUTRO produtor vê esse evento só pra consulta — o servidor já
+    // diz isso em "somenteLeitura"; sem usar, os botões de editar apareciam e davam erro ao clicar.
+    SOMENTE_LEITURA=SOMENTE_LEITURA_BASE||d.somenteLeitura===true;
+    document.body.classList.toggle('modo-leitura',SOMENTE_LEITURA);
     renderEventoDetalhe();
     document.getElementById('eventoDetalhe').dataset.id=id;
     PH.push('eventos');
