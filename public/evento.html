@@ -195,11 +195,35 @@ async function api(m,p,b){
   if(AT_COMPRADOR) o.headers['Authorization']='Bearer '+AT_COMPRADOR;
   if(b) o.body=JSON.stringify(b);
   const r=await fetch(p,o);
-  const d=await r.json();
-  if(!r.ok) throw new Error(d.error||'Erro');
+  // Se o servidor/proxy devolver algo que NÃO é JSON (ex: o texto "rate limited" do Railway, ou uma página
+  // de erro 502), antes estourava "Unexpected token..." — uma mensagem ilegível pro cliente.
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){
+    const msg=d.error||(r.status===429?'Muitas tentativas em pouco tempo. Aguarde um instante e tente de novo.':(r.status>=500?'O sistema está instável agora. Tente de novo em instantes.':'Erro'));
+    const err=new Error(msg); err.dados=d; throw err;
+  }
   return d;
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// Aviso rápido na tela. Esta função NÃO EXISTIA neste arquivo, mas era chamada em 3 pontos do fluxo de
+// confirmação de e-mail — o primeiro erro ("toast is not defined") interrompia tudo: depois de digitar o
+// código CERTO o checkout não avançava (a tela de dados/pagamento nunca aparecia), e o botão "reenviar
+// código" não dava nenhum retorno. Autocontida de propósito (estilo inline, cria o elemento sozinha).
+let TOAST_TIMER=null;
+function toast(msg,tipo){
+  try{
+    let el=document.getElementById('toastLota');
+    if(!el){
+      el=document.createElement('div'); el.id='toastLota'; el.setAttribute('role','status');
+      el.style.cssText='position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:500;max-width:90vw;padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:inherit;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .2s;text-align:center';
+      document.body.appendChild(el);
+    }
+    el.textContent=msg;
+    el.style.background=tipo==='err'?'#EF4444':'#22C55E'; el.style.color='#fff'; el.style.opacity='1'; el.style.display='block';
+    clearTimeout(TOAST_TIMER);
+    TOAST_TIMER=setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>{ el.style.display='none'; },250); },3200);
+  }catch(e){}
+}
 function parseDataLocal(dataStr){ if(!dataStr) return new Date(); const [y,m,d]=String(dataStr).split('-').map(Number); return new Date(y,(m||1)-1,d||1); }
 
 function injetarPixels(pixels){
@@ -256,6 +280,7 @@ async function init(){
     montarBotaoWhatsapp(EVENTO);
     if(refParam){ try{ PROMOTER_INFO=await api('GET','/api/public/eventos/'+slug+'/promoter/'+refParam); }catch(e){} }
     renderEvento();
+    carregarBeneficioAssinatura(); // agora sim o cartão existe na tela
     if(EVENTO.googleClientId) inicializarGoogleLogin();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="empty"><div style="font-size:40px;margin-bottom:12px">🎪</div><p>'+esc(e.message)+'</p></div>';
@@ -385,11 +410,17 @@ function renderEvento(){
     <!-- Confirmação de e-mail com código de 6 dígitos — evita comprar com e-mail digitado errado -->
     <div class="card" id="gateCodigoCard" style="display:none">
       <div class="card-title">Confirme seu e-mail</div>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Enviamos um código de 6 dígitos para <strong id="gateCodigoEmailTxt" style="color:var(--text)"></strong>. Digite ele abaixo pra continuar — isso garante que seu ingresso chegue certinho.</p>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:10px">Enviamos um código de 6 dígitos para <strong id="gateCodigoEmailTxt" style="color:var(--text)"></strong>. Digite ele abaixo pra continuar — isso garante que seu ingresso chegue certinho.</p>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:14px">📬 Não chegou? Pode levar 1 ou 2 minutos. Olhe também a caixa de <strong>spam / lixo eletrônico</strong> e a aba <strong>Promoções</strong>.</p>
       <div class="err" id="errGateCodigo"></div>
-      <div class="fg"><label>Código de confirmação</label><input class="fi" id="gCodigoInput" placeholder="000000" maxlength="6" inputmode="numeric" style="text-align:center;font-size:22px;letter-spacing:6px;font-weight:800" onkeydown="if(event.key==='Enter')confirmarCodigoGate()"></div>
+      <div class="fg"><label>Código de confirmação</label><input class="fi" id="gCodigoInput" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="text-align:center;font-size:22px;letter-spacing:6px;font-weight:800" onkeydown="if(event.key==='Enter')confirmarCodigoGate()"></div>
       <button class="btn" type="button" onclick="confirmarCodigoGate()">Confirmar →</button>
-      <button type="button" onclick="reenviarCodigoGate()" style="background:none;border:none;color:var(--text3);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:12px;width:100%;text-align:center">Não recebi — reenviar código</button>
+      <button type="button" id="btnReenviarGate" onclick="reenviarCodigoGate()" style="background:none;border:none;color:var(--text3);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:12px;width:100%;text-align:center;font-family:inherit">Não recebi — reenviar código</button>
+      <button type="button" onclick="alternarCorrecaoEmailGate()" style="background:none;border:none;color:var(--text3);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:12px;width:100%;text-align:center;font-family:inherit;margin-top:6px">E-mail errado? Corrigir</button>
+      <div id="gateCorrigirEmailBox" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+        <div class="fg"><label>E-mail correto</label><input class="fi" id="gNovoEmail" type="email" placeholder="seu@email.com" autocomplete="email" onkeydown="if(event.key==='Enter')corrigirEmailGate()"></div>
+        <button class="btn" type="button" onclick="corrigirEmailGate()">Enviar código pra esse e-mail →</button>
+      </div>
     </div>
     <div class="card" id="assinaturaBeneficioCard" style="display:none"></div>
     <div class="card" id="dadosCard" style="display:none">
@@ -866,6 +897,10 @@ carregarSaldoCredito();
 let BENEFICIO_ASSINATURA=null;
 async function carregarBeneficioAssinatura(){
   const card=document.getElementById('assinaturaBeneficioCard');
+  // Ao carregar a página essa função roda ANTES da tela ser desenhada (o cartão ainda não existe) — dava
+  // erro de JavaScript em toda abertura, e o benefício do assinante já logado nunca aparecia. Agora ela
+  // também é chamada logo depois de desenhar o evento (ver init).
+  if(!card) return;
   if(!AT_COMPRADOR){ card.style.display='none'; return; }
   try{
     const d=await api('GET','/api/public/eventos/'+slug+'/minha-assinatura');
@@ -877,7 +912,6 @@ async function carregarBeneficioAssinatura(){
       +(d.cortesiasDisponiveis>0?'<label style="display:flex;align-items:center;gap:10px;padding:10px 0;cursor:pointer;font-size:13px"><input type="checkbox" id="usarCortesiaAssinaturaChk" onchange="atualizarTotal()"> Usar 1 cortesia disponível (<strong>'+d.cortesiasDisponiveis+' restante(s) este mês</strong>)</label>':'<p style="font-size:12px;color:var(--text3)">Sem cortesias disponíveis este mês.</p>');
   }catch(e){ card.style.display='none'; }
 }
-carregarBeneficioAssinatura();
 
 function atualizarTotal(){
   renderListaAssentosSelecionados();
@@ -1087,6 +1121,65 @@ function mostrarTelaCodigoGate(email){
   document.getElementById('gateCodigoEmailTxt').textContent=email;
   document.getElementById('gCodigoInput').value='';
   document.getElementById('errGateCodigo').style.display='none';
+  document.getElementById('gateCorrigirEmailBox').style.display='none';
+  // Antes essa tela SEMPRE dizia "enviamos um código", mesmo pra quem estava só voltando e fazendo login
+  // (o código do cadastro dura 15 min e já tinha expirado) — nada era enviado e a pessoa esperava à toa.
+  // Agora o servidor confere e, se não houver um código válido a caminho, envia na hora.
+  garantirCodigoGate();
+}
+let GATE_REENVIO_TIMER=null;
+function iniciarCooldownReenvioGate(seg){
+  const btn=document.getElementById('btnReenviarGate'); if(!btn) return;
+  clearInterval(GATE_REENVIO_TIMER);
+  let resta=seg;
+  const atualiza=()=>{
+    if(resta>0){ btn.disabled=true; btn.style.opacity='.55'; btn.style.cursor='default'; btn.textContent='Reenviar código em '+resta+'s'; resta--; }
+    else{ clearInterval(GATE_REENVIO_TIMER); btn.disabled=false; btn.style.opacity='1'; btn.style.cursor='pointer'; btn.textContent='Não recebi — reenviar código'; }
+  };
+  atualiza(); GATE_REENVIO_TIMER=setInterval(atualiza,1000);
+}
+function mostrarErroGateCodigo(msg){ const el=document.getElementById('errGateCodigo'); el.textContent=msg; el.style.display='block'; }
+// Mostra o erro e, se o servidor sugeriu uma correção de e-mail ("gmial.com" → "gmail.com"), oferece um
+// botão pra aplicar com um toque (textContent em tudo: nada do que veio do servidor vira HTML).
+function mostrarErroComSugestao(elId,e,inputId){
+  const el=document.getElementById(elId);
+  el.textContent=e.message;
+  const sug=e.dados&&e.dados.sugestao;
+  if(sug){
+    const b=document.createElement('button');
+    b.type='button'; b.textContent='Usar '+sug;
+    b.style.cssText='display:block;margin-top:8px;background:var(--p2);color:#18160F;border:none;border-radius:8px;padding:8px 12px;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit';
+    b.onclick=()=>{ document.getElementById(inputId).value=sug; el.style.display='none'; };
+    el.appendChild(b);
+  }
+  el.style.display='block';
+}
+async function garantirCodigoGate(){
+  try{
+    const d=await api('POST','/api/auth/garantir-codigo',{});
+    if(d.aguardarSegundos>0) iniciarCooldownReenvioGate(d.aguardarSegundos);
+  }catch(e){ mostrarErroGateCodigo(e.message); if(e.dados&&e.dados.aguardarSegundos>0) iniciarCooldownReenvioGate(e.dados.aguardarSegundos); }
+}
+function alternarCorrecaoEmailGate(){
+  const b=document.getElementById('gateCorrigirEmailBox');
+  const abrir=b.style.display==='none';
+  b.style.display=abrir?'block':'none';
+  if(abrir) setTimeout(()=>document.getElementById('gNovoEmail').focus(),50);
+}
+async function corrigirEmailGate(){
+  const novo=document.getElementById('gNovoEmail').value.trim();
+  document.getElementById('errGateCodigo').style.display='none';
+  if(!novo){ mostrarErroGateCodigo('Digite o e-mail correto.'); return; }
+  try{
+    const d=await api('POST','/api/auth/corrigir-email',{novoEmail:novo});
+    CU_EMAIL_PENDENTE=d.email;
+    document.getElementById('gateCodigoEmailTxt').textContent=d.email;
+    const campoEmail=document.getElementById('cEmail'); if(campoEmail) campoEmail.value=d.email;
+    document.getElementById('gateCorrigirEmailBox').style.display='none';
+    document.getElementById('gCodigoInput').value='';
+    if(d.emailEnviado){ toast('Código enviado para '+d.email,'ok'); iniciarCooldownReenvioGate(d.aguardarSegundos||20); }
+    else mostrarErroGateCodigo('Atualizamos seu e-mail, mas não conseguimos enviar o código agora. Toque em "reenviar código" daqui a pouco.');
+  }catch(e){ mostrarErroComSugestao('errGateCodigo',e,'gNovoEmail'); }
 }
 async function confirmarCodigoGate(){
   const codigo=document.getElementById('gCodigoInput').value.trim();
@@ -1097,13 +1190,14 @@ async function confirmarCodigoGate(){
     await api('POST','/api/auth/confirmar-codigo',{codigo});
     document.getElementById('gateCodigoCard').style.display='none';
     EMAIL_PENDENTE_CONFIRMACAO=false;
+    atualizarTotal(); // primeiro libera o checkout; o aviso vem depois e nunca pode travar o fluxo
     toast('E-mail confirmado!','ok');
-    atualizarTotal();
   }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
 }
 async function reenviarCodigoGate(){
-  try{ await api('POST','/api/auth/reenviar-verificacao',{}); toast('Novo código enviado!','ok'); }
-  catch(e){ toast(e.message,'err'); }
+  document.getElementById('errGateCodigo').style.display='none';
+  try{ const d=await api('POST','/api/auth/reenviar-verificacao',{}); toast('Código enviado! Confira também o spam.','ok'); iniciarCooldownReenvioGate(d.aguardarSegundos||20); }
+  catch(e){ mostrarErroGateCodigo(e.message); if(e.dados&&e.dados.aguardarSegundos>0) iniciarCooldownReenvioGate(e.dados.aguardarSegundos); }
 }
 async function fazerLoginGate(){
   const email=document.getElementById('gLoginEmail').value.trim();
@@ -1128,7 +1222,7 @@ async function fazerCadastroGate(){
     const codigoIndicacao=new URLSearchParams(location.search).get('cupom_indicacao')||'';
     const d=await api('POST','/api/auth/registro',{nome,email,senha,tipo:'cliente',codigoIndicacao});
     await autenticarEContinuar(d.token,d.user);
-  }catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
+  }catch(e){ mostrarErroComSugestao('errGateAuth',e,'gCadEmail'); }
 }
 
 function selecionarMetodo(metodo){
