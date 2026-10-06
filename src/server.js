@@ -6,6 +6,7 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
 const crypto  = require('crypto');
+const dns     = require('dns');
 const jwt     = require('jsonwebtoken');
 const fetch   = require('node-fetch');
 const fs      = require('fs');
@@ -123,9 +124,18 @@ app.use((req, res, next) => {
 
 // ── Rate limiting ──────────────────────────────────────────
 const rateLimits = new Map();
+// IP REAL do cliente. No Railway o servidor fica atrás de um proxy: sem tratar isso, req.ip é o IP do
+// PROXY (o mesmo pra todo mundo) — e todo limite "por IP" virava um limite da plataforma inteira somada:
+// ex. "3 reenvios de código por minuto" valia pra TODOS os clientes juntos. O Railway sobrescreve o
+// cabeçalho X-Real-IP com o IP verdadeiro (o cliente não consegue forjar esse), então usamos ele.
+function ipDoCliente(req) {
+  const real = String(req.headers['x-real-ip'] || '').trim();
+  if (real && /^[0-9a-fA-F:.]{3,45}$/.test(real)) return real;
+  return req.ip;
+}
 function rateLimit(windowMs = 60000, max = 30) {
   return (req, res, next) => {
-    const key = req.ip + (req.path || '');
+    const key = ipDoCliente(req) + (req.path || '');
     const now = Date.now();
     const r = rateLimits.get(key) || { count: 0, start: now };
     if (now - r.start > windowMs) { r.count = 0; r.start = now; }
@@ -399,7 +409,10 @@ function adminOnly(req, res, next) {
   if (!req.user.isAdmin) return res.status(403).json({ error: 'Acesso restrito.' });
   next();
 }
-function safe(u) { const { senha, twoFactorSecret, twoFactorSecretPendente, ...r } = u; return r; }
+// Nunca devolve segredos ao navegador. O código de verificação de e-mail ficava aqui dentro e vazava
+// na resposta do cadastro e de qualquer chamada autenticada — dava pra "confirmar" um e-mail sem nunca
+// abrir a caixa de entrada, anulando a verificação.
+function safe(u) { const { senha, twoFactorSecret, twoFactorSecretPendente, emailVerificacaoCodigo, emailVerificacaoExpira, emailVerificacaoTentativas, emailVerificacaoEnvioStatus, emailVerificacaoUltimoEnvioEm, ...r } = u; return r; }
 function eventoDoUsuario(eventoId, userId) {
   const ev = EVENTOS.find(e => e.id === eventoId);
   if (!ev || ev.organizadorId !== userId) return null;
@@ -432,7 +445,7 @@ function eventoAcessivelParaCheckin(eventoId, user) {
 // ════════════════════════════════════════════════════════
 // AUTH
 // ════════════════════════════════════════════════════════
-app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
+app.post('/api/auth/registro', rateLimit(60000, 20), async (req, res) => {
   const nome = sanitize(req.body.nome || '', 100);
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   const senha = (req.body.senha || '').slice(0, 200);
@@ -447,6 +460,10 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   if (ehProdutor && !nomePublicoInformado) return res.status(400).json({ error: 'Nome público obrigatório para produtores.' });
   if (ehProdutor && !cpfCnpj) return res.status(400).json({ error: 'CPF ou CNPJ obrigatório para produtores.' });
   if (db.users.find(u => u.email === email)) return res.status(400).json({ error: 'E-mail já cadastrado.' });
+  // Pega erro de digitação ("gmial.com", ".con") e domínio que não existe ANTES de criar a conta — senão
+  // o código de confirmação vai pra um endereço que não existe, e a pessoa fica esperando pra sempre.
+  const validacaoEmail = await validarEmailParaCadastro(email);
+  if (!validacaoEmail.ok) return res.status(400).json({ error: validacaoEmail.mensagem, sugestao: validacaoEmail.sugestao });
   const slugsExistentes = db.users.filter(u => u.organizadorSlug).map(u => u.organizadorSlug);
   let indicadoPor = null;
   if (codigoIndicacaoUsado) {
@@ -467,8 +484,13 @@ app.post('/api/auth/registro', rateLimit(60000, 10), async (req, res) => {
   };
   db.users.push(user); saveDB(db);
   const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
-  enviarCodigoVerificacao(user).catch(() => {});
-  res.status(201).json({ token, user: safe(user) });
+  // Espera o resultado do envio (no máximo 6s) pra responder com a verdade: antes o envio era
+  // "dispare e esqueça" — se o e-mail falhasse, a tela dizia "enviamos" do mesmo jeito.
+  const emailEnviado = await Promise.race([
+    enviarCodigoVerificacao(user).catch(() => false),
+    new Promise(r => setTimeout(() => r(null), 6000)) // null = demorou, resultado ainda desconhecido
+  ]);
+  res.status(201).json({ token, user: safe(user), emailEnviado });
 });
 function gerarCodigoIndicacaoUnico() {
   let codigo;
@@ -517,32 +539,110 @@ app.post('/api/auth/google', rateLimit(60000, 20), async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erro ao verificar login do Google: ' + e.message }); }
 });
 
-// Gera um código de 6 dígitos (não um link) — o comprador digita esse código na própria tela do
-// checkout pra confirmar que o e-mail é válido de verdade, antes de conseguir finalizar a compra.
-// Isso existe especificamente pra evitar o problema de alguém digitar o e-mail errado sem perceber
-// e depois não encontrar o ingresso (nem por e-mail, nem em "Meus Ingressos").
-async function enviarCodigoVerificacao(user) {
-  const codigo = String(Math.floor(100000 + Math.random() * 900000));
-  user.emailVerificacaoCodigo = codigo;
-  user.emailVerificacaoExpira = new Date(Date.now() + 15 * 60000).toISOString(); // 15 minutos
+// ═══ VERIFICAÇÃO DE E-MAIL ═══════════════════════════════════════════════
+// O comprador digita um código de 6 dígitos na própria tela do checkout pra confirmar que o e-mail é
+// válido de verdade, antes de finalizar a compra — evita o problema de alguém digitar o e-mail errado
+// sem perceber e depois não encontrar o ingresso (nem por e-mail, nem em "Meus Ingressos").
+const MAX_TENTATIVAS_CODIGO = 5;
+const INTERVALO_REENVIO_CODIGO_MS = 20000; // mínimo entre dois envios pra mesma conta
+// Quantos segundos faltam pra essa conta poder pedir outro envio — o servidor informa e o botão da tela
+// mostra a contagem, em vez de parecer clicável e dar erro.
+function segundosAteReenvio(user) {
+  const desde = Date.now() - new Date(user.emailVerificacaoUltimoEnvioEm || 0).getTime();
+  return Math.max(0, Math.ceil((INTERVALO_REENVIO_CODIGO_MS - desde) / 1000));
+}
+const MSG_FALHA_ENVIO_EMAIL = 'Não conseguimos enviar o e-mail agora. Confira se o endereço está certo (use "E-mail errado? Corrigir") ou tente de novo em alguns minutos. Se continuar, fale com a gente pelo WhatsApp.';
+
+// Erros de digitação comuns em provedores grandes — domínios que ninguém usa de verdade.
+const DOMINIOS_COM_ERRO_COMUM = {
+  'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gmail.con': 'gmail.com', 'gmail.cm': 'gmail.com',
+  'gmail.co': 'gmail.com', 'gmail.om': 'gmail.com', 'gmail.vom': 'gmail.com', 'gnail.com': 'gmail.com', 'gmaill.com': 'gmail.com',
+  'gmil.com': 'gmail.com', 'gmal.com': 'gmail.com', 'gmeil.com': 'gmail.com', 'gmail.comm': 'gmail.com', 'gimail.com': 'gmail.com',
+  'hotmial.com': 'hotmail.com', 'hotmai.com': 'hotmail.com', 'hotmail.con': 'hotmail.com', 'hotmal.com': 'hotmail.com', 'hotnail.com': 'hotmail.com',
+  'hormail.com': 'hotmail.com', 'hotmaill.com': 'hotmail.com', 'hotmil.com': 'hotmail.com', 'hotmail.co': 'hotmail.com',
+  'outlok.com': 'outlook.com', 'outlook.con': 'outlook.com', 'outloo.com': 'outlook.com', 'outllook.com': 'outlook.com', 'outlook.co': 'outlook.com',
+  'yaho.com': 'yahoo.com', 'yahooo.com': 'yahoo.com', 'yahoo.con': 'yahoo.com', 'yahho.com': 'yahoo.com', 'yhoo.com': 'yahoo.com',
+  'icloud.con': 'icloud.com', 'iclod.com': 'icloud.com', 'icoud.com': 'icloud.com', 'icloud.co': 'icloud.com',
+};
+// Finais que não existem como domínio de verdade (digitação no teclado) — viram ".com".
+const TLDS_COM_ERRO = { con: 'com', vom: 'com', xom: 'com', cim: 'com', coom: 'com', comm: 'com', cmo: 'com', ocm: 'com', c0m: 'com' };
+function sugerirCorrecaoEmail(email) {
+  const [usuario, dominio] = String(email).split('@');
+  if (!usuario || !dominio) return null;
+  if (DOMINIOS_COM_ERRO_COMUM[dominio]) return `${usuario}@${DOMINIOS_COM_ERRO_COMUM[dominio]}`;
+  const partes = dominio.split('.');
+  const tld = partes[partes.length - 1];
+  if (TLDS_COM_ERRO[tld]) { partes[partes.length - 1] = TLDS_COM_ERRO[tld]; return `${usuario}@${partes.join('.')}`; }
+  return null;
+}
+// Domínio recebe e-mail? Só diz "não" quando o DNS responde DEFINITIVAMENTE que não (domínio inexistente
+// ou sem servidor de e-mail). Qualquer falha de rede/DNS/timeout NÃO bloqueia o cadastro de ninguém.
+async function dominioRecebeEmail(dominio, resolver = dns.promises, limiteMs = 3000) {
+  const comLimite = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })), limiteMs))]);
+  try {
+    const mx = await comLimite(resolver.resolveMx(dominio));
+    if (mx && mx.some(r => r.exchange && r.exchange !== '.')) return true;
+    if (mx && mx.length) return false; // MX nulo ("."): o domínio declara que não recebe e-mail
+  } catch (e) {
+    if (e.code === 'ENOTFOUND') return false;
+    if (e.code !== 'ENODATA') return true;
+  }
+  // Sem MX, o padrão do e-mail manda tentar o endereço (A/AAAA) do próprio domínio.
+  for (const tentar of [() => resolver.resolve4(dominio), () => resolver.resolve6(dominio)]) {
+    try { const r = await comLimite(tentar()); if (r && r.length) return true; }
+    catch (e) { if (e.code !== 'ENODATA' && e.code !== 'ENOTFOUND') return true; }
+  }
+  return false;
+}
+async function validarEmailParaCadastro(email, resolver) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 150 || /\.\./.test(email) || /^\./.test(email) || /\.@/.test(email)) return { ok: false, mensagem: 'E-mail inválido.' };
+  const sugestao = sugerirCorrecaoEmail(email);
+  if (sugestao) return { ok: false, mensagem: `Esse e-mail parece ter um erro de digitação. Você quis dizer ${sugestao}?`, sugestao };
+  const dominio = email.split('@')[1];
+  if (!(await dominioRecebeEmail(dominio, resolver))) return { ok: false, mensagem: `O domínio "${dominio}" não parece existir ou não recebe e-mails. Confira se o endereço está certo.` };
+  return { ok: true };
+}
+function codigoVerificacaoAtivo(user) {
+  return !!(user.emailVerificacaoCodigo && user.emailVerificacaoExpira
+    && new Date(user.emailVerificacaoExpira).getTime() > Date.now() + 60000 // com pelo menos 1 min de vida
+    && (user.emailVerificacaoTentativas || 0) < MAX_TENTATIVAS_CODIGO);
+}
+// Se já existe um código ainda válido, REENVIA O MESMO (não troca por um novo): quando o e-mail demora a
+// chegar e a pessoa pede reenvio, os e-mails antigos continuam valendo — antes cada reenvio invalidava o
+// anterior, e quem usava o primeiro e-mail (que chegou atrasado) tomava "código incorreto".
+async function enviarCodigoVerificacao(user, opcoes = {}) {
+  if (!codigoVerificacaoAtivo(user) || opcoes.forcarNovo) {
+    user.emailVerificacaoCodigo = String(crypto.randomInt(100000, 1000000)); // criptograficamente seguro
+    user.emailVerificacaoTentativas = 0;
+  }
+  const codigo = user.emailVerificacaoCodigo;
+  user.emailVerificacaoExpira = new Date(Date.now() + 15 * 60000).toISOString(); // 15 minutos a partir deste envio
+  user.emailVerificacaoEnvioStatus = 'pendente';
+  user.emailVerificacaoUltimoEnvioEm = new Date().toISOString();
   saveDB(db);
+  const base = PUBLIC_BASE_URL || 'https://www.lotaticketeria.com.br';
   const html = `<div style="background:#0F0E0C;padding:32px 20px;font-family:Arial,sans-serif;color:#F0EDE8;"><div style="max-width:480px;margin:0 auto;">
-    <div style="margin-bottom:20px;"><img src="${PUBLIC_BASE_URL}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
+    <div style="margin-bottom:20px;"><img src="${base}/logo-header.png" alt="Lota" height="28" style="vertical-align:middle;margin-right:8px"><span style="font-size:20px;font-weight:800;color:#C47B14;vertical-align:middle;">Lota</span></div>
     <h2 style="font-size:18px;margin-bottom:12px;">Confirme seu e-mail</h2>
-    <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Digite o código abaixo na tela onde você estava comprando o ingresso. Ele vale por 15 minutos.</p>
+    <p style="font-size:13px;color:#A09880;margin-bottom:20px;">Olá ${esc(user.nome)}! Use o código abaixo pra confirmar seu e-mail na Lota. Ele vale por 15 minutos.</p>
     <div style="background:#1E1C18;border:1.5px solid #2A2822;border-radius:12px;padding:20px;text-align:center;margin-bottom:20px;">
       <span style="font-size:32px;font-weight:900;letter-spacing:8px;color:#E8961A;">${codigo}</span>
     </div>
+    <p style="font-size:12px;color:#A09880;margin-bottom:14px;">Digite esse código na tela em que você criou sua conta.</p>
     <p style="font-size:11px;color:#605848;">Se não foi você quem se cadastrou, ignore este e-mail.</p>
     </div></div>`;
-  return enviarEmailGenerico(user.email, `${codigo} é o seu código de confirmação — Lota`, html);
+  const texto = `Lota — confirme seu e-mail\n\nOlá ${user.nome}! Seu código de confirmação é: ${codigo}\n\nEle vale por 15 minutos. Digite esse código na tela em que você criou sua conta.\n\nSe não foi você quem se cadastrou, ignore este e-mail.`;
+  const ok = await enviarEmailGenerico(user.email, `${codigo} é o seu código de confirmação — Lota`, html, { text: texto });
+  user.emailVerificacaoEnvioStatus = ok ? 'ok' : 'falhou';
+  saveDB(db);
+  return ok;
 }
 
 
 app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
   const email = sanitize(req.body.email || '', 150).toLowerCase();
   const senha = (req.body.senha || '').slice(0, 200);
-  const ip = req.ip;
+  const ip = ipDoCliente(req);
   const attempts = db.loginAttempts[ip] || { count: 0, lastAttempt: 0 };
   const now = Date.now();
   if (attempts.count >= 5 && now - attempts.lastAttempt < 300000) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 5 minutos.' });
@@ -563,7 +663,7 @@ app.post('/api/auth/login', rateLimit(60000, 10), (req, res) => {
   // travar o próprio admin fora da conta caso algo dê errado no fluxo de configuração), pelo menos
   // avisamos com destaque e registramos no log de auditoria toda vez que isso acontece sem 2FA.
   const avisoSeguranca2FA = !!(user.isAdmin && !user.twoFactorAtivo);
-  if (avisoSeguranca2FA) registrarAuditoria(user, 'login_admin_sem_2fa', { ip: req.ip });
+  if (avisoSeguranca2FA) registrarAuditoria(user, 'login_admin_sem_2fa', { ip: ipDoCliente(req) });
   res.json({ token, user: safe(user), avisoSeguranca2FA });
 });
 
@@ -726,17 +826,68 @@ app.post('/api/auth/confirmar-codigo', auth, rateLimit(60000, 10), (req, res) =>
   if (!codigo) return res.status(400).json({ error: 'Digite o código.' });
   if (!user.emailVerificacaoCodigo || !user.emailVerificacaoExpira) return res.status(400).json({ error: 'Nenhum código pendente. Peça um novo.' });
   if (new Date(user.emailVerificacaoExpira) < new Date()) return res.status(400).json({ error: 'Esse código expirou. Peça um novo.' });
-  if (codigo !== user.emailVerificacaoCodigo) return res.status(400).json({ error: 'Código incorreto.' });
+  // Limite de tentativas POR CÓDIGO — com só o limite por IP, dava pra tentar os 1 milhão de combinações
+  // trocando de IP. Depois de 5 erros o código é cancelado e é preciso pedir outro.
+  const tentativas = user.emailVerificacaoTentativas || 0;
+  if (tentativas >= MAX_TENTATIVAS_CODIGO) {
+    user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null; saveDB(db);
+    return res.status(400).json({ error: 'Muitas tentativas incorretas. Peça um novo código.' });
+  }
+  const esperado = Buffer.from(user.emailVerificacaoCodigo);
+  const recebido = Buffer.from(codigo);
+  const igual = esperado.length === recebido.length && crypto.timingSafeEqual(esperado, recebido);
+  if (!igual) {
+    user.emailVerificacaoTentativas = tentativas + 1;
+    const restantes = MAX_TENTATIVAS_CODIGO - user.emailVerificacaoTentativas;
+    if (restantes <= 0) { user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null; }
+    saveDB(db);
+    return res.status(400).json({ error: restantes > 0 ? `Código incorreto. Você tem mais ${restantes} tentativa${restantes > 1 ? 's' : ''}.` : 'Código incorreto. Por segurança, esse código foi cancelado — peça um novo.' });
+  }
   user.emailVerificado = true;
-  user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null;
+  user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null; user.emailVerificacaoTentativas = 0;
   saveDB(db);
   res.json({ ok: true });
 });
 
-app.post('/api/auth/reenviar-verificacao', auth, rateLimit(60000, 3), async (req, res) => {
+app.post('/api/auth/reenviar-verificacao', auth, rateLimit(60000, 10), async (req, res) => {
   if (req.user.emailVerificado) return res.json({ ok: true, jaVerificado: true });
-  await enviarCodigoVerificacao(req.user).catch(() => {});
-  res.json({ ok: true });
+  // Trava POR CONTA (o limite por IP sozinho não segura quem usa vários aparelhos, e pune quem divide o
+  // mesmo IP — comum em rede de celular): no mínimo 20s entre um envio e outro pra mesma pessoa.
+  const falta = segundosAteReenvio(req.user);
+  if (falta > 0) return res.status(429).json({ error: `Aguarde ${falta} segundos antes de pedir outro código.`, aguardarSegundos: falta });
+  const ok = await enviarCodigoVerificacao(req.user).catch(() => false);
+  // Antes respondia "ok" mesmo quando o e-mail NÃO saía — a tela dizia "Novo código enviado!" à toa.
+  if (!ok) return res.status(502).json({ error: MSG_FALHA_ENVIO_EMAIL, falhaEnvio: true, aguardarSegundos: segundosAteReenvio(req.user) });
+  res.json({ ok: true, aguardarSegundos: segundosAteReenvio(req.user) });
+});
+
+// Chamada pela tela de código quando ela abre: garante que existe um código válido a caminho. Cobre quem
+// volta depois (login) — antes a tela dizia "enviamos um código" mas nada era enviado, e o código do
+// cadastro (15 min) já tinha expirado. Não envia nada se já existe código válido e o último envio deu certo.
+app.post('/api/auth/garantir-codigo', auth, rateLimit(60000, 6), async (req, res) => {
+  if (req.user.emailVerificado) return res.json({ ok: true, jaVerificado: true });
+  if (codigoVerificacaoAtivo(req.user) && req.user.emailVerificacaoEnvioStatus !== 'falhou') return res.json({ ok: true, enviado: false, aguardarSegundos: segundosAteReenvio(req.user) });
+  const ok = await enviarCodigoVerificacao(req.user).catch(() => false);
+  if (!ok) return res.status(502).json({ error: MSG_FALHA_ENVIO_EMAIL, falhaEnvio: true, aguardarSegundos: segundosAteReenvio(req.user) });
+  res.json({ ok: true, enviado: true, aguardarSegundos: segundosAteReenvio(req.user) });
+});
+
+// Troca o e-mail de uma conta que AINDA NÃO confirmou o endereço (digitou errado no cadastro). Antes não
+// havia saída: "reenviar" mandava sempre pro mesmo endereço errado, e a pessoa ficava presa na conta.
+app.post('/api/auth/corrigir-email', auth, rateLimit(60000, 5), async (req, res) => {
+  const user = req.user;
+  if (user.emailVerificado) return res.status(400).json({ error: 'Seu e-mail já foi confirmado. Pra trocar, use as configurações do perfil.' });
+  const novoEmail = sanitize(req.body.novoEmail || '', 150).toLowerCase();
+  if (!novoEmail) return res.status(400).json({ error: 'Digite o e-mail correto.' });
+  if (novoEmail === user.email) return res.status(400).json({ error: 'Esse já é o e-mail da sua conta. Se o código não chegou, use "reenviar código".' });
+  if (db.users.some(u => u.id !== user.id && u.email === novoEmail)) return res.status(400).json({ error: 'E-mail já cadastrado.' });
+  const validacao = await validarEmailParaCadastro(novoEmail);
+  if (!validacao.ok) return res.status(400).json({ error: validacao.mensagem, sugestao: validacao.sugestao });
+  user.email = novoEmail;
+  user.emailVerificacaoCodigo = null; user.emailVerificacaoExpira = null; user.emailVerificacaoTentativas = 0;
+  saveDB(db);
+  const ok = await enviarCodigoVerificacao(user, { forcarNovo: true }).catch(() => false);
+  res.json({ ok: true, email: novoEmail, emailEnviado: ok, aguardarSegundos: segundosAteReenvio(user) });
 });
 
 app.patch('/api/auth/perfil', auth, (req, res) => {
@@ -923,19 +1074,73 @@ const ASAAS_SANDBOX = process.env.ASAAS_SANDBOX === 'true';
 const ASAAS_API = ASAAS_SANDBOX ? 'https://api-sandbox.asaas.com/v3' : 'https://api.asaas.com/v3';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM    = process.env.RESEND_FROM_EMAIL || 'Lota <onboarding@resend.dev>';
+const RESEND_API_URL = process.env.RESEND_API_URL || 'https://api.resend.com/emails';
+// Se RESEND_FROM_EMAIL não estiver configurada, o código cai no remetente de TESTE do Resend — que só
+// entrega no e-mail do dono da conta Resend. Resultado: nenhum cliente recebe nada, e não aparece erro
+// em lugar nenhum. Por isso o aviso no início, e o status também aparece no /health e no painel admin.
+const REMETENTE_DE_TESTE = /@resend\.dev>?\s*$/i.test(RESEND_FROM);
+if (RESEND_API_KEY && REMETENTE_DE_TESTE) console.error('⚠️⚠️⚠️ ATENÇÃO: RESEND_FROM_EMAIL não está configurada (usando resend.dev). Nesse modo o Resend SÓ entrega no e-mail do dono da conta — NENHUM cliente vai receber e-mails (código de cadastro, ingressos, etc).');
 
-async function enviarEmailGenerico(destinatario, assunto, html) {
+// Registro em memória dos envios recentes — pro admin enxergar POR QUE um e-mail não saiu (cota do plano
+// estourada, domínio não verificado, etc). Antes qualquer falha só aparecia como uma linha solta no log.
+const ESTADO_EMAIL = { enviadosOk: 0, falhas: 0, ultimaFalha: null, ultimoSucesso: null, historico: [] };
+function mascararEmail(e) { const [u, d] = String(e || '').split('@'); return d ? `${(u || '')[0] || ''}***@${d}` : '(inválido)'; }
+function registrarResultadoEmail(rotulo, destinatario, r) {
+  const item = { em: new Date().toISOString(), ok: !!r.ok, rotulo: String(rotulo || '').slice(0, 60), para: mascararEmail(destinatario), status: r.status || 0, tipo: r.tipo || '', mensagem: String(r.mensagem || '').slice(0, 200), tentativas: r.tentativas || 1 };
+  if (r.ok) { ESTADO_EMAIL.enviadosOk++; ESTADO_EMAIL.ultimoSucesso = item; } else { ESTADO_EMAIL.falhas++; ESTADO_EMAIL.ultimaFalha = item; }
+  ESTADO_EMAIL.historico.push(item);
+  if (ESTADO_EMAIL.historico.length > 50) ESTADO_EMAIL.historico.shift();
+}
+// Chama o Resend com repetição automática SÓ pra falhas passageiras (limite de 5 req/s → 429, ou erro 5xx
+// / rede). Cota diária/mensal estourada e erros de configuração NÃO adiantam repetir. A chave de
+// idempotência garante que, se uma tentativa chegou mas a resposta se perdeu, repetir NÃO manda o e-mail duplicado.
+async function chamarResend(payload, rotulo) {
+  const chaveIdempotencia = uuidv4();
+  const esperas = [0, 700, 2000];
+  let ultimo = { ok: false, status: 0, tipo: 'rede', mensagem: '' };
+  let tentativas = 0;
+  for (const espera of esperas) {
+    if (espera) await new Promise(r => setTimeout(r, espera));
+    tentativas++;
+    try {
+      const r = await fetch(RESEND_API_URL, {
+        method: 'POST', timeout: 15000,
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Idempotency-Key': chaveIdempotencia },
+        body: JSON.stringify(payload)
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) { const res = { ok: true, status: r.status, data, tentativas }; registrarResultadoEmail(rotulo, payload.to, res); return res; }
+      const tipo = data.name || data.type || '';
+      const mensagem = data.message || '';
+      ultimo = { ok: false, status: r.status, tipo, mensagem };
+      const ehCota = /quota/i.test(tipo) || /quota/i.test(mensagem);
+      const passageiro = (r.status === 429 && !ehCota) || r.status >= 500;
+      if (!passageiro) break;
+    } catch (e) { ultimo = { ok: false, status: 0, tipo: 'rede', mensagem: e.message }; }
+  }
+  const res = { ...ultimo, tentativas };
+  registrarResultadoEmail(rotulo, payload.to, res);
+  return res;
+}
+function htmlParaTexto(html) {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, '$2 ($1)')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h[1-6]|tr|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+async function enviarEmailGenerico(destinatario, assunto, html, extra = {}) {
   if (!RESEND_API_KEY || !destinatario) { console.error('Resend não configurado ou destinatário ausente ao tentar enviar:', assunto); return false; }
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
-      body: JSON.stringify({ from: RESEND_FROM, to: destinatario, subject: assunto, html })
-    });
-    const data = await r.json().catch(()=>({}));
-    if (!r.ok) { console.error('Resend recusou o e-mail:', assunto, '| destinatário:', destinatario, '| status:', r.status, '| resposta:', JSON.stringify(data)); }
-    else { console.log('Resend aceitou o e-mail com sucesso:', assunto, '| destinatário:', destinatario, '| id:', data.id); }
-    return r.ok;
-  } catch(e) { console.error('Erro e-mail:', e.message); return false; }
+  // Sempre manda também a versão em TEXTO (e-mail só em HTML pontua pior nos filtros de spam) e um
+  // endereço de resposta, quando configurado.
+  const payload = { from: RESEND_FROM, to: destinatario, subject: assunto, html, text: extra.text || htmlParaTexto(html) };
+  if (SUPORTE_EMAIL) payload.reply_to = SUPORTE_EMAIL;
+  const r = await chamarResend(payload, assunto);
+  if (!r.ok) { console.error('Resend recusou o e-mail:', assunto, '| destinatário:', destinatario, '| status:', r.status, '| tipo:', r.tipo, '| mensagem:', r.mensagem, '| tentativas:', r.tentativas); }
+  else { console.log('Resend aceitou o e-mail com sucesso:', assunto, '| destinatário:', destinatario, '| id:', r.data.id, r.tentativas > 1 ? `| (precisou de ${r.tentativas} tentativas)` : ''); }
+  return r.ok;
 }
 
 async function notificarSeguidoresNovoEvento(ev, organizador, baseUrl) {
@@ -3250,18 +3455,19 @@ async function enviarEmailIngressos(pedido, ev, baseUrl) {
     ${linkPdf ? `<a href="${linkPdf}" style="display:block;text-align:center;background:#E8961A;color:#18160F;font-weight:800;padding:13px;border-radius:9px;text-decoration:none;font-size:14px;margin-top:18px;">📄 Abrir ingresso em PDF</a>` : ''}
     <p style="font-size:11px;color:#605848;margin-top:20px;">Apresente o QR Code na entrada. Se o PDF anexado não abrir, use o botão acima pra acessá-lo a qualquer momento.</p>
     </div></div>`;
-  const payload = { from: RESEND_FROM, to: pedido.comprador.email, subject: `Seus ingressos — ${nomeEvento}`, html };
+  const payload = { from: RESEND_FROM, to: pedido.comprador.email, subject: `Seus ingressos — ${nomeEvento}`, html, text: htmlParaTexto(html) };
+  if (SUPORTE_EMAIL) payload.reply_to = SUPORTE_EMAIL;
   try {
     const pdfBuffer = await gerarPdfIngressos(pedido, ev);
     payload.attachments = [{ filename: `ingresso-${(ev.slug || 'lota')}.pdf`, content: pdfBuffer.toString('base64') }];
     console.log(`PDF do ingresso gerado com sucesso (${pdfBuffer.length} bytes) para o pedido ${pedido.id}`);
   } catch (e) { console.error('Erro ao gerar PDF do ingresso — e-mail seguirá sem anexo, mas com o link de download:', e.message); }
-  try {
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify(payload) });
-    if (!r.ok) { const errBody = await r.text().catch(()=>''); console.error('Resend recusou o envio do e-mail de ingressos:', r.status, errBody); return false; }
-    console.log(`E-mail de ingressos enviado com sucesso para ${pedido.comprador.email} (pedido ${pedido.id})`);
-    return true;
-  } catch(e) { console.error('Erro de rede ao enviar e-mail de ingressos:', e.message); return false; }
+  // Mesma chamada usada pelo código de cadastro: repete sozinha em falha passageira (limite por segundo,
+  // erro do Resend) sem risco de mandar o ingresso duplicado, e registra o resultado pro admin.
+  const r = await chamarResend(payload, `ingressos — ${nomeEvento}`);
+  if (!r.ok) { console.error('Resend recusou o envio do e-mail de ingressos:', r.status, r.tipo, r.mensagem, `| pedido ${pedido.id} | tentativas: ${r.tentativas}`); return false; }
+  console.log(`E-mail de ingressos enviado com sucesso para ${pedido.comprador.email} (pedido ${pedido.id})${r.tentativas > 1 ? ` — precisou de ${r.tentativas} tentativas` : ''}`);
+  return true;
 }
 
 // ── WEBHOOK MERCADO PAGO ──
@@ -4249,6 +4455,37 @@ app.post('/api/admin/eventos/:id/recuperar-pedido', auth, adminOnly, async (req,
   res.json({ ok: true, pedidoId: pedido.id, ticketsGerados: pedido.tickets.length });
 });
 
+// ── STATUS DO ENVIO DE E-MAIL (admin) ────────────────────────────────────────
+// Mostra o que o servidor viu nas últimas tentativas de envio e traduz o motivo das falhas — é onde
+// aparece, por exemplo, "limite diário do plano gratuito do Resend atingido". (O registro fica em
+// memória: zera quando o servidor reinicia/redeploya. Entrega/rejeição final do e-mail só o painel do
+// próprio Resend mostra, na aba Emails.)
+function explicarFalhaEmail(f) {
+  if (!f) return null;
+  const t = `${f.tipo} ${f.mensagem}`.toLowerCase();
+  if (/daily_quota|monthly_quota|quota/.test(t)) return 'Limite de envios do plano do Resend atingido (plano gratuito = 100 e-mails por dia e 3.000 por mês). Enquanto isso, NENHUM e-mail sai (cadastro, ingressos...). Solução: fazer upgrade do plano no Resend (resend.com/settings/billing).';
+  if (/testing emails to your own|verify a domain|resend\.dev/.test(t)) return 'O Resend está recusando porque o remetente é o de teste ou o domínio não está verificado. Verifique o domínio em resend.com/domains e configure RESEND_FROM_EMAIL com um endereço dele.';
+  if (f.status === 401 || /api key|unauthorized|restricted/.test(t)) return 'Chave do Resend (RESEND_API_KEY) inválida ou sem permissão de envio.';
+  if (f.status === 429) return 'Muitos envios ao mesmo tempo (limite de 5 por segundo no Resend). O sistema já tenta de novo sozinho; se persistir, é pico de uso.';
+  if (f.status === 422 || /validation|invalid/.test(t)) return 'O Resend recusou os dados do e-mail (endereço do destinatário inválido, por exemplo).';
+  if (f.tipo === 'rede') return 'Não conseguiu se conectar ao Resend (rede/timeout).';
+  return 'Falha não classificada — veja a mensagem original abaixo e os logs do Resend.';
+}
+app.get('/api/admin/email-status', auth, adminOnly, (req, res) => {
+  const limite = Date.now() - 24 * 60 * 60 * 1000;
+  const ultimas24h = ESTADO_EMAIL.historico.filter(h => new Date(h.em).getTime() >= limite);
+  res.json({
+    configurado: !!RESEND_API_KEY, remetente: RESEND_FROM, remetenteDeTeste: REMETENTE_DE_TESTE,
+    desdeInicioDoServidor: { enviadosOk: ESTADO_EMAIL.enviadosOk, falhas: ESTADO_EMAIL.falhas },
+    ultimas24h: { ok: ultimas24h.filter(h => h.ok).length, falhas: ultimas24h.filter(h => !h.ok).length },
+    ultimaFalha: ESTADO_EMAIL.ultimaFalha, explicacaoUltimaFalha: explicarFalhaEmail(ESTADO_EMAIL.ultimaFalha),
+    ultimoSucesso: ESTADO_EMAIL.ultimoSucesso,
+    historico: ESTADO_EMAIL.historico.slice(-20).reverse(),
+    // Como o servidor está enxergando VOCÊ agora — serve pra conferir se o IP real está chegando.
+    diagnosticoIp: { ipUsadoNosLimites: ipDoCliente(req), reqIpDoExpress: req.ip, xRealIp: req.headers['x-real-ip'] || null, xForwardedFor: req.headers['x-forwarded-for'] || null }
+  });
+});
+
 // ── EQUIPE DO EVENTO — gestão manual pelo admin ──────────────────────────────
 // O produtor só consegue adicionar contas que NÃO são de produtor (regra das rotas dele). Aqui o admin
 // resolve os casos que travam por isso: pode adicionar QUALQUER conta (inclusive de outro produtor),
@@ -4735,6 +4972,7 @@ app.get('/health', (req, res) => {
     backup_automatico: fs.existsSync(BACKUP_DIR) ? `✅ ativo (${fs.readdirSync(BACKUP_DIR).length} backup(s) guardado(s))` : '⏳ ainda não rodou (primeiro backup ocorre 1 min após o servidor iniciar)',
     backup_por_email: (SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email) ? `✅ enviado pra ${SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email}` : '⚠️ sem destinatário configurado (configure SUPORTE_EMAIL)',
     resend_email: !!RESEND_API_KEY ? '✅' : '❌ (configure RESEND_API_KEY)',
+    resend_remetente: REMETENTE_DE_TESTE ? '❌ remetente de TESTE (resend.dev) — configure RESEND_FROM_EMAIL com um endereço do seu domínio verificado, senão nenhum cliente recebe e-mail' : `✅ ${RESEND_FROM}`,
     armazenamento_persistente: DATA_DIR === '/data' ? '✅ (Volume configurado — dados seguros em deploys)' : '❌ PERIGO: sem Volume — dados serão perdidos no próximo deploy!',
     data_dir: DATA_DIR,
     uptime: Math.round(process.uptime()) + 's'
