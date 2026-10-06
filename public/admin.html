@@ -231,6 +231,12 @@ a{color:inherit;}
     <div id="contaContent" class="card" style="max-width:440px"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
     <div id="segurancaContent" class="card" style="max-width:440px"><div class="empty"><span class="empty-ic">⏳</span><p>Carregando...</p></div></div>
     <div class="card">
+      <div class="ct">📧 Status do envio de e-mails</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Mostra o que o servidor viu nas últimas tentativas de envio (código de cadastro, ingressos...) e o motivo quando algum falha. É a primeira coisa a conferir quando um cliente diz que o e-mail não chegou.</p>
+      <button class="btn bp btn-sm" onclick="carregarStatusEmail()">🔄 Verificar agora</button>
+      <div id="statusEmailContent" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
       <div class="ct">🔧 Corrigir Assentos Corrompidos</div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Corrige eventos onde o código "undefined" acabou marcado como assento ocupado por engano — isso fazia vários lugares aparecerem como vendidos sem estar. Roda em todos os eventos de uma vez, sem afetar assentos legitimamente vendidos.</p>
       <button class="btn bp btn-sm" onclick="limparAssentosCorrompidos()">Rodar correção agora</button>
@@ -426,7 +432,7 @@ function gp(id,el){
   if(id==='mensagens') carregarMensagens();
   if(id==='dicas') carregarDicasAdmin();
   if(id==='config'){ carregarFee(); carregarProvedor(); carregarAsaasWebhooks(); }
-  if(id==='seguranca'){ carregarConta(); carregarSeguranca(); carregarAuditoria(); }
+  if(id==='seguranca'){ carregarConta(); carregarSeguranca(); carregarAuditoria(); carregarStatusEmail(); }
   closeSb();
 }
 
@@ -666,6 +672,34 @@ let PEDIDOS_EVENTO_ID=null;
 let PEDIDOS_CACHE=[];
 let MOSTRAR_RECUSADOS_EXPIRADOS=false;
 // ── EQUIPE DO EVENTO (gestão manual pelo admin) ──
+// ── STATUS DO ENVIO DE E-MAILS ──
+async function carregarStatusEmail(){
+  const el=document.getElementById('statusEmailContent');
+  if(!el) return;
+  el.innerHTML='<p style="font-size:12px;color:var(--text3)">Consultando...</p>';
+  try{
+    const d=await api('GET','/api/admin/email-status');
+    const linha=(rot,val)=>'<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--text3)">'+rot+'</span><span style="font-weight:700;text-align:right">'+val+'</span></div>';
+    let html='';
+    if(!d.configurado) html+='<div style="background:rgba(239,68,68,.12);border:1px solid var(--red);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12px"><strong>❌ Resend não configurado.</strong> Falta a variável RESEND_API_KEY no Railway — nenhum e-mail sai.</div>';
+    else if(d.remetenteDeTeste) html+='<div style="background:rgba(239,68,68,.12);border:1px solid var(--red);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12px"><strong>❌ Remetente de TESTE (resend.dev).</strong> Nesse modo o Resend só entrega no e-mail do dono da conta — nenhum cliente recebe. Configure a variável RESEND_FROM_EMAIL com um endereço do seu domínio verificado.</div>';
+    html+=linha('Remetente',esc(d.remetente))
+      +linha('Últimas 24h (desde o último deploy)','<span style="color:#22C55E">'+d.ultimas24h.ok+' enviados</span> · <span style="color:'+(d.ultimas24h.falhas?'var(--red)':'var(--text3)')+'">'+d.ultimas24h.falhas+' falhas</span>')
+      +linha('Desde o início do servidor','<span style="color:#22C55E">'+d.desdeInicioDoServidor.enviadosOk+' enviados</span> · <span style="color:'+(d.desdeInicioDoServidor.falhas?'var(--red)':'var(--text3)')+'">'+d.desdeInicioDoServidor.falhas+' falhas</span>');
+    if(d.ultimaFalha){
+      html+='<div style="background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:10px;padding:12px 14px;margin-top:12px;font-size:12px"><div style="font-weight:800;margin-bottom:4px">⚠️ Última falha — '+new Date(d.ultimaFalha.em).toLocaleString('pt-BR')+'</div>'
+        +'<div style="margin-bottom:6px">'+esc(d.explicacaoUltimaFalha||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--text3)">Status '+esc(d.ultimaFalha.status)+' · '+esc(d.ultimaFalha.tipo||'sem tipo')+' · '+esc(d.ultimaFalha.mensagem||'')+' · para '+esc(d.ultimaFalha.para)+' · '+esc(d.ultimaFalha.rotulo)+'</div></div>';
+    } else if(d.ultimoSucesso){
+      html+='<div style="font-size:12px;color:#22C55E;margin-top:12px">✅ Nenhuma falha registrada desde o último deploy. Último envio OK: '+new Date(d.ultimoSucesso.em).toLocaleString('pt-BR')+'.</div>';
+    } else {
+      html+='<div style="font-size:12px;color:var(--text3);margin-top:12px">Nenhum envio registrado desde o último deploy ainda.</div>';
+    }
+    html+='<details style="margin-top:12px;font-size:11px;color:var(--text3)"><summary style="cursor:pointer">Como o servidor enxerga seu IP (diagnóstico)</summary><div style="padding-top:8px;line-height:1.7">'
+      +'IP usado nos limites de tentativa: <strong>'+esc(d.diagnosticoIp.ipUsadoNosLimites)+'</strong><br>IP que o Express enxerga sozinho: '+esc(d.diagnosticoIp.reqIpDoExpress)+'<br>X-Real-IP: '+esc(d.diagnosticoIp.xRealIp||'—')+'<br>X-Forwarded-For: '+esc(d.diagnosticoIp.xForwardedFor||'—')+'</div></details>';
+    el.innerHTML=html;
+  }catch(e){ el.innerHTML='<p style="font-size:12px;color:var(--red)">'+esc(e.message)+'</p>'; }
+}
 let EQUIPE_EVENTO_ID=null, EQUIPE_CACHE=null;
 async function abrirEquipeEvento(eventoId,nomeEvento){
   EQUIPE_EVENTO_ID=eventoId;
