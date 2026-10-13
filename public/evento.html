@@ -426,12 +426,12 @@ function renderEvento(){
     <div class="card" id="dadosCard" style="display:none">
       <div class="card-title">Seus dados</div>
       <div class="err" id="errMsg"></div>
-      <div class="fg"><label>Nome completo *</label><input class="fi" id="cNome" placeholder="Seu nome"></div>
-      <div class="fg"><label>E-mail *</label><input class="fi" type="email" id="cEmail" placeholder="seu@email.com"></div>
-      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" placeholder="Somente números" maxlength="14"></div>
-      <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" placeholder="(11) 99999-9999"></div>
+      <div class="fg"><label>Nome completo *</label><input class="fi" id="cNome" name="name" autocomplete="name" placeholder="Nome e sobrenome (como no cartão)"></div>
+      <div class="fg"><label>E-mail *</label><input class="fi" type="email" id="cEmail" name="email" autocomplete="email" placeholder="seu@email.com"></div>
+      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" name="cpf" autocomplete="off" inputmode="numeric" placeholder="Somente números" maxlength="14"></div>
+      <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" name="tel" type="tel" autocomplete="tel" placeholder="(11) 99999-9999"></div>
       <div id="camposEnderecoAsaas" style="display:none">
-        <div class="fg"><label>CEP *</label><input class="fi" id="cCep" placeholder="00000-000" maxlength="9"></div>
+        <div class="fg"><label>CEP *</label><input class="fi" id="cCep" name="cep" autocomplete="postal-code" inputmode="numeric" placeholder="00000-000" maxlength="9"></div>
         <p style="font-size:11px;color:var(--text3);margin-top:-6px">Exigido pelo processador de pagamento pra confirmar a compra.</p>
       </div>
     </div>
@@ -1260,6 +1260,8 @@ async function processarSubmitAsaas(){
   const errEl=document.getElementById('errMsgAsaas');
   errEl.style.display='none';
   if(!nome||!email){errEl.textContent='Preencha nome e e-mail.';errEl.style.display='block';return;}
+  if((nome.match(/\d/g)||[]).length>=3){errEl.textContent='Digite seu NOME completo no campo de nome (o CPF vai no campo CPF).';errEl.style.display='block';return;}
+  if(nome.replace(/[^A-Za-zÀ-ÿ\s]/g,' ').trim().split(/\s+/).length<2){errEl.textContent='Digite nome e sobrenome, como está no cartão.';errEl.style.display='block';return;}
   if(!cpf||cpf.length!==11){errEl.textContent='Digite um CPF válido (11 dígitos).';errEl.style.display='block';return;}
   // O CEP só é exigido de verdade pelo Asaas pra pagamento em CARTÃO (uso antifraude do cartão) —
   // pra PIX e boleto, pedir isso é uma fricção sem necessidade, que pode fazer gente desistir bem
