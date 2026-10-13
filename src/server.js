@@ -114,9 +114,9 @@ app.use((req, res, next) => {
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://www.mercadopago.com https://mercadopago.com https://http2.mlstatic.com https://www.mercadolibre.com https://accounts.google.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com https://www.googleadservices.com https://googleads.g.doubleclick.net",
     "style-src 'self' 'unsafe-inline' https://http2.mlstatic.com https://www.mercadopago.com https://mercadopago.com https://fonts.googleapis.com https://accounts.google.com",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://api.mercadopago.com https://www.mercadopago.com https://mercadopago.com https://*.mercadopago.com https://http2.mlstatic.com https://www.mercadolibre.com https://*.mercadolibre.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://analytics.tiktok.com",
+    "connect-src 'self' https://*.mlstatic.com https://api.mercadopago.com https://www.mercadopago.com https://mercadopago.com https://*.mercadopago.com https://http2.mlstatic.com https://www.mercadolibre.com https://*.mercadolibre.com https://api.asaas.com https://api-sandbox.asaas.com https://oauth2.googleapis.com https://accounts.google.com https://api.qrserver.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://analytics.tiktok.com",
     // Inclui o YouTube e o mercadolibre.com (usado pelo Brick pra verificação antifraude via iframe)
-    "frame-src 'self' https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com https://mercadopago.com https://www.mercadolibre.com https://www.youtube.com https://www.youtube-nocookie.com",
+    "frame-src 'self' https://*.mlstatic.com https://*.mercadolibre.com https://sdk.mercadopago.com https://accounts.google.com https://*.mercadopago.com https://mercadopago.com https://www.mercadolibre.com https://www.youtube.com https://www.youtube-nocookie.com",
     "font-src 'self' data: https://http2.mlstatic.com https://fonts.gstatic.com",
   ].join('; '));
   next();
@@ -2922,6 +2922,7 @@ app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (
 });
 // ── CHECKOUT (com cupom, promoter e cortesia) ──
 app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
+  let soltarReserva = () => {}; let pedidoIdDaReserva = null;
   try {
     const { slug, itens, comprador, cupom, ref } = req.body;
     const hostReq = req.get('host'); const protoReq = req.get('x-forwarded-proto') || 'https';
@@ -2943,6 +2944,16 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     const ev = EVENTOS.find(e => e.id === ticketRef.eventoId);
     if (!ev || ev.status !== 'publicado') return res.status(404).json({ error: 'Vendas encerradas.' });
     if (!comprador?.nome || !comprador?.email) return res.status(400).json({ error: 'Nome e e-mail obrigatórios.' });
+    // Nome do comprador: o Asaas pré-preenche "Nome impresso no cartão" com esse valor, e o antifraude recusa cartão
+    // quando o nome parece um CPF/número (foi o que apareceu no print: CPF no campo do nome → "Não foi possível
+    // processar seu pagamento"). Então recusamos aqui, com mensagem clara, ANTES de reservar ingresso ou cobrar.
+    {
+      const nomeBruto = String(comprador.nome || '');
+      if ((nomeBruto.match(/\d/g) || []).length >= 3) return res.status(400).json({ error: 'Digite seu NOME completo no campo de nome (o CPF vai no campo CPF).' });
+      const nomeLimpo = nomeBruto.replace(/[^A-Za-zÀ-ÿ' ]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (nomeLimpo.split(' ').filter(x => x.length > 0).length < 2) return res.status(400).json({ error: 'Digite seu nome completo (nome e sobrenome), como está no cartão.' });
+      comprador.nome = nomeLimpo.slice(0, 100);
+    }
     if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Selecione ao menos um ingresso.' });
 
     const organizador = db.users.find(u => u.id === ev.organizadorId);
@@ -2998,13 +3009,22 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       ev.assentosOcupados = [...assentosOcupadosAtuais, ...assentosSelecionadosNestePedido];
     }
     persistEventos();
+    // Se QUALQUER validação/erro abaixo interromper a compra (CPF, CEP, cupom, erro do Asaas/MP...), devolve a
+    // reserva feita acima. Antes ela ficava presa pra sempre: o pedido nem chegava a existir, então a rotina de
+    // limpeza nunca encontrava nada pra liberar — cada tentativa falha "comia" ingressos/assentos do estoque.
+    let reservaDevolvida = false;
+    soltarReserva = () => {
+      if (reservaDevolvida) return;
+      reservaDevolvida = true;
+      liberarReservaPedido({ itens: itensDetalhados }, ev);
+    };
 
     // Aplica cupom
     let desconto = 0, cupomObj = null;
     if (cupom) {
       cupomObj = ev.cupons.find(c => c.codigo === String(cupom).toUpperCase().trim() && c.ativo);
-      if (!cupomObj) return res.status(400).json({ error: 'Cupom inválido ou expirado.' });
-      if (cupomObj.usosMax > 0 && cupomObj.usosAtuais >= cupomObj.usosMax) return res.status(400).json({ error: 'Cupom esgotado.' });
+      if (!cupomObj) return soltarReserva(), res.status(400).json({ error: 'Cupom inválido ou expirado.' });
+      if (cupomObj.usosMax > 0 && cupomObj.usosAtuais >= cupomObj.usosMax) return soltarReserva(), res.status(400).json({ error: 'Cupom esgotado.' });
       desconto = cupomObj.tipo === 'fixo' ? cupomObj.valor : Math.round(subtotal * (cupomObj.valor/100) * 100) / 100;
       desconto = Math.min(desconto, subtotal);
     }
@@ -3051,6 +3071,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     let promoterObj = ref ? ev.promoters.find(p => p.codigoRef === ref && p.ativo) : null;
 
     const pedidoId = uuidv4();
+    pedidoIdDaReserva = pedidoId;
 
     // CORTESIA / valor zero — não precisa Mercado Pago, aprova na hora (sem taxa, pois não há cobrança)
     if (valorIngressos <= 0) {
@@ -3076,16 +3097,16 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       return res.json({ ok: true, pedidoId, cortesia: true });
     }
 
-    if (db.provedorPagamento === 'asaas' && !ASAAS_API_KEY) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Asaas.' });
-    if (db.provedorPagamento === 'mercadopago' && !MP_PLATFORM_TOKEN) return res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
+    if (db.provedorPagamento === 'asaas' && !ASAAS_API_KEY) return soltarReserva(), res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Asaas.' });
+    if (db.provedorPagamento === 'mercadopago' && !MP_PLATFORM_TOKEN) return soltarReserva(), res.status(500).json({ error: 'Pagamento indisponível no momento. Peça ao administrador para configurar o Mercado Pago.' });
 
     const { metodo, cpf, token, installments, paymentMethodId, issuerId, deviceId, cep, numero } = req.body;
     const cpfLimpo = sanitize(cpf || '', 20).replace(/[^\d]/g, '');
-    if (!cpfLimpo || cpfLimpo.length !== 11) return res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
+    if (!cpfLimpo || cpfLimpo.length !== 11) return soltarReserva(), res.status(400).json({ error: 'CPF do comprador é obrigatório e deve ter 11 dígitos.' });
 
     // Garante um número "limpo" com exatamente 2 casas decimais — evita rejeição da API por formatação
     const valorCobranca = Number(total.toFixed(2));
-    if (!(valorCobranca > 0)) return res.status(400).json({ error: 'Valor de cobrança inválido.' });
+    if (!(valorCobranca > 0)) return soltarReserva(), res.status(400).json({ error: 'Valor de cobrança inválido.' });
 
     const descricao = `${ev.nome} — ${itensDetalhados.map(it => it.loteNome).join(', ')}`.slice(0, 250);
 
@@ -3130,10 +3151,10 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           } catch (e) { console.error('Erro ao consultar CEP no ViaCEP:', e.message); }
         }
         if (!cepLimpo || cepLimpo.length !== 8) {
-          return res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos.' });
+          return soltarReserva(), res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos.' });
         }
         if (!enderecoResolvido) {
-          return res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.' });
+          return soltarReserva(), res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.' });
         }
 
         const checkoutBody = {
@@ -3152,7 +3173,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           items: [{ name: ev.nome.slice(0, 30), description: descricao.slice(0, 150), quantity: 1, value: valorCobranca }],
           customerData: {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
-            phone: (comprador.telefone || '').replace(/[^\d]/g, '') || undefined,
+            phone: (() => { let t = (comprador.telefone || '').replace(/[^\d]/g, ''); if (t.length > 11 && t.startsWith('55')) t = t.slice(2); return (t.length === 10 || t.length === 11) ? t : undefined; })(),
             postalCode: cepLimpo || undefined,
             addressNumber: numero || 'S/N',
             ...(enderecoResolvido || {})
@@ -3161,7 +3182,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 3 };
 
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
-        if (!criacao.ok) return res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
+        if (!criacao.ok) return soltarReserva(), res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
         pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID do checkout do Asaas nesse mesmo campo
         // Guarda ESSE id numa segunda propriedade, que NUNCA é sobrescrita depois — diferente de
         // mpPaymentId, que na confirmação do pagamento passa a guardar o ID do pagamento real (pro
@@ -3176,7 +3197,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         persistPedidosSync();
         console.log(`[Checkout Asaas] Pedido ${pedidoId} criado com sucesso — checkout id: ${criacao.data.id}, comprador: ${comprador.email}, valor: R$${valorCobranca}`);
         return res.json({ ok: true, pedidoId, metodo: 'asaas', invoiceUrl: criacao.data.link });
-      } catch (e) { return res.status(500).json({ error: e.message }); }
+      } catch (e) { return soltarReserva(), res.status(500).json({ error: e.message }); }
     }
 
     if (metodo === 'pix') {
@@ -3191,7 +3212,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       if (!pixResp.ok) {
         console.error('Mercado Pago recusou o PIX:', pixResp.status, JSON.stringify(pixData));
         const detalhe = Array.isArray(pixData.cause) && pixData.cause[0]?.description ? pixData.cause[0].description : pixData.message;
-        return res.status(400).json({ error: detalhe || 'Erro ao gerar PIX.' });
+        return soltarReserva(), res.status(400).json({ error: detalhe || 'Erro ao gerar PIX.' });
       }
       pedidoBase.mpPaymentId = String(pixData.id);
       PEDIDOS.push(pedidoBase); persistPedidosSync();
@@ -3201,7 +3222,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     }
 
     // Cartão
-    if (!token || !paymentMethodId) return res.status(400).json({ error: 'Dados do cartão incompletos.' });
+    if (!token || !paymentMethodId) return soltarReserva(), res.status(400).json({ error: 'Dados do cartão incompletos.' });
     // O Mercado Pago exige um mínimo de R$5,00 por parcela — limitamos aqui pra nunca enviar um
     // número de parcelas que resulte num valor de parcela abaixo disso (causa "Invalid transaction_amount").
     const maxParcelasPermitidas = Math.max(1, Math.floor(valorCobranca / 5));
@@ -3235,7 +3256,7 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
     if (!cardResp.ok) {
       console.error('Mercado Pago recusou o pagamento:', cardResp.status, JSON.stringify(cardData));
       const detalhe = Array.isArray(cardData.cause) && cardData.cause[0]?.description ? cardData.cause[0].description : cardData.message;
-      return res.status(400).json({ error: detalhe || 'Erro ao processar pagamento.' });
+      return soltarReserva(), res.status(400).json({ error: detalhe || 'Erro ao processar pagamento.' });
     }
 
     pedidoBase.mpPaymentId = String(cardData.id);
@@ -3262,7 +3283,11 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       persistPedidos();
       return res.json({ ok: false, pedidoId, status: 'rejected', motivo: traduzirMotivoRecusa(cardData.status_detail) });
     }
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) {
+    // Erro inesperado ANTES do pedido existir → devolve a reserva (se o pedido já foi salvo, a limpeza normal cuida dele)
+    if (!pedidoIdDaReserva || !PEDIDOS.some(p => p.id === pedidoIdDaReserva)) soltarReserva();
+    res.status(500).json({ error: e.message });
+  }
 });
 
 function traduzirMotivoRecusa(detalhe) {
