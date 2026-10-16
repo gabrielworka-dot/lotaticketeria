@@ -1541,13 +1541,20 @@ async function renderTabRelatorios(periodo){
           <div><div style="font-size:11px;color:var(--text3)">Cortesia</div><div style="font-size:20px;font-weight:800;color:var(--p2)">${r.origemVendas.cortesia}%</div></div>
         </div>
       </div>
-      <div class="card"><div class="ct">Vendas por Período</div>
+      ${RELATORIO_PERIODO_ATUAL==='geral'?`<div class="card"><div class="ct">Vendas por Período</div>
         <div class="met-g">
           <div class="met-c"><div class="met-l">Hoje</div><div class="met-v">${r.vendasPorPeriodo.hoje.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.hoje.receita||0).toFixed(2)}</div></div>
           <div class="met-c"><div class="met-l">Últimos 7 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos7dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.ultimos7dias.receita||0).toFixed(2)}</div></div>
           <div class="met-c"><div class="met-l">Últimos 30 dias</div><div class="met-v">${r.vendasPorPeriodo.ultimos30dias.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.vendasPorPeriodo.ultimos30dias.receita||0).toFixed(2)}</div></div>
         </div>
-      </div>
+      </div>`:`<div class="card"><div class="ct">Vendas no Período <span style="font-weight:400;font-size:11px;color:var(--text3)">· ${fmtDiaBR(r.resumoPeriodo.de)}${r.resumoPeriodo.de!==r.resumoPeriodo.ate?' a '+fmtDiaBR(r.resumoPeriodo.ate):''}</span></div>
+        <div class="met-g">
+          <div class="met-c"><div class="met-l">Ingressos no período</div><div class="met-v">${r.resumoPeriodo.ingressos} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.resumoPeriodo.receita||0).toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Média por dia</div><div class="met-v">${r.resumoPeriodo.mediaIngressosPorDia} ing.</div><div style="font-size:12px;color:var(--green);margin-top:2px">R$${(r.resumoPeriodo.mediaReceitaPorDia||0).toFixed(2)}</div></div>
+          <div class="met-c"><div class="met-l">Melhor dia</div><div class="met-v">${r.resumoPeriodo.melhorDia?r.resumoPeriodo.melhorDia.qtd+' ing.':'—'}</div><div style="font-size:12px;color:var(--text3);margin-top:2px">${r.resumoPeriodo.melhorDia?fmtDiaBR(r.resumoPeriodo.melhorDia.dia):'sem vendas'}</div></div>
+          <div class="met-c"><div class="met-l">Dias com venda</div><div class="met-v">${r.resumoPeriodo.diasComVenda} de ${r.resumoPeriodo.dias}</div></div>
+        </div>
+      </div>`}
       <div class="card">
         <div class="ct">Vendas por Dia</div>
         <div style="position:relative;height:240px"><canvas id="graficoVendasDiarias"></canvas></div>
@@ -1555,7 +1562,7 @@ async function renderTabRelatorios(periodo){
       ${r.tendencia?`
       <div class="card">
         <div class="ct">Tendência de Vendas</div>
-        <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Estimativa simples com base no ritmo médio de vendas até agora — não considera picos de divulgação nem sazonalidade, é só uma projeção direta.</p>
+        <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Estimativa simples com base no ritmo médio de vendas ${RELATORIO_PERIODO_ATUAL==='geral'?'até agora':'do período selecionado ('+r.tendencia.diasBase+(r.tendencia.diasBase===1?' dia':' dias')+')'} — não considera picos de divulgação nem sazonalidade, é só uma projeção direta.</p>
         <div style="display:flex;gap:24px;flex-wrap:wrap">
           <div><div style="font-size:11px;color:var(--text3)">Média por dia</div><div style="font-size:18px;font-weight:800">${r.tendencia.mediaIngressosPorDia} ing.</div></div>
           <div><div style="font-size:11px;color:var(--text3)">Dias até o evento</div><div style="font-size:18px;font-weight:800">${r.tendencia.diasRestantes}</div></div>
@@ -1563,7 +1570,7 @@ async function renderTabRelatorios(periodo){
         </div>
       </div>`:''}
       <div class="met-g">
-        <div class="met-c"><div class="met-l">Visualizações da Página</div><div class="met-v">${r.visualizacoes.toLocaleString('pt-BR')}</div></div>
+        <div class="met-c"><div class="met-l">Visualizações da Página${RELATORIO_PERIODO_ATUAL==='geral'?'':' (no período)'}</div><div class="met-v">${r.visualizacoes.toLocaleString('pt-BR')}</div>${r.visualizacoesParcial?'<div style="font-size:11px;color:var(--text3);margin-top:2px">contagem diária começou há pouco — dias anteriores não entram</div>':''}${RELATORIO_PERIODO_ATUAL!=='geral'?'<div style="font-size:11px;color:var(--text3);margin-top:2px">total geral: '+(r.visualizacoesTotal||0).toLocaleString('pt-BR')+'</div>':''}</div>
         <div class="met-c"><div class="met-l">Visualizações por Ingresso Vendido</div><div class="met-v">${r.taxaConversao!==null?r.taxaConversao:'—'}</div>${r.taxaConversao!==null?'<div style="font-size:11px;color:var(--text3);margin-top:2px">quanto menor, melhor</div>':''}</div>
       </div>
       ${r.porTipoIngresso.length?`
@@ -1583,10 +1590,11 @@ async function renderTabRelatorios(periodo){
     if(r.porTipoIngresso.length) renderGraficoTipoIngresso(r.porTipoIngresso);
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
 }
+function fmtDiaBR(d){ if(!d) return ''; const [y,m,dd]=d.split('-'); return dd+'/'+m+'/'+y; }
 const NOMES_TIPO_INGRESSO={meia:'Meia',inteira:'Inteira',solidaria:'Solidária',duplo:'Duplo',quadruplo:'Quádruplo',outro:'Outro'};
 function renderGraficoVendasDiarias(porDia){
   if(CHART_VENDAS_DIARIAS) CHART_VENDAS_DIARIAS.destroy();
-  if(!porDia.length){ document.getElementById('graficoVendasDiarias').closest('.card').innerHTML='<div class="ct">Vendas por Dia</div><p style="color:var(--text3);font-size:13px">Sem vendas registradas ainda.</p>'; return; }
+  if(!porDia.length){ document.getElementById('graficoVendasDiarias').closest('.card').innerHTML='<div class="ct">Vendas por Dia</div><p style="color:var(--text3);font-size:13px">Sem vendas no período selecionado.</p>'; return; }
   const labels=porDia.map(d=>new Date(d.dia+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}));
   CHART_VENDAS_DIARIAS=new Chart(document.getElementById('graficoVendasDiarias'),{
     data:{
