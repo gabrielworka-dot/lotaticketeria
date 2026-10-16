@@ -2131,21 +2131,24 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const todosPedidosPagos = PEDIDOS.filter(p => p.eventoId === ev.id && p.status === 'pago');
 
-  // ── Filtro de período (Geral / Últimos 30 dias / Hoje / Ontem / Personalizado) — afeta só os
-  // números-resumo abaixo. O bloco "Vendas por Período" (hoje/7d/30d) e o gráfico diário continuam
-  // sempre olhando pra tudo, sem esse filtro — como foi pedido pra manter aquele bloco congelado.
+  // ── Filtro de período (Geral / Últimos 30 dias / Hoje / Ontem / Personalizado) — agora vale pra TUDO:
+  // números-resumo, vendas por período, gráfico diário, tendência e visualizações.
   const periodo = req.query.periodo || 'geral';
   const agora = new Date();
-  let inicioFiltro = null, fimFiltro = null;
-  if (periodo === '30dias') { inicioFiltro = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000); }
-  else if (periodo === 'hoje') { inicioFiltro = new Date(agora); inicioFiltro.setHours(0, 0, 0, 0); }
-  else if (periodo === 'ontem') {
-    inicioFiltro = new Date(agora); inicioFiltro.setDate(inicioFiltro.getDate() - 1); inicioFiltro.setHours(0, 0, 0, 0);
-    fimFiltro = new Date(agora); fimFiltro.setHours(0, 0, 0, 0);
-  }
-  if (periodo === 'personalizado') {
-    if (req.query.dataInicio) inicioFiltro = new Date(req.query.dataInicio + 'T00:00:00');
-    if (req.query.dataFim) fimFiltro = new Date(req.query.dataFim + 'T23:59:59');
+  // Dias sempre no fuso de Brasília (UTC-3) — o servidor roda em UTC, então sem isso "Hoje" virava
+  // às 21h e "Ontem" pegava o intervalo errado.
+  const chaveDiaBR = (d) => new Date(d.getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  const inicioDiaBR = (chave) => new Date(chave + 'T00:00:00-03:00');
+  const somaDias = (chave, n) => new Date(new Date(chave + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10);
+  const hojeChave = chaveDiaBR(agora);
+  let inicioFiltro = null, fimFiltro = null; // fim é EXCLUSIVO
+  if (periodo === '30dias') { inicioFiltro = inicioDiaBR(somaDias(hojeChave, -29)); }
+  else if (periodo === 'hoje') { inicioFiltro = inicioDiaBR(hojeChave); }
+  else if (periodo === 'ontem') { inicioFiltro = inicioDiaBR(somaDias(hojeChave, -1)); fimFiltro = inicioDiaBR(hojeChave); }
+  else if (periodo === 'personalizado') {
+    const okData = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+    if (okData(req.query.dataInicio)) inicioFiltro = inicioDiaBR(req.query.dataInicio);
+    if (okData(req.query.dataFim)) fimFiltro = inicioDiaBR(somaDias(req.query.dataFim, 1));
   }
   const pedidos = todosPedidosPagos.filter(p => {
     const dataP = new Date(p.pagoEm || p.createdAt);
@@ -2153,6 +2156,11 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
     if (fimFiltro && dataP >= fimFiltro) return false;
     return true;
   });
+  // Primeiro/último dia do período (chaves YYYY-MM-DD) — usados pra preencher dias sem venda no gráfico
+  const primeiroDiaVenda = todosPedidosPagos.map(p => chaveDiaBR(new Date(p.pagoEm || p.createdAt))).sort()[0] || hojeChave;
+  const diaIni = inicioFiltro ? chaveDiaBR(inicioFiltro) : primeiroDiaVenda;
+  const diaFimExclusivo = fimFiltro ? chaveDiaBR(fimFiltro) : somaDias(hojeChave, 1);
+  const diasNoPeriodo = Math.max(1, Math.round((inicioDiaBR(diaFimExclusivo) - inicioDiaBR(diaIni)) / 86400000));
 
   // Usamos valorIngressos (não total) — é o valor líquido que o produtor recebe, sem a taxa
   // administrativa que é cobrada à parte do comprador e fica com a plataforma.
@@ -2220,30 +2228,51 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   const totalTipo = Object.values(porTipoMap).reduce((s, v) => s + v, 0);
   const porTipoIngresso = Object.entries(porTipoMap).map(([tipo, qtd]) => ({ tipo, qtd, percentual: totalTipo > 0 ? Math.round((qtd / totalTipo) * 1000) / 10 : 0 })).sort((a, b) => b.qtd - a.qtd);
 
-  // ── Bloco congelado: vendas por período (hoje/7d/30d) e vendas por dia — sempre olhando pra
-  // TODOS os pedidos pagos, sem aplicar o filtro de período escolhido acima.
-  const inicioHoje = new Date(); inicioHoje.setHours(0,0,0,0);
-  const limite7dias = agora.getTime() - 7 * 24 * 60 * 60 * 1000;
-  const limite30dias = agora.getTime() - 30 * 24 * 60 * 60 * 1000;
-  const janela = (limiteMs) => todosPedidosPagos.reduce((acc, p) => {
+  // ── Vendas por período e vendas por dia — AGORA seguem o filtro escolhido (usam `pedidos`, já filtrado).
+  const inicioHoje = inicioDiaBR(hojeChave);
+  const limite7dias = inicioDiaBR(somaDias(hojeChave, -6)).getTime();
+  const limite30dias = inicioDiaBR(somaDias(hojeChave, -29)).getTime();
+  const valorPedido = (p) => (p.valorIngressos !== undefined ? p.valorIngressos : p.total);
+  const janela = (limiteMs) => pedidos.reduce((acc, p) => {
     const dataPedido = new Date(p.pagoEm || p.createdAt).getTime();
-    if (dataPedido >= limiteMs) { acc.ingressos += (p.tickets || []).length; acc.receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); }
+    if (dataPedido >= limiteMs) { acc.ingressos += (p.tickets || []).length; acc.receita += valorPedido(p); }
     return acc;
   }, { ingressos: 0, receita: 0 });
   const vendasPorPeriodo = { hoje: janela(inicioHoje.getTime()), ultimos7dias: janela(limite7dias), ultimos30dias: janela(limite30dias) };
 
   const porDiaMap = {};
-  todosPedidosPagos.forEach(p => { const d = p.pagoEm ? p.pagoEm.slice(0,10) : p.createdAt.slice(0,10); if (!porDiaMap[d]) porDiaMap[d] = { qtd: 0, receita: 0 }; porDiaMap[d].qtd += (p.tickets||[]).length; porDiaMap[d].receita += (p.valorIngressos !== undefined ? p.valorIngressos : p.total); });
+  pedidos.forEach(p => {
+    const d = chaveDiaBR(new Date(p.pagoEm || p.createdAt));
+    if (!porDiaMap[d]) porDiaMap[d] = { qtd: 0, receita: 0 };
+    porDiaMap[d].qtd += (p.tickets || []).length; porDiaMap[d].receita += valorPedido(p);
+  });
   const NOMES_DIA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
   const diasOrdenados = Object.keys(porDiaMap).sort();
-  const porDia = diasOrdenados.map(dia => ({ dia, diaSemana: NOMES_DIA_SEMANA[new Date(dia + 'T12:00:00').getDay()], qtd: porDiaMap[dia].qtd, receita: Math.round(porDiaMap[dia].receita * 100) / 100 }));
+  // Preenche os dias SEM venda dentro do período (limitado a 400 dias) — gráfico contínuo e o período inteiro visível
+  const diasGrafico = [];
+  if (pedidos.length || inicioFiltro) {
+    for (let i = 0, d = diaIni; i < Math.min(diasNoPeriodo, 400); i++, d = somaDias(d, 1)) diasGrafico.push(d);
+  }
+  let acumulado = 0;
+  const porDia = (diasGrafico.length ? diasGrafico : diasOrdenados).map(dia => {
+    const x = porDiaMap[dia] || { qtd: 0, receita: 0 };
+    acumulado += x.receita;
+    return { dia, diaSemana: NOMES_DIA_SEMANA[new Date(dia + 'T12:00:00Z').getUTCDay()], qtd: x.qtd, receita: Math.round(x.receita * 100) / 100, receitaAcumulada: Math.round(acumulado * 100) / 100 };
+  });
+  const melhorDia = diasOrdenados.reduce((m, d) => (!m || porDiaMap[d].qtd > porDiaMap[m].qtd) ? d : m, null);
+  const resumoPeriodo = {
+    ingressos: totalIngressos, receita: Math.round(totalReceita * 100) / 100, dias: diasNoPeriodo,
+    diasComVenda: diasOrdenados.length,
+    mediaIngressosPorDia: Math.round((totalIngressos / diasNoPeriodo) * 10) / 10,
+    mediaReceitaPorDia: Math.round((totalReceita / diasNoPeriodo) * 100) / 100,
+    melhorDia: melhorDia ? { dia: melhorDia, qtd: porDiaMap[melhorDia].qtd } : null,
+    de: diaIni, ate: somaDias(diaFimExclusivo, -1)
+  };
 
-  // Percentual de vendas por dia da semana (agregando TODOS os dias do mesmo tipo — ex: soma de
-  // todas as segundas-feiras) — ajuda a ver quais dias da semana vendem mais, não dia a dia.
   const porDiaSemanaMap = { dom: 0, seg: 0, ter: 0, qua: 0, qui: 0, sex: 0, sáb: 0 };
-  todosPedidosPagos.forEach(p => {
-    const dataP = new Date((p.pagoEm || p.createdAt).slice(0, 10) + 'T12:00:00');
-    porDiaSemanaMap[NOMES_DIA_SEMANA[dataP.getDay()]] += (p.tickets || []).length;
+  pedidos.forEach(p => {
+    const dataP = new Date(chaveDiaBR(new Date(p.pagoEm || p.createdAt)) + 'T12:00:00Z');
+    porDiaSemanaMap[NOMES_DIA_SEMANA[dataP.getUTCDay()]] += (p.tickets || []).length;
   });
   const totalPorDiaSemana = Object.values(porDiaSemanaMap).reduce((s, v) => s + v, 0);
   const porDiaSemana = ['seg','ter','qua','qui','sex','sáb','dom'].map(dia => ({ dia, qtd: porDiaSemanaMap[dia], percentual: totalPorDiaSemana > 0 ? Math.round((porDiaSemanaMap[dia] / totalPorDiaSemana) * 1000) / 10 : 0 }));
@@ -2253,15 +2282,16 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
   // dias que faltam pro evento. NÃO é um modelo preditivo sofisticado (não considera sazonalidade,
   // picos de divulgação, etc), é só uma estimativa direta: "se continuar vendendo nesse ritmo".
   let tendencia = null;
-  if (ev.dataEvento && diasOrdenados.length >= 2) {
+  if (ev.dataEvento && (periodo !== 'geral' || diasOrdenados.length >= 2)) {
     const dataEventoObj = new Date(ev.dataEvento + 'T23:59:59');
     const diasRestantes = Math.max(0, Math.ceil((dataEventoObj - agora) / (24 * 60 * 60 * 1000)));
-    const primeiroDia = new Date(diasOrdenados[0]);
-    const diasDeVendaDecorridos = Math.max(1, Math.ceil((agora - primeiroDia) / (24 * 60 * 60 * 1000)));
-    const mediaIngressosDia = totalVendidoPago / diasDeVendaDecorridos;
+    // Ritmo médio = só ingressos PAGOS dentro do período escolhido ÷ dias do período.
+    const vendidoPagoPeriodo = pedidos.reduce((s, p) => s + (p.itens || []).filter(it => !ev.lotes.find(l => l.id === it.loteId)?.cortesia).reduce((s2, it) => s2 + (it.qtd || 0), 0), 0);
+    const diasBase = periodo === 'geral' ? Math.max(1, Math.ceil((agora - new Date(diasOrdenados[0] + 'T00:00:00-03:00')) / 86400000)) : diasNoPeriodo;
+    const mediaIngressosDia = vendidoPagoPeriodo / diasBase;
     const projecaoIngressos = Math.round(totalVendidoGeral + mediaIngressosDia * diasRestantes);
     tendencia = {
-      mediaIngressosPorDia: Math.round(mediaIngressosDia * 10) / 10, diasRestantes,
+      mediaIngressosPorDia: Math.round(mediaIngressosDia * 10) / 10, diasRestantes, diasBase,
       projecaoIngressosNoEvento: capacidadeMaxima > 0 ? Math.min(projecaoIngressos, capacidadeMaxima) : projecaoIngressos,
       atingeCapacidade: capacidadeMaxima > 0 && projecaoIngressos >= capacidadeMaxima
     };
@@ -2269,16 +2299,25 @@ app.get('/api/eventos/:id/relatorio', auth, (req, res) => {
 
   // Visualizações da página e taxa de conversão (visualização → pedido pago) — não temos rastreio
   // de visitante único, então essa taxa é sobre o total de visualizações, não pessoas distintas.
-  const visualizacoes = ev.visualizacoes || 0;
-  // Taxa de conversão: visualizações da página ÷ ingressos vendidos — mostra quantas visualizações
-  // em média "custam" um ingresso vendido (quanto menor, melhor a conversão).
-  const taxaConversao = totalVendidoGeral > 0 ? Math.round((visualizacoes / totalVendidoGeral) * 10) / 10 : null;
+  const visualizacoesTotal = ev.visualizacoes || 0;
+  let visualizacoes = visualizacoesTotal, visualizacoesParcial = false;
+  if (periodo !== 'geral') {
+    // Soma só os dias do período. Antes do registro diário existir (visualizacoesDesde) só havia o total,
+    // então se o período começa antes disso o número é parcial — avisamos na tela.
+    const porDiaViews = ev.visualizacoesPorDia || {};
+    visualizacoes = 0;
+    for (const [d, n] of Object.entries(porDiaViews)) { if (d >= diaIni && d < diaFimExclusivo) visualizacoes += n; }
+    visualizacoesParcial = !ev.visualizacoesDesde || ev.visualizacoesDesde > diaIni;
+  }
+  // Conversão do período: visualizações ÷ ingressos vendidos NO período (pagos + cortesia)
+  const ingressosBaseConversao = periodo === 'geral' ? totalVendidoGeral : totalIngressos;
+  const taxaConversao = ingressosBaseConversao > 0 && visualizacoes > 0 ? Math.round((visualizacoes / ingressosBaseConversao) * 10) / 10 : null;
 
   res.json({
     periodo, totalReceita, totalIngressos, totalPedidos: pedidos.length, porLote, porDia, porPromoter, porCupom, vendasPorPeriodo,
     ticketMedioIngresso: Math.round(ticketMedioIngresso * 100) / 100, ticketMedioPedido: Math.round(ticketMedioPedido * 100) / 100,
     capacidade, origemVendas, porTipoIngresso, tendencia,
-    visualizacoes, taxaConversao, porDiaSemana
+    visualizacoes, visualizacoesTotal, visualizacoesParcial, taxaConversao, porDiaSemana, resumoPeriodo
   });
 });
 
@@ -2874,6 +2913,11 @@ app.get('/api/public/eventos/:slug', rateLimit(60000, 60), (req, res) => {
   const ev = EVENTOS.find(e => e.id === ref.eventoId);
   if (!ev || ev.status !== 'publicado') return res.status(404).json({ error: 'Evento não encontrado ou não publicado.' });
   ev.visualizacoes = (ev.visualizacoes || 0) + 1;
+  // Guarda também as visualizações POR DIA (fuso de Brasília), pro relatório poder filtrar por período.
+  // "visualizacoesDesde" marca quando esse registro diário começou — antes disso só existia o total.
+  { const diaBR = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    if (!ev.visualizacoesPorDia) { ev.visualizacoesPorDia = {}; ev.visualizacoesDesde = diaBR; }
+    ev.visualizacoesPorDia[diaBR] = (ev.visualizacoesPorDia[diaBR] || 0) + 1; }
   persistEventos();
   const organizador = db.users.find(u => u.id === ev.organizadorId);
   const lotesPublicos = ev.lotes.filter(l => l.ativo && !l.exclusivoPromoter && l.vendidos < l.qtdTotal)
