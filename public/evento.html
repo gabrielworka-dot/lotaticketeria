@@ -71,6 +71,14 @@ a{color:inherit;}
 .total-row.final{padding-top:14px;border-top:1px solid var(--border);margin-top:6px;}
 .total-row.final .total-val{font-size:24px;font-weight:800;color:var(--p2);}
 .btn{width:100%;padding:15px;background:var(--p2);border:none;border-radius:10px;color:var(--bg-deep);font-family:inherit;font-size:15px;font-weight:800;cursor:pointer;margin-top:6px;}
+.btn-ir-ingressos{margin:14px 0 4px;box-shadow:0 6px 18px rgba(232,150,26,.28);display:flex;align-items:center;justify-content:center;gap:8px;}
+.btn-ir-ingressos span{display:inline-block;animation:setaBaixo 1.4s ease-in-out infinite;}
+/* Enquanto a pessoa digita num campo: esconde botões flutuantes/barra fixa (cobriam o campo e "roubavam" o toque no celular)
+   e dá folga no fim da página pra o campo poder subir acima do teclado. */
+body.digitando #botoesFlutuantes, body.digitando #barraResumoFixa{display:none !important;}
+body.digitando{padding-bottom:50vh;}
+@keyframes setaBaixo{0%,100%{transform:translateY(-2px)}50%{transform:translateY(3px)}}
+@media (prefers-reduced-motion:reduce){.btn-ir-ingressos span{animation:none}}
 .btn:disabled{opacity:.4;}
 .err{font-size:12px;color:var(--red);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 13px;margin-bottom:12px;display:none;}
 .empty{text-align:center;padding:40px 20px;color:var(--text3);}
@@ -287,6 +295,40 @@ async function init(){
   }
 }
 
+// Máscara do CEP (00000-000) — só dígitos, no máximo 8.
+function mascararCep(el){
+  const d=(el.value||'').replace(/\D/g,'').slice(0,8);
+  el.value=d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+// Campos de texto no celular: modo "digitando" (ver CSS) + rola o campo pro meio da tela quando o teclado abre.
+(function(){
+  const ehCampo=(el)=>!!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !/^(checkbox|radio|button|submit)$/.test(el.type||'');
+  document.addEventListener('focusin',function(e){
+    if(!ehCampo(e.target)) return;
+    document.body.classList.add('digitando');
+    const el=e.target;
+    setTimeout(function(){ try{ el.scrollIntoView({block:'center',behavior:'smooth'}); }catch(err){} },350);
+  });
+  document.addEventListener('focusout',function(){
+    setTimeout(function(){ if(!ehCampo(document.activeElement)) document.body.classList.remove('digitando'); },200);
+  });
+})();
+
+// Rola suavemente até a área de compra (mapa de assentos ou lista de lotes) e dá um destaque rápido.
+function irParaIngressos(){
+  const alvo=document.getElementById('ancoraIngressos');
+  if(!alvo) return;
+  const y=alvo.getBoundingClientRect().top+window.pageYOffset-12;
+  try{ window.scrollTo({top:y,behavior:'smooth'}); }catch(e){ window.scrollTo(0,y); }
+  const card=document.getElementById('cardListaIngressos');
+  const destaque=(card&&card.style.display!=='none')?card:alvo.nextElementSibling;
+  if(destaque&&destaque.style){
+    destaque.style.transition='box-shadow .4s';
+    destaque.style.boxShadow='0 0 0 2px var(--p2)';
+    setTimeout(()=>{ destaque.style.boxShadow=''; },1600);
+  }
+}
+
 function renderEvento(){
   const c1=(EVENTO.cores&&EVENTO.cores.primaria)||'var(--p)';
   const temMapaAssentos=!!(EVENTO.mapaAssentos&&EVENTO.mapaAssentos.ativo&&EVENTO.mapaAssentos.setores?.length);
@@ -343,11 +385,14 @@ function renderEvento(){
           ${EVENTO.local?'<span>📍 '+esc(EVENTO.local)+(EVENTO.cidade?', '+esc(EVENTO.cidade):'')+'</span>':''}
         </div>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">Pague em até 3x</div>
+        <!-- Botão de atalho: leva direto pra área de compra (mapa/lotes). Clientes estavam perguntando no WhatsApp "onde compro?" -->
+        <button type="button" class="btn btn-ir-ingressos" onclick="irParaIngressos()">🎟️ Compre seu ingresso aqui <span aria-hidden="true">↓</span></button>
         ${EVENTO.organizador?.nome?'<div class="hero-organizador"><span>Por <a href="/o/'+esc(EVENTO.organizador.slug)+'" style="color:var(--p2);font-weight:700">'+esc(EVENTO.organizador.nome)+'</a>'+(EVENTO.organizador.verificado?' <span title="Produtor verificado" style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;background:var(--blue);border-radius:50%;font-size:9px;vertical-align:middle;color:#fff">✓</span>':'')+'</span></div>':''}
         ${EVENTO.descricao?'<div class="hero-desc">'+esc(EVENTO.descricao)+'</div>':''}
         ${EVENTO.videoYoutubeId?'<div style="margin-top:16px;border-radius:10px;overflow:hidden;aspect-ratio:16/9"><iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+EVENTO.videoYoutubeId+'" title="Vídeo do evento" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;height:100%;display:block"></iframe></div>':''}
       </div>
     </div>
+    <div id="ancoraIngressos"></div>
     ${temMapaAssentos?renderMapaAssentosHtml():''}
     ${temMapaSecoes?renderMapaSecoesHtml():''}
     <!-- Lista clara dos assentos escolhidos, separada do mapa — pra não depender só de olhar a cor
@@ -428,10 +473,10 @@ function renderEvento(){
       <div class="err" id="errMsg"></div>
       <div class="fg"><label>Nome completo *</label><input class="fi" id="cNome" name="name" autocomplete="name" placeholder="Nome e sobrenome (como no cartão)"></div>
       <div class="fg"><label>E-mail *</label><input class="fi" type="email" id="cEmail" name="email" autocomplete="email" placeholder="seu@email.com"></div>
-      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" name="cpf" autocomplete="off" inputmode="numeric" placeholder="Somente números" maxlength="14"></div>
+      <div class="fg"><label>CPF *</label><input class="fi" id="cCpf" name="cpf" type="text" autocomplete="off" inputmode="numeric" pattern="[0-9]*" placeholder="Somente números" maxlength="14"></div>
       <div class="fg"><label>WhatsApp</label><input class="fi" id="cTel" name="tel" type="tel" autocomplete="tel" placeholder="(11) 99999-9999"></div>
       <div id="camposEnderecoAsaas" style="display:none">
-        <div class="fg"><label>CEP *</label><input class="fi" id="cCep" name="cep" autocomplete="postal-code" inputmode="numeric" placeholder="00000-000" maxlength="9"></div>
+        <div class="fg"><label>CEP *</label><input class="fi" id="cCep" name="cep" type="text" autocomplete="off" autocorrect="off" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="00000-000" maxlength="9" oninput="mascararCep(this)"></div>
         <p style="font-size:11px;color:var(--text3);margin-top:-6px">Exigido pelo processador de pagamento pra confirmar a compra.</p>
       </div>
     </div>
