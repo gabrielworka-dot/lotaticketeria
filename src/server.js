@@ -33,6 +33,10 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || (process.env.RAILWAY_PUBL
 // Isso protege o CPF salvo nos arquivos de dados mesmo que alguém tenha acesso direto ao Volume —
 // o resto do sistema continua funcionando normalmente com o valor decifrado em memória.
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
+// ROTAÇÃO DE CHAVE: ao trocar ENCRYPTION_KEY, coloque a chave ANTIGA em ENCRYPTION_KEY_OLD. Os dados cifrados com a
+// chave antiga continuam legíveis (fallback) e são regravados com a chave NOVA logo no boot (ver "reencriptarDados").
+// Depois de ver "✅ reencriptação concluída" no log, apague ENCRYPTION_KEY_OLD.
+const ENCRYPTION_KEY_OLD = process.env.ENCRYPTION_KEY_OLD || '';
 function criptografar(texto) {
   if (!ENCRYPTION_KEY || !texto || String(texto).startsWith('enc:')) return texto;
   try {
@@ -45,17 +49,21 @@ function criptografar(texto) {
     return `enc:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
   } catch (e) { console.error('Erro ao criptografar dado:', e.message); return texto; }
 }
+function descriptografarComChave(valor, chaveHex) {
+  const [, ivHex, authTagHex, encrypted] = String(valor).split(':');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(chaveHex, 'hex'), Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
 function descriptografar(valor) {
   if (!valor || !String(valor).startsWith('enc:') || !ENCRYPTION_KEY) return valor;
-  try {
-    const [, ivHex, authTagHex, encrypted] = String(valor).split(':');
-    const key = Buffer.from(ENCRYPTION_KEY, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
-    decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  } catch (e) { console.error('Erro ao descriptografar dado (chave pode ter mudado):', e.message); return valor; }
+  try { return descriptografarComChave(valor, ENCRYPTION_KEY); }
+  catch (e) {
+    if (ENCRYPTION_KEY_OLD) { try { return descriptografarComChave(valor, ENCRYPTION_KEY_OLD); } catch (e2) {} }
+    console.error('Erro ao descriptografar dado (chave pode ter mudado):', e.message); return valor;
+  }
 }
 // Cifra/decifra só o CPF dos pedidos e usuários — no momento exato de salvar/carregar do disco.
 // O resto do código nunca precisa saber disso: em memória, o valor sempre está em texto puro.
@@ -387,6 +395,11 @@ function auth(req, res, next) {
     const user = db.users.find(u => u.id === dec.id);
     if (!user) return res.status(401).json({ error: 'Sessão inválida.' });
     if (user.ativo === false) return res.status(403).json({ error: 'Esta conta foi desativada.' });
+    // Sessões emitidas ANTES de um "encerrar todas as sessões" (global ou da conta) deixam de valer.
+    const emitidoEm = (dec.iat || 0) * 1000;
+    if ((db.sessoesInvalidasAntesDe && emitidoEm < db.sessoesInvalidasAntesDe) || (user.sessoesInvalidasAntesDe && emitidoEm < user.sessoesInvalidasAntesDe)) {
+      return res.status(401).json({ error: 'Sessão encerrada. Entre novamente.' });
+    }
     req.user = user;
     next();
   } catch(e) { return res.status(401).json({ error: 'Token inválido ou expirado.' }); }
@@ -793,8 +806,13 @@ app.post('/api/produtor/excluir-conta', auth, organizadorOnly, async (req, res) 
 app.post('/api/admin/recuperar-acesso', rateLimit(300000, 5), (req, res) => {
   const secretConfigurado = process.env.ADMIN_RECOVERY_SECRET;
   if (!secretConfigurado) return res.status(503).json({ error: 'Recuperação de emergência não configurada. Defina ADMIN_RECOVERY_SECRET nas variáveis de ambiente.' });
-  const secretEnviado = req.headers['x-recovery-secret'] || '';
-  if (secretEnviado !== secretConfigurado) return res.status(403).json({ error: 'Chave de recuperação incorreta.' });
+  const secretEnviado = String(req.headers['x-recovery-secret'] || '');
+  const bufA = Buffer.from(secretEnviado), bufB = Buffer.from(secretConfigurado);
+  if (secretConfigurado.length < 24) return res.status(503).json({ error: 'ADMIN_RECOVERY_SECRET precisa ter pelo menos 24 caracteres.' });
+  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+    registrarAuditoria({ id: 'sistema', nome: 'Sistema', email: '' }, 'recuperacao_acesso_chave_incorreta', { ip: ipDoCliente(req) });
+    return res.status(403).json({ error: 'Chave de recuperação incorreta.' });
+  }
   const admin = db.users.find(u => u.isAdmin);
   if (!admin) return res.status(404).json({ error: 'Nenhuma conta de administrador encontrada.' });
   const { novoEmail, novaSenha } = req.body;
@@ -809,6 +827,8 @@ app.post('/api/admin/recuperar-acesso', rateLimit(300000, 5), (req, res) => {
     if (novaSenha.length < 6) return res.status(400).json({ error: 'Nova senha muito curta (mínimo 6 caracteres).' });
     admin.senha = bcrypt.hashSync(novaSenha, 12);
   }
+  admin.sessoesInvalidasAntesDe = Date.now(); // derruba sessões antigas do admin
+  registrarAuditoria({ id: 'sistema', nome: 'Sistema', email: '' }, 'recuperacao_acesso_admin_usada', { ip: ipDoCliente(req), emailAdmin: admin.email, trocouEmail: !!novoEmail, trocouSenha: !!novaSenha });
   saveDB(db);
   res.json({ ok: true, email: admin.email });
 });
@@ -901,6 +921,10 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
   if (cpfCnpj !== undefined) user.cpfCnpj = sanitize(cpfCnpj, 20).replace(/[^\d]/g, '');
   if (tipoDocumento !== undefined) user.tipoDocumento = tipoDocumento === 'cnpj' ? 'cnpj' : 'cpf';
   if (pagamentoInfo) {
+    const pixAnterior = user.pagamentoInfo?.chavePix || '';
+    if (sanitize(pagamentoInfo.chavePix || '', 140) !== pixAnterior) {
+      registrarAuditoria(user, 'alterou_chave_pix', { de: pixAnterior, para: sanitize(pagamentoInfo.chavePix || '', 140), ip: ipDoCliente(req) });
+    }
     user.pagamentoInfo = {
       chavePix: sanitize(pagamentoInfo.chavePix || '', 140),
       tipoChavePix: sanitize(pagamentoInfo.tipoChavePix || '', 20),
@@ -916,6 +940,7 @@ app.patch('/api/auth/perfil', auth, (req, res) => {
     const emailNormalizado = sanitize(novoEmail, 150).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNormalizado)) return res.status(400).json({ error: 'E-mail inválido.' });
     if (emailNormalizado !== user.email && db.users.find(u => u.email === emailNormalizado)) return res.status(400).json({ error: 'Esse e-mail já está em uso por outra conta.' });
+    if (emailNormalizado !== user.email) registrarAuditoria(user, 'alterou_email', { de: user.email, para: emailNormalizado, ip: ipDoCliente(req) });
     user.email = emailNormalizado;
     user.emailVerificado = false;
   }
@@ -2769,6 +2794,46 @@ app.post('/api/public/contato', rateLimit(60000, 5), async (req, res) => {
 
 app.get('/api/admin/auditoria', auth, adminOnly, (req, res) => {
   res.json({ registros: AUDITORIA.slice(-500).reverse() });
+});
+
+// ── VERIFICAÇÃO PÓS-INCIDENTE (vazamento de variáveis de ambiente) ──────────────
+// Mostra, num lugar só, tudo que um invasor com acesso às chaves poderia ter mexido: quem é admin, chaves PIX de produtores
+// (pra onde o dinheiro vai), adiantamentos recentes, ações sensíveis no log e o estado da configuração de segredos.
+// NUNCA devolve o valor de nenhuma variável de ambiente — só se está configurada ou não.
+app.get('/api/admin/seguranca/pos-incidente', auth, adminOnly, (req, res) => {
+  const mascarar = (v) => { v = String(v || ''); return v.length <= 6 ? v : v.slice(0, 3) + '…' + v.slice(-3); };
+  const admins = db.users.filter(u => u.isAdmin).map(u => ({ id: u.id, nome: u.nome, email: u.email, twoFactorAtivo: !!u.twoFactorAtivo, criadoEm: u.createdAt || null, ativo: u.ativo !== false }));
+  const produtoresPix = db.users.filter(u => u.pagamentoInfo?.chavePix).map(u => ({
+    id: u.id, nome: u.nome, email: u.email, chavePix: u.pagamentoInfo.chavePix, tipoChavePix: u.pagamentoInfo.tipoChavePix || '', titular: u.pagamentoInfo.nomeTitular || '', podeAntecipar: !!u.podeAntecipar
+  }));
+  const adiantamentos = ADIANTAMENTOS.slice(-40).reverse().map(a => ({
+    id: a.id, produtorId: a.produtorId, eventoNome: a.eventoNome, valor: a.valor, chavePix: a.chavePix, titular: a.nomeTitular, status: a.status, solicitadoEm: a.solicitadoEm, pagoEm: a.pagoEm
+  }));
+  const acoesSensiveis = new Set(['alterou_chave_pix', 'alterou_email', 'recuperacao_acesso_admin_usada', 'recuperacao_acesso_chave_incorreta', 'login_admin_sem_2fa', 'trocou_provedor_pagamento', 'alterou_comissao', 'alterou_permissao_antecipacao', 'desativou_usuario', 'reativou_usuario', 'reembolso_pedido', 'editou_bordero', 'gerou_cortesia']);
+  const logSensivel = AUDITORIA.filter(a => acoesSensiveis.has(a.acao)).slice(-100).reverse();
+  const novosUsuarios7d = db.users.filter(u => u.createdAt && Date.now() - new Date(u.createdAt).getTime() < 7 * 86400000).length;
+  res.json({
+    geradoEm: new Date().toISOString(),
+    segredos: {
+      jwtSecret: JWT_SECRET === 'role_dev_secret_change_in_prod' ? 'PADRÃO (INSEGURO)' : 'configurado',
+      encryptionKey: ENCRYPTION_KEY ? 'configurada' : 'AUSENTE',
+      encryptionKeyOldPresente: !!ENCRYPTION_KEY_OLD,
+      adminRecoverySecret: process.env.ADMIN_RECOVERY_SECRET ? (process.env.ADMIN_RECOVERY_SECRET.length >= 24 ? 'configurado' : 'CURTO (<24)') : 'não configurado',
+      mpAccessToken: MP_PLATFORM_TOKEN ? 'configurado' : 'ausente', mpWebhookSecret: MP_WEBHOOK_SECRET ? 'configurado' : 'AUSENTE',
+      asaasApiKey: ASAAS_API_KEY ? 'configurada' : 'ausente', asaasWebhookToken: ASAAS_WEBHOOK_TOKEN ? 'configurado' : 'AUSENTE',
+      resendApiKey: RESEND_API_KEY ? 'configurada' : 'ausente'
+    },
+    sessoesInvalidasAntesDe: db.sessoesInvalidasAntesDe || null,
+    admins, produtoresPix, adiantamentos, logSensivel, novosUsuarios7d,
+    totalUsuarios: db.users.length, dicaMascara: mascarar('exemplo1234')
+  });
+});
+// Derruba TODAS as sessões ativas (todo mundo precisa entrar de novo). Use ao suspeitar de vazamento de token/segredo.
+app.post('/api/admin/seguranca/encerrar-sessoes', auth, adminOnly, rateLimit(60000, 5), (req, res) => {
+  db.sessoesInvalidasAntesDe = Date.now();
+  saveDB(db);
+  registrarAuditoria(req.user, 'encerrou_todas_as_sessoes', { ip: ipDoCliente(req) });
+  res.json({ ok: true, mensagem: 'Todas as sessões foram encerradas. Entre novamente.' });
 });
 
 // ── DICAS PRA PRODUTORES (vídeo/PDF) — o admin publica, todo produtor vê no próprio painel ──
@@ -5037,6 +5102,7 @@ app.get('/health', (req, res) => {
     suporte_email: SUPORTE_EMAIL ? `✅ (${SUPORTE_EMAIL})` : '❌ (configure SUPORTE_EMAIL — sem isso, mensagens do formulário de contato não geram e-mail de notificação)',
     asaas: ASAAS_API_KEY ? `✅ (${ASAAS_SANDBOX ? 'sandbox' : 'produção'})` : '❌ (configure ASAAS_API_KEY)',
     asaas_webhook_token: ASAAS_WEBHOOK_TOKEN ? '✅ configurado' : '⚠️ não configurado (recomendado configurar ASAAS_WEBHOOK_TOKEN)',
+    jwt_secret: JWT_SECRET === 'role_dev_secret_change_in_prod' ? '❌ PADRÃO — qualquer pessoa pode forjar login! Configure JWT_SECRET' : '✅ configurado',
     criptografia_cpf: ENCRYPTION_KEY ? '✅ ativa' : '⚠️ não configurada (recomendado configurar ENCRYPTION_KEY)',
     backup_automatico: fs.existsSync(BACKUP_DIR) ? `✅ ativo (${fs.readdirSync(BACKUP_DIR).length} backup(s) guardado(s))` : '⏳ ainda não rodou (primeiro backup ocorre 1 min após o servidor iniciar)',
     backup_por_email: (SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email) ? `✅ enviado pra ${SUPORTE_EMAIL || db.users.find(u => u.isAdmin)?.email}` : '⚠️ sem destinatário configurado (configure SUPORTE_EMAIL)',
@@ -5281,7 +5347,19 @@ process.on('uncaughtException', (erro) => {
   console.error('⚠️ Exceção não capturada (uncaughtException) — servidor continua rodando normalmente:', erro);
 });
 
+// Regrava usuários/pedidos com a ENCRYPTION_KEY atual (usado na rotação de chave — ver ENCRYPTION_KEY_OLD).
+function reencriptarDados() {
+  if (!ENCRYPTION_KEY || !ENCRYPTION_KEY_OLD) return;
+  try {
+    saveDB(db);
+    const ok = persistPedidosSync();
+    console.log(ok ? '✅ [Rotação de chave] reencriptação concluída — pode apagar ENCRYPTION_KEY_OLD das variáveis.' : '⚠️ [Rotação de chave] falhou ao regravar pedidos.');
+  } catch (e) { console.error('[Rotação de chave] erro:', e.message); }
+}
+if (JWT_SECRET === 'role_dev_secret_change_in_prod') console.error('🚨 JWT_SECRET NÃO CONFIGURADO — o segredo padrão está no código público; qualquer pessoa pode forjar login. Configure JWT_SECRET agora.');
+
 app.listen(PORT, () => {
+  reencriptarDados();
   console.log(`\n🎟️  LOTA rodando na porta ${PORT}`);
   console.log(`   Mercado Pago: ${MP_PLATFORM_TOKEN ? '✅' : '❌'}`);
   console.log(`   Resend: ${RESEND_API_KEY ? '✅' : '❌'}\n`);
