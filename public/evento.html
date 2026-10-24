@@ -1015,7 +1015,7 @@ function atualizarTotal(){
     gateCodigoEl.style.display='none';
   }
   const usaAsaas=EVENTO?.provedorPagamento==='asaas';
-  document.getElementById('camposEnderecoAsaas').style.display=(usaAsaas&&METODO_ATUAL_ASAAS==='cartao')?'block':'none';
+  document.getElementById('camposEnderecoAsaas').style.display=(usaAsaas&&(METODO_ATUAL_ASAAS==='cartao'||CEP_FORCADO_VISIVEL))?'block':'none';
   document.getElementById('pagamentoCard').style.display=(temItem&&autenticado&&!usaAsaas)?'block':'none';
   document.getElementById('pagamentoCardAsaas').style.display=(temItem&&autenticado&&usaAsaas)?'block':'none';
   if(temItem&&autenticado){
@@ -1283,6 +1283,7 @@ function selecionarMetodo(metodo){
 }
 
 let METODO_ATUAL_ASAAS='cartao';
+let CEP_FORCADO_VISIVEL=false; // vira true quando o servidor pede o CEP — o campo não pode mais sumir ao trocar de aba/atualizar total
 function selecionarMetodoAsaas(metodo){
   METODO_ATUAL_ASAAS=metodo;
   document.getElementById('tabCartaoAsaas').classList.toggle('active', metodo==='cartao');
@@ -1291,7 +1292,7 @@ function selecionarMetodoAsaas(metodo){
   // O CEP só é necessário pra cartão (uso antifraude) — escondemos o campo pra PIX/boleto, pra não
   // parecer uma etapa extra obrigatória pra quem só quer pagar rápido.
   const campoCep=document.getElementById('camposEnderecoAsaas');
-  if(campoCep) campoCep.style.display=metodo==='cartao'?'block':'none';
+  if(campoCep) campoCep.style.display=(metodo==='cartao'||CEP_FORCADO_VISIVEL)?'block':'none';
 }
 
 let PROCESSANDO_PAGAMENTO_ASAAS=false;
@@ -1337,6 +1338,14 @@ async function processarSubmitAsaas(){
     else{ errEl.textContent='Não foi possível gerar o link de pagamento.'; errEl.style.display='block'; }
   }catch(e){
     errEl.textContent=e.message; errEl.style.display='block';
+    // O servidor pediu o CEP (obrigatório pro cartão; o Asaas às vezes exige também no PIX/boleto): mostra o campo e leva o cliente até ele.
+    if(e.dados&&e.dados.precisaCep){
+      const caixaCep=document.getElementById('camposEnderecoAsaas');
+      if(caixaCep) caixaCep.style.display='block';
+      CEP_FORCADO_VISIVEL=true;
+      const campoCep=document.getElementById('cCep');
+      if(campoCep){ try{ campoCep.scrollIntoView({block:'center',behavior:'smooth'}); }catch(x){} setTimeout(()=>{ try{ campoCep.focus(); }catch(x){} },400); }
+    }
   }finally{
     PROCESSANDO_PAGAMENTO_ASAAS=false;
     btn.disabled=false; btn.textContent='Continuar para pagamento →';
