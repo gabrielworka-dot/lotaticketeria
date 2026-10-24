@@ -3249,22 +3249,27 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
         // cliente antecipadamente — não importa a forma de pagamento escolhida (PIX, cartão ou
         // boleto). Resolvemos isso consultando o CEP no ViaCEP (serviço público e gratuito) por
         // trás dos panos, assim o comprador só precisa digitar o CEP mesmo, em qualquer método.
-        let enderecoResolvido = null;
+        let enderecoResolvido = null, cepNaoExiste = false, viaCepIndisponivel = false;
         if (cepLimpo.length === 8) {
           try {
-            const viaCepResp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+            const viaCepResp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { timeout: 6000 });
             const viaCepData = await viaCepResp.json();
-            if (!viaCepData.erro) {
-              enderecoResolvido = { address: viaCepData.logradouro || 'Endereço não informado', province: viaCepData.bairro || 'Centro', city: parseInt(viaCepData.ibge, 10) || undefined };
-            }
-          } catch (e) { console.error('Erro ao consultar CEP no ViaCEP:', e.message); }
+            if (viaCepData.erro) cepNaoExiste = true;
+            else enderecoResolvido = { address: viaCepData.logradouro || 'Endereço não informado', province: viaCepData.bairro || 'Centro', city: parseInt(viaCepData.ibge, 10) || undefined };
+          } catch (e) { viaCepIndisponivel = true; console.error('Erro ao consultar CEP no ViaCEP:', e.message); }
         }
-        if (!cepLimpo || cepLimpo.length !== 8) {
-          return soltarReserva(), res.status(400).json({ error: 'CEP é obrigatório e deve ter 8 dígitos.' });
+        // O CEP só é OBRIGATÓRIO pro cartão (antifraude). Antes o servidor exigia pra qualquer método, mas a tela
+        // escondia o campo no PIX/boleto — o cliente recebia "CEP é obrigatório" sem ter onde digitar.
+        // `precisaCep` avisa a tela pra mostrar o campo na hora.
+        const exigeCep = metodo === 'cartao';
+        if (exigeCep && cepLimpo.length !== 8) {
+          return soltarReserva(), res.status(400).json({ error: 'Digite seu CEP (8 dígitos) para pagar com cartão.', precisaCep: true });
         }
-        if (!enderecoResolvido) {
-          return soltarReserva(), res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.' });
+        if (cepNaoExiste && exigeCep) {
+          return soltarReserva(), res.status(400).json({ error: 'Não conseguimos localizar esse CEP. Confira e tente novamente.', precisaCep: true });
         }
+        // ViaCEP fora do ar não pode travar a compra: segue com endereço genérico + o CEP informado.
+        if (!enderecoResolvido && viaCepIndisponivel) enderecoResolvido = { address: 'Endereço não informado', province: 'Centro' };
 
         const checkoutBody = {
           billingTypes: billingTypesMap[metodo] || ['PIX', 'CREDIT_CARD'],
@@ -3283,15 +3288,23 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
           customerData: {
             name: comprador.nome, cpfCnpj: cpfLimpo, email: comprador.email,
             phone: (() => { let t = (comprador.telefone || '').replace(/[^\d]/g, ''); if (t.length > 11 && t.startsWith('55')) t = t.slice(2); return (t.length === 10 || t.length === 11) ? t : undefined; })(),
-            postalCode: cepLimpo || undefined,
-            addressNumber: numero || 'S/N',
-            ...(enderecoResolvido || {})
+            // Endereço só vai quando temos um CEP válido (PIX/boleto podem seguir sem)
+            ...(enderecoResolvido ? { postalCode: cepLimpo, addressNumber: numero || 'S/N', ...enderecoResolvido } : {})
           }
         };
         if (chargeTypes.includes('INSTALLMENT')) checkoutBody.installment = { maxInstallmentCount: 3 };
 
         const criacao = await asaasFetch('/checkouts', { method: 'POST', body: JSON.stringify(checkoutBody) });
-        if (!criacao.ok) return soltarReserva(), res.status(400).json({ error: criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.' });
+        if (!criacao.ok) {
+          const descErroAsaas = criacao.data.errors?.[0]?.description || 'Erro ao criar checkout no Asaas.';
+          // Sem endereço e o Asaas reclamou dele → pede o CEP na tela (campo aparece sozinho)
+          if (!enderecoResolvido && /endere|cep|postal|address|rua|bairro|cidade|province/i.test(descErroAsaas)) {
+            console.error('[Checkout Asaas] Asaas exigiu endereço para', metodo, '→ pedindo CEP ao cliente. Detalhe:', descErroAsaas);
+            return soltarReserva(), res.status(400).json({ error: 'Para concluir este pagamento precisamos do seu CEP. Digite abaixo e tente de novo.', precisaCep: true });
+          }
+          console.error('[Checkout Asaas] Asaas recusou a criação do checkout:', metodo, descErroAsaas);
+          return soltarReserva(), res.status(400).json({ error: descErroAsaas });
+        }
         pedidoBase.mpPaymentId = criacao.data.id; // guardamos o ID do checkout do Asaas nesse mesmo campo
         // Guarda ESSE id numa segunda propriedade, que NUNCA é sobrescrita depois — diferente de
         // mpPaymentId, que na confirmação do pagamento passa a guardar o ID do pagamento real (pro
