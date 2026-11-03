@@ -316,7 +316,15 @@ a{color:inherit;}
     <div class="fg"><label>Código *</label><input class="fi" id="cupCodigo" placeholder="DESCONTO10" style="text-transform:uppercase"></div>
     <div class="fg2"><div class="fg"><label>Tipo</label><select class="fs" id="cupTipo"><option value="percentual">Percentual (%)</option><option value="fixo">Valor fixo (R$)</option></select></div><div class="fg"><label>Valor *</label><input class="fi" type="number" id="cupValor" step="0.01" min="0"></div></div>
     <div class="fg"><label>Limite de usos (0 = ilimitado)</label><input class="fi" type="number" id="cupUsosMax" value="0" min="0"></div>
+    <div class="fg"><label>Vale para quais ingressos?</label><div id="cupLotesBox"></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Deixe "Todos os ingressos" marcado, ou escolha só os lotes onde o desconto vale.</div></div>
     <div class="ma"><button class="btn bo" onclick="cm('cupomModal')">Cancelar</button><button class="btn bp" onclick="salvarCupom()">Criar</button></div>
+  </div>
+</div>
+<div class="mo" id="cupomLotesModal" onclick="if(event.target===this)cm('cupomLotesModal')">
+  <div class="modal"><h2>Lotes do cupom <span id="cupLotesEditCodigo" style="color:var(--p2)"></span></h2>
+    <div class="fg"><div id="cupLotesEditBox"></div></div>
+    <div class="ma"><button class="btn bo" onclick="cm('cupomLotesModal')">Cancelar</button><button class="btn bp" onclick="salvarLotesCupom()">Salvar</button></div>
   </div>
 </div>
 
@@ -1423,13 +1431,58 @@ function renderTabCupons(){
   const cupons=EV_ATUAL.cupons||[];
   const ro=SOMENTE_LEITURA;
   el.innerHTML='<div class="card"><div class="ct">Cupons de Desconto</div>'
-    +(cupons.length?cupons.map(c=>'<div class="cupom-row"><div style="flex:1"><strong>'+esc(c.codigo)+'</strong> — '+(c.tipo==='fixo'?'R$'+c.valor.toFixed(2):c.valor+'%')+'<div style="font-size:11px;color:var(--text3)">'+c.usosAtuais+' usado(s)'+(c.usosMax?' / '+c.usosMax+' máx':' · ilimitado')+'</div></div>'+(ro?'<span class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" style="opacity:.7">'+(c.ativo?'Ativo':'Inativo')+'</span>':'<button class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" onclick="toggleCupom(\''+c.id+'\','+!c.ativo+')">'+(c.ativo?'Ativo':'Inativo')+'</button><button class="btn bdng btn-sm" onclick="deletarCupom(\''+c.id+'\')">✕</button>')+'</div>').join(''):'<div class="empty" style="padding:16px"><p>Nenhum cupom ainda.</p></div>')
-    +(ro?'':'<div class="br"><button class="btn bp btn-sm" onclick="document.getElementById(\'cupomModal\').classList.add(\'show\')">+ Novo Cupom</button></div>')+'</div>';
+    +(cupons.length?cupons.map(c=>'<div class="cupom-row"><div style="flex:1"><strong>'+esc(c.codigo)+'</strong> — '+(c.tipo==='fixo'?'R$'+c.valor.toFixed(2):c.valor+'%')+'<div style="font-size:11px;color:var(--text3)">'+c.usosAtuais+' usado(s)'+(c.usosMax?' / '+c.usosMax+' máx':' · ilimitado')+'</div><div style="font-size:11px;color:var(--p2);margin-top:2px">'+escopoCupomTexto(c)+'</div></div>'+(ro?'<span class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" style="opacity:.7">'+(c.ativo?'Ativo':'Inativo')+'</span>':'<button class="btn '+(c.ativo?'bgreen':'bo')+' btn-sm" onclick="toggleCupom(\''+c.id+'\','+!c.ativo+')">'+(c.ativo?'Ativo':'Inativo')+'</button><button class="btn bo btn-sm" title="Escolher lotes" onclick="editarLotesCupom(\''+c.id+'\')">🎟️ Lotes</button><button class="btn bdng btn-sm" onclick="deletarCupom(\''+c.id+'\')">✕</button>')+'</div>').join(''):'<div class="empty" style="padding:16px"><p>Nenhum cupom ainda.</p></div>')
+    +(ro?'':'<div class="br"><button class="btn bp btn-sm" onclick="abrirNovoCupom()">+ Novo Cupom</button></div>')+'</div>';
+}
+// ── Cupom por lote ──
+function escopoCupomTexto(c){
+  const ids=(c.lotesIds||[]);
+  if(!ids.length) return '🎟️ Vale para todos os ingressos';
+  const nomes=ids.map(id=>(EV_ATUAL.lotes||[]).find(l=>l.id===id)?.nome).filter(Boolean);
+  return '🎟️ Só para: '+esc(nomes.join(', ')||'lotes removidos');
+}
+function montarSeletorLotesCupom(boxId,prefixo,selecionados){
+  const lotes=EV_ATUAL.lotes||[];
+  const sel=new Set(selecionados||[]);
+  document.getElementById(boxId).innerHTML=
+    '<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13px;cursor:pointer"><input type="checkbox" id="'+prefixo+'Todos" '+(!sel.size?'checked':'')+' onchange="alternarTodosLotesCupom(\''+prefixo+'\')"> <strong>Todos os ingressos</strong></label>'
+    +lotes.map(l=>'<label style="display:flex;gap:8px;align-items:center;padding:6px 0 6px 22px;font-size:13px;cursor:pointer"><input type="checkbox" class="'+prefixo+'Lote" value="'+esc(l.id)+'" '+(sel.has(l.id)?'checked':'')+' onchange="alternarLoteCupom(\''+prefixo+'\')"> '+esc(l.nome)+' <span style="color:var(--text3)">· R$ '+(l.preco||0).toFixed(2)+'</span></label>').join('');
+}
+function alternarTodosLotesCupom(prefixo){
+  const todos=document.getElementById(prefixo+'Todos');
+  if(todos.checked) document.querySelectorAll('.'+prefixo+'Lote').forEach(c=>c.checked=false);
+  else if(!document.querySelector('.'+prefixo+'Lote:checked')) todos.checked=true;
+}
+function alternarLoteCupom(prefixo){
+  document.getElementById(prefixo+'Todos').checked=document.querySelectorAll('.'+prefixo+'Lote:checked').length===0;
+}
+function lerLotesCupom(prefixo){
+  if(document.getElementById(prefixo+'Todos')?.checked) return [];
+  return [...document.querySelectorAll('.'+prefixo+'Lote:checked')].map(c=>c.value);
+}
+function abrirNovoCupom(){
+  montarSeletorLotesCupom('cupLotesBox','cupNovo',[]);
+  document.getElementById('cupomModal').classList.add('show');
+}
+let CUPOM_EDITANDO_ID=null;
+function editarLotesCupom(id){
+  const c=(EV_ATUAL.cupons||[]).find(x=>x.id===id); if(!c) return;
+  CUPOM_EDITANDO_ID=id;
+  document.getElementById('cupLotesEditCodigo').textContent=c.codigo;
+  montarSeletorLotesCupom('cupLotesEditBox','cupEdit',c.lotesIds||[]);
+  document.getElementById('cupomLotesModal').classList.add('show');
+}
+async function salvarLotesCupom(){
+  if(bloqueiaSomenteLeitura())return;
+  try{
+    const d=await api('PATCH','/api/eventos/'+EV_ATUAL.id+'/cupons/'+CUPOM_EDITANDO_ID,{lotesIds:lerLotesCupom('cupEdit')});
+    EV_ATUAL=d.evento; cm('cupomLotesModal'); renderTabCupons(); toast('Lotes do cupom atualizados!','ok');
+  }catch(e){ toast(e.message,'err'); }
 }
 async function salvarCupom(){
   if(bloqueiaSomenteLeitura())return;
   try{
-    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/cupons',{codigo:gv('cupCodigo'),tipo:gv('cupTipo'),valor:gv('cupValor'),usosMax:gv('cupUsosMax')});
+    const d=await api('POST','/api/eventos/'+EV_ATUAL.id+'/cupons',{codigo:gv('cupCodigo'),tipo:gv('cupTipo'),valor:gv('cupValor'),usosMax:gv('cupUsosMax'),lotesIds:lerLotesCupom('cupNovo')});
     EV_ATUAL=d.evento; cm('cupomModal'); renderTabCupons(); toast('Cupom criado!','ok');
   }catch(e){ toast(e.message,'err'); }
 }
