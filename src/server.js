@@ -1757,6 +1757,8 @@ app.post('/api/eventos/:id/duplicar', auth, (req, res) => {
   if (copia.mapaAssentos?.setores?.length) {
     copia.mapaAssentos.setores = copia.mapaAssentos.setores.map((s, i) => ({ ...s, id: uuidv4(), loteId: copia.lotes[original.lotes.findIndex(l => l.id === s.loteId)]?.id || copia.lotes[0]?.id || '' }));
   }
+  // Cupons restritos a lotes: aponta pros NOVOS ids dos lotes copiados (senão ficariam ligados ao evento antigo)
+  copia.cupons = copia.cupons.map(c => ({ ...c, lotesIds: (c.lotesIds || []).map(oldId => { const i = original.lotes.findIndex(l => l.id === oldId); return i >= 0 ? copia.lotes[i].id : null; }).filter(Boolean) }));
   EVENTOS.push(copia);
   db.ticketSlugs[slug] = { userId: req.user.id, eventoId: copia.id };
   saveDB(db); persistEventos();
@@ -1793,14 +1795,29 @@ app.patch('/api/eventos/:id/lotes', auth, (req, res) => {
 });
 
 // ── CUPONS ──
+// CUPOM POR LOTE: `lotesIds` vazio = vale pra TODOS os ingressos; com ids = só pros lotes escolhidos.
+// Só aceita ids que realmente existem no evento (ignora qualquer outro valor vindo do navegador).
+function normalizarLotesCupom(ev, lotesIds) {
+  if (!Array.isArray(lotesIds)) return [];
+  const validos = new Set((ev.lotes || []).map(l => l.id));
+  return [...new Set(lotesIds.map(String).filter(id => validos.has(id)))];
+}
+// Valor dos itens do carrinho que o cupom realmente cobre (todos, ou só os dos lotes escolhidos).
+function baseDescontoCupom(cupom, itensDetalhados) {
+  const restrito = Array.isArray(cupom.lotesIds) && cupom.lotesIds.length > 0;
+  return itensDetalhados
+    .filter(it => !restrito || cupom.lotesIds.includes(it.loteId))
+    .reduce((s, it) => s + (it.precoUnit || 0) * (it.qtd || 0), 0);
+}
 app.post('/api/eventos/:id/cupons', auth, (req, res) => {
   const ev = eventoDoUsuario(req.params.id, req.user.id);
   if (!ev) return res.status(404).json({ error: 'Evento não encontrado.' });
   const { codigo, tipo, valor, usosMax } = req.body;
   if (!codigo || !tipo || !valor) return res.status(400).json({ error: 'Preencha código, tipo e valor.' });
+  const lotesIdsCupom = normalizarLotesCupom(ev, req.body.lotesIds);
   const codigoNorm = sanitize(codigo, 30).toUpperCase();
   if (ev.cupons.find(c => c.codigo === codigoNorm)) return res.status(400).json({ error: 'Já existe um cupom com esse código.' });
-  ev.cupons.push({ id: uuidv4(), codigo: codigoNorm, tipo: tipo === 'fixo' ? 'fixo' : 'percentual', valor: Math.max(0, parseFloat(valor) || 0), usosMax: parseInt(usosMax) || 0, usosAtuais: 0, ativo: true, createdAt: new Date().toISOString() });
+  ev.cupons.push({ id: uuidv4(), codigo: codigoNorm, tipo: tipo === 'fixo' ? 'fixo' : 'percentual', valor: Math.max(0, parseFloat(valor) || 0), usosMax: parseInt(usosMax) || 0, usosAtuais: 0, ativo: true, lotesIds: lotesIdsCupom, createdAt: new Date().toISOString() });
   ev.updatedAt = new Date().toISOString();
   persistEventos();
   res.status(201).json({ evento: ev });
@@ -1812,6 +1829,7 @@ app.patch('/api/eventos/:id/cupons/:cupomId', auth, (req, res) => {
   if (!c) return res.status(404).json({ error: 'Cupom não encontrado.' });
   if (req.body.ativo !== undefined) c.ativo = !!req.body.ativo;
   if (req.body.usosMax !== undefined) c.usosMax = parseInt(req.body.usosMax) || 0;
+  if (req.body.lotesIds !== undefined) c.lotesIds = normalizarLotesCupom(ev, req.body.lotesIds);
   persistEventos();
   res.json({ evento: ev });
 });
@@ -3017,7 +3035,8 @@ app.get('/api/public/eventos/:slug/cupom/:codigo', rateLimit(60000, 60), (req, r
   const cupomObj = ev.cupons.find(c => c.codigo === String(req.params.codigo).toUpperCase().trim() && c.ativo);
   if (!cupomObj) return res.status(404).json({ error: 'Cupom inválido ou expirado.' });
   if (cupomObj.usosMax > 0 && cupomObj.usosAtuais >= cupomObj.usosMax) return res.status(400).json({ error: 'Cupom esgotado.' });
-  res.json({ codigo: cupomObj.codigo, tipo: cupomObj.tipo, valor: cupomObj.valor });
+  const lotesIdsCupom = (cupomObj.lotesIds || []).filter(id => ev.lotes.some(l => l.id === id));
+  res.json({ codigo: cupomObj.codigo, tipo: cupomObj.tipo, valor: cupomObj.valor, lotesIds: lotesIdsCupom, lotesNomes: lotesIdsCupom.map(id => ev.lotes.find(l => l.id === id).nome) });
 });
 
 app.get('/api/public/eventos/:slug/promoter/:codigoRef', rateLimit(60000, 60), (req, res) => {
@@ -3134,8 +3153,14 @@ app.post('/api/public/checkout', rateLimit(60000, 20), async (req, res) => {
       cupomObj = ev.cupons.find(c => c.codigo === String(cupom).toUpperCase().trim() && c.ativo);
       if (!cupomObj) return soltarReserva(), res.status(400).json({ error: 'Cupom inválido ou expirado.' });
       if (cupomObj.usosMax > 0 && cupomObj.usosAtuais >= cupomObj.usosMax) return soltarReserva(), res.status(400).json({ error: 'Cupom esgotado.' });
-      desconto = cupomObj.tipo === 'fixo' ? cupomObj.valor : Math.round(subtotal * (cupomObj.valor/100) * 100) / 100;
-      desconto = Math.min(desconto, subtotal);
+      // O desconto incide só sobre os ingressos que o cupom cobre (todos, ou os lotes escolhidos pelo produtor).
+      const baseCupom = baseDescontoCupom(cupomObj, itensDetalhados);
+      if (baseCupom <= 0 && (cupomObj.lotesIds || []).length) {
+        const nomes = cupomObj.lotesIds.map(id => ev.lotes.find(l => l.id === id)?.nome).filter(Boolean).join(', ');
+        return soltarReserva(), res.status(400).json({ error: `Este cupom vale apenas para: ${nomes || 'outros ingressos'}. Adicione um desses ingressos para usá-lo.` });
+      }
+      desconto = cupomObj.tipo === 'fixo' ? cupomObj.valor : Math.round(baseCupom * (cupomObj.valor/100) * 100) / 100;
+      desconto = Math.min(desconto, baseCupom);
     }
     // Benefícios do Clube de Assinantes — só aplica se o comprador estiver logado, tiver assinatura
     // ATIVA com esse produtor especificamente, e tiver optado por usar o benefício nessa compra.
