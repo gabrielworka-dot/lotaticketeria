@@ -970,8 +970,19 @@ function atualizarTotal(){
   Object.values(assentosSelecionados).forEach(a=>{ subtotal+=a.preco; temItem=true; });
   let desconto=0;
   if(cupomAplicado){
-    desconto=cupomAplicado.tipo==='fixo'?cupomAplicado.valor:Math.round(subtotal*(cupomAplicado.valor/100)*100)/100;
-    desconto=Math.min(desconto,subtotal);
+    // Cupom por lote: o desconto incide só sobre os ingressos que ele cobre (sem restrição = todos).
+    const idsCupom=cupomAplicado.lotesIds||[];
+    const restrito=idsCupom.length>0;
+    let baseCupom=0;
+    for(const loteId in selecoes){
+      const qtd=selecoes[loteId];
+      if(qtd>0&&(!restrito||idsCupom.includes(loteId))){ const lote=lotes.find(l=>l.id===loteId); if(lote) baseCupom+=lote.preco*qtd; }
+    }
+    Object.values(assentosSelecionados).forEach(a=>{ if(!restrito||idsCupom.includes(a.loteId)) baseCupom+=a.preco; });
+    desconto=cupomAplicado.tipo==='fixo'?cupomAplicado.valor:Math.round(baseCupom*(cupomAplicado.valor/100)*100)/100;
+    desconto=Math.min(desconto,baseCupom);
+    const aviso=document.getElementById('cupomAvisoEscopo');
+    if(aviso) aviso.style.display=(restrito&&baseCupom<=0&&subtotal>0)?'block':'none';
   }
   const valorIngressos=Math.max(0,subtotal-desconto);
   const feePercent=EVENTO?.feePercent||10;
@@ -1038,9 +1049,11 @@ async function aplicarCupom(){
   if(btnAplicar){ btnAplicar.disabled=true; btnAplicar.textContent='Verificando...'; }
   try{
     const d=await api('GET','/api/public/eventos/'+slug+'/cupom/'+encodeURIComponent(codigo));
-    cupomAplicado={codigo:d.codigo, tipo:d.tipo, valor:d.valor};
+    cupomAplicado={codigo:d.codigo, tipo:d.tipo, valor:d.valor, lotesIds:d.lotesIds||[], lotesNomes:d.lotesNomes||[]};
     const descValor=d.tipo==='fixo'?('R$ '+d.valor.toFixed(2).replace('.',',')):(d.valor+'%');
-    area.innerHTML='<div class="cupom-aplicado">🎟️ Cupom "'+esc(d.codigo)+'" aplicado — '+descValor+' de desconto <button onclick="removerCupom()" style="background:none;border:none;color:var(--green);cursor:pointer;font-weight:700">✕</button></div>';
+    const escopo=cupomAplicado.lotesIds.length?(' nos ingressos: <strong>'+esc(cupomAplicado.lotesNomes.join(', '))+'</strong>'):'';
+    area.innerHTML='<div class="cupom-aplicado"><span>🎟️ Cupom "'+esc(d.codigo)+'" aplicado — '+descValor+' de desconto'+escopo+'</span> <button onclick="removerCupom()" style="background:none;border:none;color:var(--green);cursor:pointer;font-weight:700">✕</button></div>'
+      +(cupomAplicado.lotesIds.length?'<div id="cupomAvisoEscopo" style="display:none;font-size:12px;color:var(--p2);margin-top:6px">⚠️ Este cupom só vale para: '+esc(cupomAplicado.lotesNomes.join(', '))+'. Adicione um desses ingressos para ver o desconto.</div>':'');
     atualizarTotal();
   }catch(e){
     cupomAplicado=null;
