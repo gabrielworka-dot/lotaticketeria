@@ -1632,6 +1632,7 @@ async function renderTabRelatorios(periodo){
         <div style="position:relative;height:220px;max-width:320px;margin:0 auto"><canvas id="graficoTipoIngresso"></canvas></div>
       </div>`:''}
       <div class="card"><div class="ct">Por Lote</div>${Object.entries(r.porLote).map(([nome,d])=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(nome)+'</span><span>'+d.vendidos+' vendidos · R$'+(d.receita||0).toFixed(2)+'</span></div>').join('')||'<p style="color:var(--text3);font-size:13px">Sem dados ainda.</p>'}</div>
+      <div class="card"><div class="ct">Cupons Usados${RELATORIO_PERIODO_ATUAL==='geral'?'':' <span style="font-weight:400;font-size:11px;color:var(--text3)">· no período selecionado</span>'}</div>${renderCuponsRelatorio(r)}</div>
       <div class="card"><div class="ct">Por Promoter</div>${r.porPromoter.length?r.porPromoter.map(p=>'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span>'+esc(p.nome)+'</span><span>'+p.vendas+' vendas · R$'+(p.receita||0).toFixed(2)+'</span></div>').join(''):'<p style="color:var(--text3);font-size:13px">Nenhum promoter.</p>'}</div>
       <div class="card"><div class="ct">Exportar</div><div class="br">
         <a href="#" class="btn bo btn-sm" onclick="return baixarComAuth(event,'participantes.csv')">📥 Lista de Participantes</a>
@@ -1642,6 +1643,29 @@ async function renderTabRelatorios(periodo){
     renderGraficoVendasDiarias(r.porDia);
     if(r.porTipoIngresso.length) renderGraficoTipoIngresso(r.porTipoIngresso);
   }catch(e){ el.innerHTML='<div class="empty"><p>'+esc(e.message)+'</p></div>'; }
+}
+function renderCuponsRelatorio(r){
+  const lista=r.cuponsUso||[], rc=r.resumoCupons||{};
+  if(!lista.length) return '<p style="font-size:13px;color:var(--text3)">Nenhum cupom criado neste evento ainda.</p>';
+  const brl=(v)=>'R$'+(v||0).toFixed(2).replace('.',',');
+  const resumo='<div class="met-g" style="margin-bottom:12px">'
+    +'<div class="met-c"><div class="met-l">Pedidos com cupom</div><div class="met-v">'+rc.pedidosComCupom+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">'+rc.percentualPedidos+'% dos pedidos</div></div>'
+    +'<div class="met-c"><div class="met-l">Ingressos com cupom</div><div class="met-v">'+rc.ingressosComCupom+'</div></div>'
+    +'<div class="met-c"><div class="met-l">Desconto concedido</div><div class="met-v" style="color:var(--p2)">'+brl(rc.descontoTotal)+'</div></div>'
+    +'<div class="met-c"><div class="met-l">Usos desde o início</div><div class="met-v">'+rc.usosTotaisHistorico+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">em todos os períodos</div></div>'
+    +'</div>';
+  const linhas=lista.map(c=>{
+    const desc=c.removido?'cupom removido':(c.tipo==='fixo'?brl(c.valor):c.valor+'%')+' · '+(c.lotesNomes&&c.lotesNomes.length?'só '+esc(c.lotesNomes.join(', ')):'todos os ingressos');
+    const limite=c.usosMax?(c.usosTotais+' / '+c.usosMax):(c.usosTotais+' (ilimitado)');
+    const pct=c.usosMax?Math.min(100,Math.round(c.usosTotais/c.usosMax*100)):0;
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><strong>'+esc(c.codigo)+'</strong>'+(c.ativo||c.removido?'':' <span style="font-size:10px;color:var(--text3)">(inativo)</span>')+'<div style="font-size:11px;color:var(--text3)">'+desc+'</div></div>'
+      +'<div style="text-align:right;font-size:13px"><strong>'+c.pedidos+'</strong> pedido(s) · <strong>'+c.ingressos+'</strong> ingresso(s)<div style="font-size:11px;color:var(--text3)">desconto '+brl(c.desconto)+' · receita '+brl(c.receita)+'</div></div></div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Usos desde o início: '+limite+'</div>'
+      +(c.usosMax?'<div style="background:var(--bg3);border-radius:20px;height:6px;overflow:hidden;margin-top:4px"><div style="width:'+pct+'%;height:100%;background:'+(pct>=100?'var(--red)':'var(--p2)')+'"></div></div>':'')
+      +'</div>';
+  }).join('');
+  return resumo+linhas;
 }
 function fmtDiaBR(d){ if(!d) return ''; const [y,m,dd]=d.split('-'); return dd+'/'+m+'/'+y; }
 const NOMES_TIPO_INGRESSO={meia:'Meia',inteira:'Inteira',solidaria:'Solidária',duplo:'Duplo',quadruplo:'Quádruplo',outro:'Outro'};
